@@ -287,7 +287,10 @@ fun OneGalleryApp(
                 )
             }
             composable(MainTab.Sync.route) {
-                SyncStatusScreen(syncCoordinator = syncCoordinator)
+                SyncStatusScreen(
+                    syncCoordinator = syncCoordinator,
+                    syncPreferences = syncPreferences,
+                )
             }
             composable(MainTab.Settings.route) {
                 SettingsScreen(
