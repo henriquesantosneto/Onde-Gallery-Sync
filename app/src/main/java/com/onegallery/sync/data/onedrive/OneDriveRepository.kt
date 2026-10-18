@@ -183,6 +183,17 @@ class OneDriveRepository(
         }
     }
 
+    suspend fun downloadThumbnailToFile(itemId: String, destination: File): Result<Unit> {
+        return runWithToken { token ->
+            destination.parentFile?.mkdirs()
+            graphApi.downloadItemThumbnail("Bearer $token", itemId).use { body ->
+                destination.outputStream().use { out ->
+                    body.byteStream().copyTo(out)
+                }
+            }
+        }
+    }
+
     suspend fun deleteRemoteItem(itemId: String): Result<Unit> {
         return runWithToken { token ->
             graphApi.deleteItem("Bearer $token", itemId)

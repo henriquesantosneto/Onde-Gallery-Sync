@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
 import kotlinx.coroutines.launch
 
@@ -96,6 +97,7 @@ fun MediaDetailScreen(
                         Text(
                             when {
                                 state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+                                currentItem?.kind == MediaKind.VIDEO -> currentItem.displayName
                                 else -> currentItem?.displayName ?: "Foto"
                             },
                             maxLines = 1,
@@ -205,10 +207,16 @@ private fun MediaDetailPage(
         var display = syncCoordinator.getMetadata(canonicalPath)?.let {
             GalleryMapper.toDisplayItem(it, mediaCacheRepository)
         }
-        if (display != null && display.localUri == null && display.cachedOriginal == null) {
-            syncCoordinator.downloadOriginalOnDemand(canonicalPath)
-                .onSuccess { file -> display = display?.copy(cachedOriginal = file) }
-                .onFailure { error = it.message }
+        if (display != null) {
+            syncCoordinator.ensureThumbnailCached(canonicalPath)
+            if (display.localUri == null && display.cachedOriginal == null) {
+                syncCoordinator.downloadOriginalOnDemand(canonicalPath)
+                    .onSuccess { file ->
+                        display = display?.copy(cachedOriginal = file)
+                        syncCoordinator.ensureThumbnailCached(canonicalPath)
+                    }
+                    .onFailure { error = it.message }
+            }
         }
         item = display
         loading = false
@@ -228,24 +236,50 @@ private fun MediaDetailPage(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    val model = display.thumbnailModel
-                    if (model != null) {
-                        AsyncImage(
-                            model = model,
-                            contentDescription = display.displayName,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentScale = ContentScale.Fit,
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("Original na nuvem — use o botão abaixo para baixar.")
+                    val playback = display.playbackUri()
+                    when {
+                        display.kind == MediaKind.VIDEO && playback != null -> {
+                            VideoPlayerView(
+                                uri = playback,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                            )
+                        }
+                        display.kind == MediaKind.VIDEO -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                            ) {
+                                MediaThumbnailImage(
+                                    item = display,
+                                    syncCoordinator = syncCoordinator,
+                                    contentDescription = display.displayName,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit,
+                                )
+                            }
+                        }
+                        display.detailPreviewModel() != null -> {
+                            AsyncImage(
+                                model = display.detailPreviewModel(),
+                                contentDescription = display.displayName,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentScale = ContentScale.Fit,
+                            )
+                        }
+                        else -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("Original na nuvem — use o botão abaixo para baixar.")
+                            }
                         }
                     }
                     Text(
@@ -261,7 +295,10 @@ private fun MediaDetailPage(
                             onClick = {
                                 scope.launch {
                                     syncCoordinator.downloadOriginalOnDemand(canonicalPath)
-                                        .onSuccess { file -> item = display.copy(cachedOriginal = file) }
+                                        .onSuccess { file ->
+                                            item = display.copy(cachedOriginal = file)
+                                            syncCoordinator.ensureThumbnailCached(canonicalPath)
+                                        }
                                         .onFailure { err -> error = err.message }
                                 }
                             },

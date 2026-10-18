@@ -1,4 +1,4 @@
-OneGallery Sync — APK 0.7.6 (versionCode 42)
+OneGallery Sync — APK 0.7.7 (versionCode 43)
 ============================================
 
 Arquivo: OneGallerySync-debug.apk (~24 MB)
@@ -35,11 +35,11 @@ GitHub (henriquesantosneto/Onde-Gallery-Sync) — após publicar esta branch no 
 
 Download direto no navegador (Release GitHub — recomendado):
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.5-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.6-debug/OneGallerySync-debug.apk
 
 Página da release:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.5-debug
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.6-debug
 
 Ver APK no GitHub (botão Download na página):
 

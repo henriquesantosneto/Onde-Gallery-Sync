@@ -46,9 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
+import com.onegallery.sync.sync.SyncCoordinator
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -56,6 +56,7 @@ import java.nio.charset.StandardCharsets
 @Composable
 fun GalleryScreen(
     viewModel: GalleryViewModel,
+    syncCoordinator: SyncCoordinator,
     onOpenItem: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -159,6 +160,7 @@ fun GalleryScreen(
                         val selected = item.canonicalPath in state.selectedPaths
                         MediaThumbnail(
                             item = item,
+                            syncCoordinator = syncCoordinator,
                             selectionMode = state.selectionMode,
                             selected = selected,
                             onClick = {
@@ -205,6 +207,7 @@ fun GalleryScreen(
 @Composable
 private fun MediaThumbnail(
     item: GalleryDisplayItem,
+    syncCoordinator: SyncCoordinator,
     selectionMode: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
@@ -215,21 +218,13 @@ private fun MediaThumbnail(
             .aspectRatio(1f)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        if (item.thumbnailModel != null) {
-            AsyncImage(
-                model = item.thumbnailModel,
-                contentDescription = item.displayName,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Outlined.CloudDownload, contentDescription = null)
-            }
-        }
+        MediaThumbnailImage(
+            item = item,
+            syncCoordinator = syncCoordinator,
+            contentDescription = item.displayName,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
         if (selectionMode) {
             Icon(
                 imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,

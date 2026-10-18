@@ -10,12 +10,16 @@ import java.io.File
 object GalleryMapper {
     private val videoExtensions = setOf("mp4", "mkv", "webm", "mov", "3gp", "avi")
 
+    fun isVideoFileName(displayName: String): Boolean {
+        val ext = displayName.substringAfterLast('.', "").lowercase()
+        return ext in videoExtensions
+    }
+
     fun toDisplayItem(
         entity: SyncMetadataEntity,
         mediaCacheRepository: MediaCacheRepository,
     ): GalleryDisplayItem {
-        val ext = entity.displayName.substringAfterLast('.', "").lowercase()
-        val kind = if (ext in videoExtensions) MediaKind.VIDEO else MediaKind.IMAGE
+        val kind = if (isVideoFileName(entity.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
         val localUri = entity.localContentUri?.let { Uri.parse(it) }
         val cached = entity.cachedFilePath?.let { File(it) }?.takeIf { it.exists() }
         val placeholderThumb = mediaCacheRepository.thumbnailIfCached(entity.canonicalPath)

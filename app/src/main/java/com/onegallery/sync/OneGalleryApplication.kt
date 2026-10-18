@@ -1,6 +1,9 @@
 package com.onegallery.sync
 
 import android.app.Application
+import coil.Coil
+import coil.ImageLoader
+import coil.decode.VideoFrameDecoder
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -72,6 +75,14 @@ class OneGalleryApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Coil.setImageLoader(
+            ImageLoader.Builder(this)
+                .components {
+                    add(VideoFrameDecoder.Factory())
+                }
+                .crossfade(true)
+                .build(),
+        )
         authManager = MsalAuthManager(this, AuthPreferences(this))
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)

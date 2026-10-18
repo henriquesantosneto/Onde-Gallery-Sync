@@ -5,6 +5,8 @@ import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.VideoThumbnailHelper
+import com.onegallery.sync.ui.gallery.GalleryMapper
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.MediaDeleteResult
 import com.onegallery.sync.data.local.db.SyncMetadataDao
@@ -313,6 +315,39 @@ class SyncCoordinator(
                 }
             }
         }
+    }
+
+    suspend fun ensureThumbnailCached(canonicalPath: String): Result<File?> {
+        mediaCacheRepository.thumbnailIfCached(canonicalPath)?.let { return Result.success(it) }
+        val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
+        val thumbDest = mediaCacheRepository.thumbFile(canonicalPath)
+        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
+
+        localContentUri(row)?.let { uri ->
+            val ok = if (isVideo) {
+                VideoThumbnailHelper.captureToFile(appContext, uri, thumbDest)
+            } else {
+                cacheImageThumbnailFromUri(uri, thumbDest)
+            }
+            if (ok) return Result.success(mediaCacheRepository.thumbnailIfCached(canonicalPath))
+        }
+
+        row.cachedFilePath?.let { path ->
+            val cached = File(path)
+            if (cached.exists() && isVideo && VideoThumbnailHelper.captureToFile(cached, thumbDest)) {
+                return Result.success(mediaCacheRepository.thumbnailIfCached(canonicalPath))
+            }
+        }
+
+        val itemId = row.oneDriveItemId
+        if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+            oneDriveRepository.downloadThumbnailToFile(itemId, thumbDest).onSuccess {
+                if (thumbDest.length() > 0L) {
+                    return Result.success(thumbDest)
+                }
+            }
+        }
+        return Result.success(null)
     }
 
     suspend fun downloadOriginalOnDemand(canonicalPath: String): Result<File> {
@@ -706,12 +741,21 @@ class SyncCoordinator(
         val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath)
         if (existing != null) return
         val uri = localContentUri(row) ?: return
-        runCatching {
-            val target = mediaCacheRepository.thumbFile(row.canonicalPath)
+        val target = mediaCacheRepository.thumbFile(row.canonicalPath)
+        if (GalleryMapper.isVideoFileName(row.displayName)) {
+            VideoThumbnailHelper.captureToFile(appContext, uri, target)
+        } else {
+            cacheImageThumbnailFromUri(uri, target)
+        }
+    }
+
+    private fun cacheImageThumbnailFromUri(uri: Uri, target: File): Boolean {
+        return runCatching {
             appContext.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
-        }
+            target.length() > 0L
+        }.getOrDefault(false)
     }
 
     private fun mergeLocalIntoEntity(
