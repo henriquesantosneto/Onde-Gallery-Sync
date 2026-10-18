@@ -1,13 +1,13 @@
-OneGallery Sync — APK 0.8.19 (versionCode 75)
+OneGallery Sync — APK 0.8.21 (versionCode 77)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.19-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.21-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Mapa: correção de crash (MapLibre); GPS indexado junto com Sincronizar agora
-- Permissão “Localização das mídias” (GPS no EXIF) — distinta da localização do aparelho
-- Sync: fila com progresso; galeria: pinça e timeline (versões recentes)
+- Galeria: ícone de nuvem/overlays menores ao pinçar para miniaturas pequenas
+- Mapa: satélite + miniaturas empilhadas (estilo Apple Photos)
+- Sync/GPS, fila com progresso, timeline (versões recentes)
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
