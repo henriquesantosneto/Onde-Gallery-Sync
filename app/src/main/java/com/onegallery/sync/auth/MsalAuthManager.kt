@@ -41,6 +41,43 @@ class MsalAuthManager(
     val redirectUriForAzure: String
         get() = MsalConfigFactory.computeRedirectUri(appContext)
 
+    val azureRegistrationHint: String
+        get() {
+            val hash = MsalConfigFactory.signatureHashBase64(appContext)
+            val redirect = redirectUriForAzure
+            val hashLine = hash ?: MsalRedirectUri.bakedSignatureHash().ifBlank { "—" }
+            return buildString {
+                appendLine("Pacote: ${appContext.packageName}")
+                appendLine("Hash (Android no Azure): $hashLine")
+                appendLine("URI (Mobile/desktop): $redirect")
+                if (!MsalRedirectUri.runtimeMatchesBuild(hash)) {
+                    appendLine()
+                    append(
+                        "Este APK foi reinstalado com outra assinatura ou é uma build diferente. " +
+                            "Registre no Azure a URI acima (do hash deste aparelho), não a de outro APK.",
+                    )
+                }
+            }
+        }
+
+    private fun enrichMsalError(message: String?): String {
+        val base = message?.trim().orEmpty()
+        val lower = base.lowercase()
+        val redirectHint = if (
+            lower.contains("90023") ||
+            lower.contains("redirect") ||
+            lower.contains("redirect_uri") ||
+            lower.contains("reply address")
+        ) {
+            "\n\n— Azure —\n${azureRegistrationHint.trim()}\n\n" +
+                "Em Autenticação → Mobile/desktop, cole a URI exata. " +
+                "Se existir tile Android, use o hash com / e = (sem %2F)."
+        } else {
+            ""
+        }
+        return base + redirectHint
+    }
+
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES
         .split(' ')
         .filter { it.isNotBlank() }
@@ -143,8 +180,11 @@ class MsalAuthManager(
                     }
 
                     override fun onError(exception: MsalException) {
-                        _state.value = _state.value.copy(lastError = exception.message)
-                        if (cont.isActive) cont.resume(Result.failure(exception))
+                        val msg = enrichMsalError(exception.message)
+                        _state.value = _state.value.copy(lastError = msg)
+                        if (cont.isActive) {
+                            cont.resume(Result.failure(IllegalStateException(msg, exception)))
+                        }
                     }
 
                     override fun onCancel() {

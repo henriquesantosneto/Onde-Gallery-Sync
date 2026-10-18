@@ -30,7 +30,7 @@
             </intent-filter>
         </activity>
 
-        <!-- MSAL: path = hash Base64 do APK (decodificado). Azure = msauth://…/XNT%2F…%3D -->
+        <!-- MSAL: path = hash Base64 do keystore de build (placeholder Gradle). Azure = URI codificada no app. -->
         <activity
             android:name="com.microsoft.identity.client.BrowserTabActivity"
             android:exported="true">
@@ -41,7 +41,7 @@
                 <data
                     android:scheme="msauth"
                     android:host="com.onegallery.sync"
-                    android:path="/XNT/U2cXeU6BS9HUWsT4MsU1wY4=" />
+                    android:path="${msalSignaturePath}" />
             </intent-filter>
         </activity>
 

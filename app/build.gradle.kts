@@ -1,4 +1,51 @@
+import java.io.File
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.Properties
+
+fun sha1SignatureHashBase64(
+    storeFile: File,
+    storePassword: String,
+    keyAlias: String,
+): String? {
+    if (!storeFile.isFile) return null
+    return runCatching {
+        val keystore = KeyStore.getInstance(KeyStore.getDefaultType())
+        storeFile.inputStream().use { keystore.load(it, storePassword.toCharArray()) }
+        val cert = keystore.getCertificate(keyAlias) ?: return null
+        val md = MessageDigest.getInstance("SHA-1")
+        md.update(cert.encoded)
+        Base64.getEncoder().encodeToString(md.digest())
+    }.getOrNull()
+}
+
+fun msalRedirectUri(packageName: String, hashBase64: String): String {
+    val encoded = hashBase64
+        .replace("+", "%2B")
+        .replace("/", "%2F")
+        .replace("=", "%3D")
+    return "msauth://$packageName/$encoded"
+}
+
+/** Mesmo keystore padrão do `signingConfig debug` do Android Gradle Plugin. */
+fun defaultDebugKeystoreFile(): File =
+    File(System.getProperty("user.home"), ".android/debug.keystore")
+
+fun resolveDebugMsalSignature(): Pair<String, String> {
+    val storeFile = defaultDebugKeystoreFile()
+    val hash = sha1SignatureHashBase64(storeFile, "android", "androiddebugkey")
+        ?: "UNCONFIGURED"
+    val packageName = "com.onegallery.sync"
+    val redirect = if (hash == "UNCONFIGURED") {
+        "msauth://$packageName/UNCONFIGURED"
+    } else {
+        msalRedirectUri(packageName, hash)
+    }
+    return hash to redirect
+}
+
+val (msalSignatureHashBase64, msalRedirectUriForBuild) = resolveDebugMsalSignature()
 
 plugins {
     id("com.android.application")
@@ -26,17 +73,16 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "0.5.3"
+        versionCode = 17
+        versionName = "0.5.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        manifestPlaceholders["msalSignaturePath"] = "/$msalSignatureHashBase64"
+
         buildConfigField("String", "MSAL_CLIENT_ID", "\"$embeddedMsalClientId\"")
-        buildConfigField(
-            "String",
-            "MSAL_REDIRECT_URI",
-            "\"msauth://com.onegallery.sync/XNT%2FU2cXeU6BS9HUWsT4MsU1wY4%3D\"",
-        )
+        buildConfigField("String", "MSAL_SIGNATURE_HASH", "\"$msalSignatureHashBase64\"")
+        buildConfigField("String", "MSAL_REDIRECT_URI", "\"$msalRedirectUriForBuild\"")
         buildConfigField(
             "String",
             "GRAPH_SCOPES",

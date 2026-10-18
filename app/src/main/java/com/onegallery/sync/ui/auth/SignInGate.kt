@@ -34,6 +34,7 @@ import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.auth.MsalConfigFactory
+import com.onegallery.sync.auth.MsalRedirectUri
 import kotlinx.coroutines.launch
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -58,6 +59,10 @@ fun SignInGate(
     var showDevClientId by remember { mutableStateOf(false) }
     val redirect = remember { authManager.redirectUriForAzure }
     val signatureHash = remember { MsalConfigFactory.signatureHashBase64(context) }
+    val buildHash = remember { MsalRedirectUri.bakedSignatureHash() }
+    val signatureMismatch = remember(signatureHash, buildHash) {
+        !MsalRedirectUri.runtimeMatchesBuild(signatureHash)
+    }
     val packageName = remember { context.packageName }
     val needsClientId = authManager.needsUserClientId()
     val embedded = MsalBuiltInConfig.isEmbeddedClientConfigured()
@@ -106,23 +111,36 @@ fun SignInGate(
             ),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text("Cole no Azure → Android", style = MaterialTheme.typography.labelLarge)
+                Text("Registre no Azure (deste APK)", style = MaterialTheme.typography.labelLarge)
                 Text("Pacote: $packageName", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                 Text(
-                    "Hash assinatura: ${signatureHash ?: "—"}",
+                    "Hash (tile Android): ${signatureHash ?: buildHash.ifBlank { "—" }}",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Text(
-                    "Redirect (referência): $redirect",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(top = 4.dp),
+                    "URI (Mobile/desktop — cole exatamente):",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
                 Text(
-                    "Azure: se não houver Android, use Mobile/desktop → URI personalizada (msauth://…). " +
-                        "Não use Web. Hash com / e = vai cru só no formulário Android.",
+                    redirect,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                if (signatureMismatch) {
+                    Text(
+                        "A assinatura deste aparelho não bate com a build esperada. " +
+                            "Use a URI acima no Azure (não a de outro APK ou versão antiga).",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Text(
+                    "Erro AADSTS90023 = URI ou hash errado no portal. Pode registrar duas URIs se tiver dois APKs.",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(top = 6.dp),
                 )
