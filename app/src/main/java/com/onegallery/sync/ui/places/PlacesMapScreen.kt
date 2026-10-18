@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -45,7 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import org.maplibre.android.annotations.IconFactory
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -63,8 +66,6 @@ import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
-
-private const val MAP_STYLE_URL = "https://demotiles.maplibre.org/style.json"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -163,6 +164,7 @@ fun PlacesMapScreen(
                         .fillMaxSize()
                         .padding(padding),
                     clusters = clusters,
+                    syncCoordinator = syncCoordinator,
                     onClusterSelected = { selectedCluster = it },
                 )
             }
@@ -229,6 +231,7 @@ fun PlacesMapScreen(
 @Composable
 private fun PlacesMapView(
     clusters: List<PhotoMapCluster>,
+    syncCoordinator: SyncCoordinator,
     onClusterSelected: (PhotoMapCluster) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -268,13 +271,13 @@ private fun PlacesMapView(
         mapView.getMapAsync { map ->
             mapRef = map
             map.uiSettings.isCompassEnabled = true
-            map.setStyle(Style.Builder().fromUri(MAP_STYLE_URL)) {
+            map.setStyle(Style.Builder().fromJson(SatelliteMapStyle.json())) {
                 styleReady = true
             }
         }
     }
 
-    LaunchedEffect(clusters, mapRef, styleReady) {
+    LaunchedEffect(clusters, mapRef, styleReady, syncCoordinator) {
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         map.setOnMarkerClickListener { marker ->
@@ -288,12 +291,18 @@ private fun PlacesMapView(
         }
         markers.forEach { map.removeMarker(it) }
         markers.clear()
+        val iconFactory = IconFactory.getInstance(context)
         clusters.forEach { cluster ->
+            val stackBitmap = PhotoStackMarkerBitmap.create(
+                context = context,
+                items = cluster.items,
+                syncCoordinator = syncCoordinator,
+            )
             map.addMarker(
                 org.maplibre.android.annotations.MarkerOptions()
                     .position(LatLng(cluster.latitude, cluster.longitude))
                     .title(cluster.title)
-                    .snippet(cluster.items.size.toString()),
+                    .icon(iconFactory.fromBitmap(stackBitmap)),
             )?.let { markers.add(it) }
         }
         if (clusters.isEmpty()) return@LaunchedEffect
@@ -301,18 +310,30 @@ private fun PlacesMapView(
             if (clusters.size == 1) {
                 val c = clusters.first()
                 map.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(LatLng(c.latitude, c.longitude), 11.0),
+                    CameraUpdateFactory.newLatLngZoom(LatLng(c.latitude, c.longitude), 14.0),
                 )
             } else {
                 val builder = LatLngBounds.Builder()
                 clusters.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
-                map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 96))
+                map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 120))
             }
         }
     }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { mapView },
-    )
+    Box(modifier = modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { mapView },
+        )
+        Text(
+            SatelliteMapStyle.ATTRIBUTION,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(10.dp)
+                .background(Color.Black.copy(alpha = 0.45f))
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+        )
+    }
 }
