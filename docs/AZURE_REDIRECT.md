@@ -1,39 +1,72 @@
 # URI de redirecionamento (Android / MSAL)
 
-## APK baixado do GitHub (`OneGallerySync-debug.apk`)
+## Valores do APK GitHub (`OneGallerySync-debug.apk`)
 
-Use estes valores no portal **Exatamente**:
+| | |
+|--|--|
+| **Pacote** | `com.onegallery.sync` |
+| **Hash (campo assinatura Android)** | `XNT/U2cXeU6BS9HUWsT4MsU1wY4=` |
+| **URI completa** | `msauth://com.onegallery.sync/XNT%2FU2cXeU6BS9HUWsT4MsU1wY4%3D` |
 
-| Campo | Valor |
-|--------|--------|
-| Plataforma | **Android** (não Web) |
-| Nome do pacote | `com.onegallery.sync` |
-| Hash da assinatura | `XNT/U2cXeU6BS9HUWsT4MsU1wY4=` |
+---
 
-URI completa equivalente:
+## Caminho A — aparece **Android** no portal
+
+1. https://entra.microsoft.com/ (ou portal.azure.com) → **Aplicativos** → **Registros de aplicativo** → seu app.
+2. **Gerenciar** → **Autenticação**.
+3. **Adicionar URI de redirecionamento** ou **Adicionar uma plataforma** → tile **Android**.
+4. Pacote: `com.onegallery.sync`  
+   Hash: `XNT/U2cXeU6BS9HUWsT4MsU1wY4=` (com `/` e `=`, sem `%2F`).
+5. **Configurar** / **Salvar**.
+
+---
+
+## Caminho B — **não tem Android** (comum com conta pessoal / UI nova)
+
+Use **Aplicativos móveis e de desktop** (Mobile and desktop applications):
+
+1. **Autenticação** → **Adicionar URI de redirecionamento** (ou **Adicionar uma plataforma**).
+2. Escolha **Aplicativos móveis e de desktop** / **Mobile and desktop applications**.
+3. Em **URIs de redirecionamento personalizados** / **Custom redirect URIs**, clique **Adicionar URI** e cole **exatamente**:
 
 ```text
 msauth://com.onegallery.sync/XNT%2FU2cXeU6BS9HUWsT4MsU1wY4%3D
 ```
 
-No formulário Android do Azure, preencha **pacote + hash** — não cole a URI em “Web”.
+4. **Configure** / **Salvar**.
 
-### Se o portal disser que a URI é inválida
+Não use tipo **Web** nem **SPA** para esse `msauth://`.
 
-1. Remova redirects **Web** ou **SPA** com `msauth://` (só servem Android).
-2. Em **Autenticação** → **Adicionar plataforma** → **Android** (não “Aplicativo móvel e desktop” com URI manual, se der erro).
-3. O hash inclui **`/`** e **`=`** — no campo **hash** use o texto **cru** acima, sem `%2F` nem `%3D`.
-4. Se você compilou o APK **no seu PC**, o hash pode ser outro. Abra o app → login → **Sou desenvolvedor** e copie o redirect exibido.
+### Se ainda disser “URI inválida”
 
-### Vários APKs (debug local + GitHub)
+- Apague URIs `http://localhost` ou `https://...` que você não usa.
+- Tente também (alguns portais aceitam sem encoding):
 
-No mesmo registro, adicione **mais de uma** plataforma Android com o **mesmo pacote** e **hashes diferentes**, por exemplo:
+```text
+msauth://com.onegallery.sync/XNT/U2cXeU6BS9HUWsT4MsU1wY4=
+```
 
-- GitHub/cloud: `XNT/U2cXeU6BS9HUWsT4MsU1wY4=`
-- Debug keystore local (`~/.android/debug.keystore`): `pH93hJ0fsCAwFF5NxVPK0Snx6Ws=`
+- Confirme o app suporta **contas pessoais Microsoft** (multitenant + contas pessoais).
 
-Gerar hash do APK instalado:
+---
+
+## Caminho C — **Manifesto do aplicativo** (JSON)
+
+1. **Gerenciar** → **Manifesto**.
+2. Em `replyUrlsWithType` ou `publicClient`, inclua a URI `msauth://...` (como acima).
+3. `"allowPublicClient": true` se existir e estiver `false`.
+4. **Salvar**.
+
+---
+
+## Conferir no celular
+
+No app → **Conectar OneDrive** → card **“Cole no Azure → Android”**: pacote, hash e redirect do **APK instalado** devem coincidir com o portal.
+
+Hash de outro APK (compilado no seu PC):
 
 ```bash
 keytool -printcert -jarfile OneGallerySync-debug.apk | openssl sha1 -binary | openssl base64
 ```
+
+Registre **outra** URI (mobile/desktop ou outro Android) com esse hash.

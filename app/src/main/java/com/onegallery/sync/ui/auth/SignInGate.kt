@@ -121,7 +121,8 @@ fun SignInGate(
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Text(
-                    "Use plataforma Android, não Web. Hash com / e = vai cru no campo assinatura.",
+                    "Azure: se não houver Android, use Mobile/desktop → URI personalizada (msauth://…). " +
+                        "Não use Web. Hash com / e = vai cru só no formulário Android.",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(top = 6.dp),
                 )
