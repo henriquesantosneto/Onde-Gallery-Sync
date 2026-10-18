@@ -27,6 +27,7 @@ data class AuthState(
     val accountId: String? = null,
     val accessToken: String? = null,
     val lastError: String? = null,
+    val isCheckingStoredAccount: Boolean = false,
 )
 
 class MsalAuthManager(
@@ -145,8 +146,10 @@ class MsalAuthManager(
     }
 
     suspend fun initialize(): Result<Unit> {
+        _state.value = _state.value.copy(isCheckingStoredAccount = true)
         val clientId = effectiveClientId()
         if (clientId.isBlank() || clientId.startsWith("00000000")) {
+            _state.value = _state.value.copy(isCheckingStoredAccount = false)
             return Result.failure(
                 IllegalStateException(
                     "Este APK não tem Client ID embutido. Quem compila precisa configurar msal.properties " +
@@ -167,12 +170,15 @@ class MsalAuthManager(
                         application.getCurrentAccountAsync(object :
                             ISingleAccountPublicClientApplication.CurrentAccountCallback {
                             override fun onAccountLoaded(activeAccount: com.microsoft.identity.client.IAccount?) {
-                                if (activeAccount != null) {
-                                    _state.value = AuthState(
+                                _state.value = if (activeAccount != null) {
+                                    AuthState(
                                         isSignedIn = true,
                                         displayName = activeAccount.username,
                                         accountId = activeAccount.id,
+                                        isCheckingStoredAccount = false,
                                     )
+                                } else {
+                                    AuthState(isCheckingStoredAccount = false)
                                 }
                                 if (cont.isActive) cont.resume(Result.success(Unit))
                             }
@@ -186,13 +192,15 @@ class MsalAuthManager(
                                         isSignedIn = true,
                                         displayName = currentAccount.username,
                                         accountId = currentAccount.id,
+                                        isCheckingStoredAccount = false,
                                     )
                                 } else {
-                                    AuthState()
+                                    AuthState(isCheckingStoredAccount = false)
                                 }
                             }
 
                             override fun onError(exception: MsalException) {
+                                _state.value = _state.value.copy(isCheckingStoredAccount = false)
                                 if (cont.isActive) {
                                     cont.resume(Result.failure(exception))
                                 }
@@ -201,6 +209,7 @@ class MsalAuthManager(
                     }
 
                     override fun onError(exception: MsalException) {
+                        _state.value = _state.value.copy(isCheckingStoredAccount = false)
                         if (cont.isActive) cont.resume(Result.failure(exception))
                     }
                 },
@@ -248,6 +257,7 @@ class MsalAuthManager(
                             displayName = authenticationResult.account.username,
                             accountId = authenticationResult.account.id,
                             accessToken = authenticationResult.accessToken,
+                            isCheckingStoredAccount = false,
                         )
                         if (cont.isActive) cont.resume(Result.success(Unit))
                     }
@@ -303,6 +313,7 @@ class MsalAuthManager(
                                 isSignedIn = true,
                                 displayName = authenticationResult.account.username,
                                 accountId = authenticationResult.account.id,
+                                isCheckingStoredAccount = false,
                             )
                             if (cont.isActive) cont.resume(Result.success(authenticationResult.accessToken))
                         }

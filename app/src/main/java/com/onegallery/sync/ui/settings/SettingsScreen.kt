@@ -100,7 +100,15 @@ fun SettingsScreen(
             item {
                 ListItem(
                     headlineContent = {
-                        Text(authState.displayName ?: "Não conectado")
+                        Text(
+                            when {
+                                authState.isSignedIn ->
+                                    authState.displayName ?: "Conta Microsoft"
+                                authState.isCheckingStoredAccount ->
+                                    "Verificando conta salva…"
+                                else -> "Não conectado"
+                            },
+                        )
                     },
                     supportingContent = {
                         Text(

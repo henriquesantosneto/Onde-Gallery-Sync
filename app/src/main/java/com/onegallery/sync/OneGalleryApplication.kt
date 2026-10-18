@@ -72,6 +72,10 @@ class OneGalleryApplication : Application() {
             it.migrateForAppVersion(BuildConfig.VERSION_CODE)
         }
         oneDriveFolderPreferences = OneDriveFolderPreferences(this)
+        syncPreferences.repairPersistedConnection(
+            graphFolderConfigured = graphFolderPreferences.isConfigured(),
+            localOneDriveFolderConnected = oneDriveFolderPreferences.treeUri != null,
+        )
         galleryPreferences = GalleryPreferences(this)
         mediaCacheRepository = MediaCacheRepository(this)
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)

@@ -8,11 +8,27 @@ class SyncPreferences(context: Context) {
     fun migrateForAppVersion(currentVersionCode: Int) {
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
         if (last < currentVersionCode) {
-            prefs.edit()
-                .putBoolean(KEY_SETUP_DONE, false)
-                .putString(KEY_SYNC_MODE, SyncMode.LOCAL_ONLY.name)
-                .putInt(KEY_LAST_VERSION, currentVersionCode)
-                .apply()
+            prefs.edit().putInt(KEY_LAST_VERSION, currentVersionCode).apply()
+        }
+    }
+
+    /**
+     * Corrige instalações que perderam o modo de sync após migrações antigas,
+     * mas ainda têm pasta na nuvem ou pasta local salva.
+     */
+    fun repairPersistedConnection(
+        graphFolderConfigured: Boolean,
+        localOneDriveFolderConnected: Boolean,
+    ) {
+        when {
+            graphFolderConfigured && syncMode != SyncMode.ONEDRIVE_GRAPH -> {
+                syncMode = SyncMode.ONEDRIVE_GRAPH
+                hasCompletedSetup = true
+            }
+            localOneDriveFolderConnected && syncMode == SyncMode.LOCAL_ONLY -> {
+                syncMode = SyncMode.ONEDRIVE_FOLDER
+                hasCompletedSetup = true
+            }
         }
     }
 

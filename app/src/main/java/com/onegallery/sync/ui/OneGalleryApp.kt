@@ -103,6 +103,11 @@ fun OneGalleryApp(
     ) { }
 
     LaunchedEffect(Unit) {
+        authManager.initialize()
+        setupDone = syncPreferences.hasCompletedSetup
+    }
+
+    LaunchedEffect(Unit) {
         val permissions = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.READ_MEDIA_IMAGES)
