@@ -17,7 +17,10 @@ import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 data class SyncUiState(
     val lastIndexedLocalCount: Int = 0,
@@ -83,11 +87,20 @@ class SyncCoordinator(
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
 
     private val syncCancelRequested = AtomicBoolean(false)
+    private val activeLongTaskJob = AtomicReference<Job?>(null)
     private val longTaskMutex = Mutex()
     private val foregroundGuard = SyncForegroundGuard(appContext)
 
     fun requestCancelSync() {
         syncCancelRequested.set(true)
+        _state.value = _state.value.copy(lastMessage = "Cancelando…")
+        activeLongTaskJob.get()?.cancel(CancellationException("Sincronismo cancelado."))
+    }
+
+    private suspend fun bindActiveLongTaskJob() {
+        val job = coroutineContext[Job] ?: return
+        activeLongTaskJob.set(job)
+        job.invokeOnCompletion { activeLongTaskJob.compareAndSet(job, null) }
     }
 
     /** Remove mensagens de erro gravadas por item (lista Atenção). Não apaga fotos nem fila de sync. */
@@ -151,18 +164,26 @@ class SyncCoordinator(
     private suspend fun indexLocalLibraryBody(manageRunningState: Boolean): Result<Int> {
         if (manageRunningState) {
             resetSyncCancel()
+            bindActiveLongTaskJob()
             _state.value = _state.value.copy(isRunning = true, lastMessage = "Indexando mídia local…")
         }
         return runCatching {
+            ensureNotCancelled()
+            coroutineContext.ensureActive()
             val items = localMediaRepository.loadAllMedia()
+            ensureNotCancelled()
             val seenPaths = mutableSetOf<String>()
-            items.forEach { item ->
-                ensureNotCancelled()
+            items.forEachIndexed { index, item ->
+                if (index % 32 == 0) {
+                    ensureNotCancelled()
+                    coroutineContext.ensureActive()
+                }
                 val canonical = SyncPaths.canonicalFromLocal(item)
                 seenPaths.add(canonical)
                 val existing = syncMetadataDao.getByCanonicalPath(canonical)
                 syncMetadataDao.upsert(mergeLocalIntoEntity(item, canonical, existing))
             }
+            ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)
             if (manageRunningState) {
                 _state.value = _state.value.copy(
@@ -242,10 +263,14 @@ class SyncCoordinator(
         return longTaskMutex.withLock {
             foregroundGuard.runWithForeground {
                 resetSyncCancel()
+                bindActiveLongTaskJob()
                 _state.value = _state.value.copy(isRunning = true, lastMessage = "Sincronizando com OneDrive…")
                 runCatching {
+                    ensureNotCancelled()
                     flushLegacyPendingDeletes()
+                    _state.value = _state.value.copy(lastMessage = "Indexando mídia local…")
                     indexLocalLibrary(manageRunningState = false).getOrThrow()
+                    _state.value = _state.value.copy(lastMessage = "Sincronizando com OneDrive…")
                     ensureNotCancelled()
                     val remoteFiles = listRemoteFiles().getOrThrow()
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
@@ -678,6 +703,7 @@ class SyncCoordinator(
     }
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
+        ensureNotCancelled()
         val localId = row.localMediaId ?: return 0
         val item = localMediaRepository.findById(localId) ?: return 0
         val temp = localMediaRepository.materializeToTempFile(item) ?: run {
@@ -731,9 +757,10 @@ class SyncCoordinator(
     }
 
     private suspend fun reconcileMissingLocalItems(seenPaths: Set<String>) {
-        syncMetadataDao.getAll().forEach { row ->
-            if (row.localMediaId == null) return@forEach
-            if (row.canonicalPath in seenPaths) return@forEach
+        syncMetadataDao.getAll().forEachIndexed { index, row ->
+            if (index % 32 == 0) ensureNotCancelled()
+            if (row.localMediaId == null) return@forEachIndexed
+            if (row.canonicalPath in seenPaths) return@forEachIndexed
             if (row.oneDriveItemId != null && syncPreferences.autoDeleteRemoteWhenLocalRemoved) {
                 row.oneDriveItemId?.let { deleteRemoteFile(it).getOrNull() }
                 mediaCacheRepository.deleteCached(row.canonicalPath)
@@ -760,6 +787,7 @@ class SyncCoordinator(
         val pending = syncMetadataDao.getAll().filter { it.pendingDeleteTarget != PendingDeleteTarget.NONE }
         if (pending.isEmpty()) return
         pending.forEach { row ->
+            ensureNotCancelled()
             runCatching {
                 deleteItemsImmediately(listOf(row.canonicalPath), row.pendingDeleteTarget)
             }

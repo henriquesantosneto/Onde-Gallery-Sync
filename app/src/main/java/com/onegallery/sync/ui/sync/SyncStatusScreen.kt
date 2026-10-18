@@ -74,10 +74,6 @@ fun SyncStatusScreen(
     val scope = rememberCoroutineScope()
     var clearingErrors by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        syncTasks.indexLocalLibrary()
-    }
-
     Scaffold(
         topBar = { TopAppBar(title = { Text("Sync") }) },
     ) { padding ->
@@ -99,7 +95,16 @@ fun SyncStatusScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             CircularProgressIndicator(strokeWidth = 2.dp)
-                            Text("Sincronizando…", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                when {
+                                    coordinatorState.lastMessage.contains("Cancelando", ignoreCase = true) ->
+                                        "Cancelando…"
+                                    coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
+                                        "Indexando biblioteca local…"
+                                    else -> "Sincronizando com OneDrive…"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                         }
                     }
                 }
