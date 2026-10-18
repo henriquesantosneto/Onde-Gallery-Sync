@@ -75,31 +75,28 @@ private fun showsMainBottomBar(route: String?): Boolean =
 
 private fun NavHostController.openGalleryTab(clearBrowseFilters: () -> Unit) {
     clearBrowseFilters()
-    if (!popBackStack(MainTab.Gallery.route, inclusive = false)) {
-        navigate(MainTab.Gallery.route) {
-            popUpTo(graph.findStartDestination().id) {
-                saveState = true
-            }
-            launchSingleTop = true
-            restoreState = true
+    navigate(MainTab.Gallery.route) {
+        popUpTo(MainTab.Gallery.route) {
+            inclusive = false
+            saveState = true
         }
+        launchSingleTop = true
+        restoreState = true
     }
 }
 
 private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
     clearBrowseFilters()
-    when (currentBackStackEntry?.destination?.route) {
-        ALBUMS_BROWSE_ROUTE -> popBackStack(MainTab.Albums.route, inclusive = false)
-        MainTab.Albums.route -> Unit
-        else -> {
-            navigate(MainTab.Albums.route) {
-                popUpTo(graph.findStartDestination().id) {
-                    saveState = true
-                }
-                launchSingleTop = true
-                restoreState = true
-            }
+    if (currentBackStackEntry?.destination?.route == ALBUMS_BROWSE_ROUTE) {
+        popBackStack(MainTab.Albums.route, inclusive = false)
+        return
+    }
+    navigate(MainTab.Albums.route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
         }
+        launchSingleTop = true
+        restoreState = true
     }
 }
 
