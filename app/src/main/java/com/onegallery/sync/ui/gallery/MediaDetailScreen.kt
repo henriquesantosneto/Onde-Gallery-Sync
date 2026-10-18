@@ -215,7 +215,7 @@ fun MediaDetailScreen(
                     )
                 }
                 Text(
-                    "Toque na mídia · pinça para zoom · duplo toque amplia",
+                    "Pinça ou duplo toque para zoom · vídeo: use os controles do player para play",
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier
@@ -311,14 +311,26 @@ private fun MediaDetailPage(
                     val playback = display.playbackUri()
                     when {
                         display.kind == MediaKind.VIDEO && playback != null -> {
-                            VideoPlayerView(
-                                uri = playback,
+                            ZoomableMediaContainer(
+                                resetKey = playback,
                                 modifier = mediaModifier,
-                                playWhenReady = true,
-                            )
+                                interceptSingleTap = false,
+                                onZoomActiveChanged = onZoomActiveChanged,
+                            ) {
+                                VideoPlayerView(
+                                    uri = playback,
+                                    modifier = Modifier.fillMaxSize(),
+                                    playWhenReady = true,
+                                )
+                            }
                         }
                         display.kind == MediaKind.VIDEO -> {
-                            Box(modifier = mediaModifier) {
+                            ZoomableMediaContainer(
+                                resetKey = canonicalPath,
+                                modifier = mediaModifier,
+                                onZoomActiveChanged = onZoomActiveChanged,
+                                onSingleTap = onToggleImmersive,
+                            ) {
                                 MediaThumbnailImage(
                                     item = display,
                                     syncCoordinator = syncCoordinator,
