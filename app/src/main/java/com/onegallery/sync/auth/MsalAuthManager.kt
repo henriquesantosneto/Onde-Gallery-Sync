@@ -8,6 +8,7 @@ import com.microsoft.identity.client.AuthenticationCallback
 import com.microsoft.identity.client.IAuthenticationResult
 import com.microsoft.identity.client.IPublicClientApplication
 import com.microsoft.identity.client.ISingleAccountPublicClientApplication
+import com.microsoft.identity.client.Prompt
 import com.microsoft.identity.client.PublicClientApplication
 import com.microsoft.identity.client.exception.MsalException
 import com.onegallery.sync.BuildConfig
@@ -66,6 +67,13 @@ class MsalAuthManager(
         val base = message?.trim().orEmpty()
         val lower = base.lowercase()
         val scopeLine = scopesAttempt?.let { "\nEscopos tentados: $it" }.orEmpty()
+        val accountMismatchHint = if (lower.contains("does not match") && lower.contains("account")) {
+            "\n\n— Conta Microsoft —\n" +
+                "O app guardava outra conta (modo conta única). Toque Entrar de novo e escolha a conta desejada. " +
+                "Se persistir: Ajustes do app → sair da conta, ou desinstale/reinstale; no navegador use outra aba anônima."
+        } else {
+            ""
+        }
         val duplicateRedirectHint = if (lower.contains("more than one app") && lower.contains("browsertab")) {
             "\n\n— Conflito msauth —\n" +
                 "Desinstale versões antigas do OneGallery Sync e instale só o APK mais recente. " +
@@ -102,7 +110,7 @@ class MsalAuthManager(
         } else {
             ""
         }
-        return base + scopeLine + duplicateRedirectHint + scopeHint + redirectHint
+        return base + scopeLine + accountMismatchHint + duplicateRedirectHint + scopeHint + redirectHint
     }
 
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES
@@ -205,14 +213,20 @@ class MsalAuthManager(
         if (activity.isFinishing || activity.isDestroyed) {
             return Result.failure(IllegalStateException("Tela indisponível — abra o login de novo."))
         }
+        signOut()
         var lastFailure: Result<Unit>? = null
         for (attemptScopes in signInScopeAttempts) {
-            val result = acquireTokenInteractive(activity, msal, attemptScopes)
+            var result = acquireTokenInteractive(activity, msal, attemptScopes)
             if (result.isSuccess) return result
-            lastFailure = result
             val msg = result.exceptionOrNull()?.message?.lowercase().orEmpty()
+            if (msg.contains("does not match")) {
+                signOut()
+                result = acquireTokenInteractive(activity, msal, attemptScopes)
+                if (result.isSuccess) return result
+            }
+            lastFailure = result
             val scopeDeclined = msg.contains("scope") && msg.contains("declin")
-            if (!scopeDeclined) return result
+            if (!scopeDeclined && !msg.contains("does not match")) return result
         }
         return lastFailure ?: Result.failure(IllegalStateException("Login falhou"))
     }
@@ -226,6 +240,7 @@ class MsalAuthManager(
             val params = AcquireTokenParameters.Builder()
                 .startAuthorizationFromActivity(activity)
                 .withScopes(attemptScopes)
+                .withPrompt(Prompt.SELECT_ACCOUNT)
                 .withCallback(object : AuthenticationCallback {
                     override fun onSuccess(authenticationResult: IAuthenticationResult) {
                         _state.value = AuthState(

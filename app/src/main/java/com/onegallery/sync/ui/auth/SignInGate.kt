@@ -239,7 +239,18 @@ fun SignInGate(
         ) {
             Text(stringResource(R.string.auth_sign_in))
         }
-        TextButton(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) {
+        TextButton(
+            onClick = {
+                scope.launch {
+                    authManager.signOut()
+                    localError = null
+                }
+            },
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Text("Limpar conta Microsoft salva")
+        }
+        TextButton(onClick = onBack, modifier = Modifier.padding(top = 8.dp)) {
             Text("Voltar")
         }
     }
