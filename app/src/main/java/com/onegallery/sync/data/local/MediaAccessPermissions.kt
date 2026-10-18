@@ -22,4 +22,11 @@ object MediaAccessPermissions {
             null
         }
     }
+
+    fun hasDeviceLocationAccess(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
 }

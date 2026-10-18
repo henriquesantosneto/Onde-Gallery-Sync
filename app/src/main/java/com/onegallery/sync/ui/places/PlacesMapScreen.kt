@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material3.Button
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,7 +45,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.onegallery.sync.R
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -64,6 +68,8 @@ import org.maplibre.android.annotations.Marker
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -81,10 +87,24 @@ fun PlacesMapScreen(
     val context = LocalContext.current
     val hasMediaLocation = MediaAccessPermissions.hasMediaLocationAccess(context)
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
+    val mediaLocationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) syncTasks.runBidirectionalSync(userInitiated = true)
+    }
+    var deviceLocationGranted by remember {
+        mutableStateOf(MediaAccessPermissions.hasDeviceLocationAccess(context))
+    }
+    var locateUserRequest by remember { mutableStateOf(0) }
+    var pendingLocateAfterPermission by remember { mutableStateOf(false) }
+    val deviceLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        deviceLocationGranted = granted
+        if (granted && pendingLocateAfterPermission) {
+            pendingLocateAfterPermission = false
+            locateUserRequest++
+        }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pins = remember(state.geoItems) { buildPhotoMapPins(state.geoItems) }
@@ -99,9 +119,11 @@ fun PlacesMapScreen(
                         Text("Mapa de fotos")
                         if (pins.isNotEmpty()) {
                             Text(
-                                "${pins.size} ${if (pins.size == 1) "local" else "locais"} · pin na posição GPS da foto",
+                                "${pins.size} ${if (pins.size == 1) "local" else "locais"} · " +
+                                    stringResource(R.string.map_photo_locations_hint),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
                             )
                         }
                     }
@@ -144,7 +166,7 @@ fun PlacesMapScreen(
                     if (!hasMediaLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         Button(
                             onClick = {
-                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                                mediaLocationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -171,14 +193,42 @@ fun PlacesMapScreen(
                 }
             }
             else -> {
-                PlacesMapView(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
-                    pins = pins,
-                    syncCoordinator = syncCoordinator,
-                    onPinSelected = { selectedPin = it },
-                )
+                ) {
+                    PlacesMapView(
+                        modifier = Modifier.fillMaxSize(),
+                        pins = pins,
+                        syncCoordinator = syncCoordinator,
+                        deviceLocationGranted = deviceLocationGranted,
+                        locateUserRequest = locateUserRequest,
+                        onPinSelected = { selectedPin = it },
+                        onRequestDeviceLocationPermission = {
+                            pendingLocateAfterPermission = true
+                            deviceLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        },
+                    )
+                    SmallFloatingActionButton(
+                        onClick = {
+                            if (deviceLocationGranted) {
+                                locateUserRequest++
+                            } else {
+                                pendingLocateAfterPermission = true
+                                deviceLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = 56.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.MyLocation,
+                            contentDescription = stringResource(R.string.map_my_location),
+                        )
+                    }
+                }
             }
         }
     }
@@ -254,11 +304,31 @@ private fun formatPinCoordinates(latitude: Double, longitude: Double): String {
     return String.format(Locale.US, "%.5f°, %.5f°", latitude, longitude)
 }
 
+/** Enquadra os locais das fotos (comportamento próximo ao mapa do app Fotos no iPhone). */
+private fun animateCameraToPhotoPins(map: MapLibreMap, pins: List<PhotoMapPin>) {
+    if (pins.isEmpty()) return
+    runCatching {
+        if (pins.size == 1) {
+            val p = pins.first()
+            map.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(LatLng(p.latitude, p.longitude), 14.0),
+            )
+        } else {
+            val builder = LatLngBounds.Builder()
+            pins.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
+            map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 120))
+        }
+    }
+}
+
 @Composable
 private fun PlacesMapView(
     pins: List<PhotoMapPin>,
     syncCoordinator: SyncCoordinator,
+    deviceLocationGranted: Boolean,
+    locateUserRequest: Int,
     onPinSelected: (PhotoMapPin) -> Unit,
+    onRequestDeviceLocationPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -271,6 +341,8 @@ private fun PlacesMapView(
     val markers = remember { mutableStateListOf<Marker>() }
     val markerToPin = remember { mutableStateMapOf<Marker, PhotoMapPin>() }
     var mapInitialized by remember { mutableStateOf(false) }
+    var initialCameraApplied by remember { mutableStateOf(false) }
+    var locationComponentReady by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -300,6 +372,55 @@ private fun PlacesMapView(
             map.setStyle(Style.Builder().fromJson(SatelliteMapStyle.json())) {
                 styleReady = true
             }
+        }
+    }
+
+    LaunchedEffect(mapRef, styleReady, deviceLocationGranted) {
+        val map = mapRef ?: return@LaunchedEffect
+        if (!styleReady) return@LaunchedEffect
+        if (deviceLocationGranted && !locationComponentReady) {
+            runCatching {
+                val style = map.style ?: return@LaunchedEffect
+                val component = map.locationComponent
+                if (!component.isLocationComponentEnabled) {
+                    component.activateLocationComponent(
+                        LocationComponentActivationOptions.builder(context, style)
+                            .useDefaultLocationEngine(true)
+                            .build(),
+                    )
+                    component.isLocationComponentEnabled = true
+                    component.cameraMode = CameraMode.NONE
+                }
+                locationComponentReady = true
+            }
+        }
+    }
+
+    LaunchedEffect(mapRef, styleReady, pins, initialCameraApplied) {
+        val map = mapRef ?: return@LaunchedEffect
+        if (!styleReady || initialCameraApplied || pins.isEmpty()) return@LaunchedEffect
+        initialCameraApplied = true
+        animateCameraToPhotoPins(map, pins)
+    }
+
+    LaunchedEffect(locateUserRequest, mapRef, styleReady, deviceLocationGranted, locationComponentReady) {
+        if (locateUserRequest == 0) return@LaunchedEffect
+        val map = mapRef ?: return@LaunchedEffect
+        if (!styleReady) return@LaunchedEffect
+        if (!deviceLocationGranted) {
+            onRequestDeviceLocationPermission()
+            return@LaunchedEffect
+        }
+        val component = map.locationComponent
+        if (!component.isLocationComponentEnabled) return@LaunchedEffect
+        component.cameraMode = CameraMode.NONE
+        val fromEngine = component.lastKnownLocation
+        val target = when {
+            fromEngine != null -> LatLng(fromEngine.latitude, fromEngine.longitude)
+            else -> lastKnownDeviceLatLng(context)
+        }
+        if (target != null) {
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 15.0))
         }
     }
 
@@ -338,19 +459,6 @@ private fun PlacesMapView(
             )
             markers.add(added)
             markerToPin[added] = pin
-        }
-        if (pins.isEmpty()) return@LaunchedEffect
-        runCatching {
-            if (pins.size == 1) {
-                val p = pins.first()
-                map.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(LatLng(p.latitude, p.longitude), 15.0),
-                )
-            } else {
-                val builder = LatLngBounds.Builder()
-                pins.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
-                map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 120))
-            }
         }
     }
 
