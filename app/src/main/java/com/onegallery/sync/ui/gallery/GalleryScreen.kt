@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -80,7 +83,7 @@ fun GalleryScreen(
     val title = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
         state.albumFilter != null -> "Álbum: ${state.albumFilter}"
-        else -> "Galeria espelhada"
+        else -> "Fotos"
     }
 
     Scaffold(
@@ -171,38 +174,61 @@ fun GalleryScreen(
                 ) { Text("Nenhuma mídia indexada. Conceda permissão e sincronize.") }
             }
             else -> {
+                val gridEntries = remember(state.items, state.sortOrder) {
+                    buildGalleryGridEntries(state.items, state.sortOrder)
+                }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = mediaCellMin),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                         .then(pinchModifier),
-                    contentPadding = PaddingValues(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    items(state.items, key = { it.canonicalPath }) { item ->
-                        val selected = item.canonicalPath in state.selectedPaths
-                        MediaThumbnail(
-                            item = item,
-                            syncCoordinator = syncCoordinator,
-                            selectionMode = state.selectionMode,
-                            selected = selected,
-                            onClick = {
-                                if (state.selectionMode) {
-                                    viewModel.toggleSelection(item.canonicalPath)
-                                } else {
-                                    val encoded = URLEncoder.encode(
-                                        item.canonicalPath,
-                                        StandardCharsets.UTF_8.name(),
-                                    )
-                                    onOpenItem(encoded)
-                                }
-                            },
-                            onLongClick = {
-                                viewModel.enterSelectionMode(item.canonicalPath)
-                            },
-                        )
+                    items(
+                        items = gridEntries,
+                        key = { it.key },
+                        span = { entry ->
+                            when (entry) {
+                                is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
+                                is GalleryGridEntry.Photo -> GridItemSpan(1)
+                            }
+                        },
+                    ) { entry ->
+                        when (entry) {
+                            is GalleryGridEntry.Header -> {
+                                TimelineSectionHeader(
+                                    title = entry.header.title,
+                                    kind = entry.header.kind,
+                                )
+                            }
+                            is GalleryGridEntry.Photo -> {
+                                val item = entry.item
+                                val selected = item.canonicalPath in state.selectedPaths
+                                MediaThumbnail(
+                                    item = item,
+                                    syncCoordinator = syncCoordinator,
+                                    selectionMode = state.selectionMode,
+                                    selected = selected,
+                                    onClick = {
+                                        if (state.selectionMode) {
+                                            viewModel.toggleSelection(item.canonicalPath)
+                                        } else {
+                                            val encoded = URLEncoder.encode(
+                                                item.canonicalPath,
+                                                StandardCharsets.UTF_8.name(),
+                                            )
+                                            onOpenItem(encoded)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        viewModel.enterSelectionMode(item.canonicalPath)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -226,6 +252,29 @@ fun GalleryScreen(
         )
     }
 
+}
+
+@Composable
+private fun TimelineSectionHeader(
+    title: String,
+    kind: TimelineHeaderKind,
+) {
+    Text(
+        text = title,
+        style = when (kind) {
+            TimelineHeaderKind.YEAR -> MaterialTheme.typography.headlineSmall
+            TimelineHeaderKind.MONTH -> MaterialTheme.typography.titleMedium
+        },
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = 4.dp,
+                end = 4.dp,
+                top = if (kind == TimelineHeaderKind.YEAR) 16.dp else 10.dp,
+                bottom = 6.dp,
+            ),
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

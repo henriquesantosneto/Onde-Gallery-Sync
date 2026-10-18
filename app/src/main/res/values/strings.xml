@@ -2,7 +2,7 @@
     <string name="app_name">OneGallery Sync</string>
     <string name="auth_sign_in">Entrar com Microsoft</string>
     <string name="auth_sign_out">Sair</string>
-    <string name="tab_gallery">Galeria</string>
+    <string name="tab_gallery">Fotos</string>
     <string name="tab_albums">Álbuns</string>
     <string name="tab_sync">Sync</string>
     <string name="tab_settings">Ajustes</string>
