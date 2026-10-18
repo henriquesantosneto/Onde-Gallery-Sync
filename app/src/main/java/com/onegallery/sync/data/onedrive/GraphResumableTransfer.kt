@@ -36,8 +36,10 @@ class GraphResumableTransfer(
         drivePath: String,
         canonicalPath: String,
         sourceFile: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long) -> Unit)? = null,
     ): DriveItem {
         val fileSize = sourceFile.length()
+        onProgress?.invoke(0L, fileSize)
         val fileModified = sourceFile.lastModified()
         require(fileSize > SIMPLE_UPLOAD_MAX_BYTES) {
             "Use upload simples para arquivos ≤ 4 MiB"
@@ -87,6 +89,7 @@ class GraphResumableTransfer(
                         }
                         202 -> {
                             nextStart = parseNextStart(body, chunkEnd + 1)
+                            onProgress?.invoke(nextStart.coerceAtMost(fileSize), fileSize)
                             uploadSessionStore.save(session)
                         }
                         404, 410 -> {
@@ -142,6 +145,7 @@ class GraphResumableTransfer(
         destination: File,
         partFile: File,
         metaFile: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ) {
         destination.parentFile?.mkdirs()
         var totalBytes = readDownloadMeta(metaFile, itemId)
@@ -157,9 +161,11 @@ class GraphResumableTransfer(
             downloaded = 0L
         }
         if (knownTotal != null && downloaded == knownTotal) {
+            onProgress?.invoke(knownTotal, knownTotal)
             finalizeDownload(partFile, destination, metaFile)
             return
         }
+        onProgress?.invoke(downloaded, knownTotal)
 
         val url = "https://graph.microsoft.com/v1.0/me/drive/items/$itemId/content"
         while (true) {
@@ -185,12 +191,14 @@ class GraphResumableTransfer(
                     writeDownloadMeta(metaFile, itemId, totalFromHeader)
                     totalBytes = totalFromHeader
                 }
+                onProgress?.invoke(downloaded, totalBytes)
                 val completeTotal = totalBytes
                 if (completeTotal != null && downloaded >= completeTotal) {
                     finalizeDownload(partFile, destination, metaFile)
                     return
                 }
                 if (response.code == 200 && completeTotal == null) {
+                    onProgress?.invoke(downloaded, downloaded.takeIf { it > 0L })
                     finalizeDownload(partFile, destination, metaFile)
                     return
                 }

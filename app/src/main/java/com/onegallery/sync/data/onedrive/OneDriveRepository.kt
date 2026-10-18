@@ -158,16 +158,23 @@ class OneDriveRepository(
         canonicalPath: String,
         sourceFile: File,
         mimeType: String?,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<DriveItem> {
         return runWithToken { token ->
             val auth = "Bearer $token"
             val drivePath = encodeDrivePath(syncDrivePathFromCanonical(canonicalPath))
+            val fileSize = sourceFile.length()
             if (sourceFile.length() <= GraphResumableTransfer.SIMPLE_UPLOAD_MAX_BYTES) {
+                onProgress?.invoke(0L, fileSize)
                 val mediaType = mimeType?.toMediaTypeOrNull()
                 val body = sourceFile.asRequestBody(mediaType)
-                graphApi.uploadSmallFile(auth, drivePath, body)
+                val item = graphApi.uploadSmallFile(auth, drivePath, body)
+                onProgress?.invoke(fileSize, fileSize)
+                item
             } else {
-                resumableTransfer.uploadFile(auth, drivePath, canonicalPath, sourceFile)
+                resumableTransfer.uploadFile(auth, drivePath, canonicalPath, sourceFile) { done, total ->
+                    onProgress?.invoke(done, total)
+                }
             }
         }
     }
@@ -189,11 +196,15 @@ class OneDriveRepository(
         }
     }
 
-    suspend fun downloadToFile(itemId: String, destination: File): Result<Unit> {
+    suspend fun downloadToFile(
+        itemId: String,
+        destination: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
         return runWithToken { token ->
             val part = File(destination.absolutePath + ".part")
             val meta = File(destination.absolutePath + ".part.meta")
-            resumableTransfer.downloadToFile("Bearer $token", itemId, destination, part, meta)
+            resumableTransfer.downloadToFile("Bearer $token", itemId, destination, part, meta, onProgress)
         }
     }
 

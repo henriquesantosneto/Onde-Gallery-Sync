@@ -22,7 +22,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +39,7 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
+import com.onegallery.sync.sync.ActiveSyncItem
 import com.onegallery.sync.sync.queueDetailLabel
 import androidx.compose.ui.platform.LocalContext
 
@@ -77,40 +77,6 @@ fun SyncStatusScreen(
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
             item {
-                Column(Modifier.padding(top = 8.dp)) {
-                    if (coordinatorState.isRunning) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Row(
-                            modifier = Modifier.padding(top = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CircularProgressIndicator(strokeWidth = 2.dp)
-                            Text(
-                                coordinatorState.activeItem?.operationLabel
-                                    ?: when {
-                                        coordinatorState.lastMessage.contains("Cancelando", ignoreCase = true) ->
-                                            "Cancelando…"
-                                        coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
-                                            "Indexando biblioteca local…"
-                                        else -> "Sincronizando com OneDrive…"
-                                    },
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                        coordinatorState.activeItem?.let { active ->
-                            Text(
-                                active.displayName,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -134,6 +100,63 @@ fun SyncStatusScreen(
                                 "Sem internet — leitura local e cache.",
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                        if (coordinatorState.isRunning) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                            )
+                            Row(
+                                modifier = Modifier.padding(top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(strokeWidth = 2.dp)
+                                Text(
+                                    coordinatorState.activeItem?.operationLabel
+                                        ?: when {
+                                            coordinatorState.lastMessage.contains("Cancelando", ignoreCase = true) ->
+                                                "Cancelando…"
+                                            coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
+                                                "Indexando biblioteca local…"
+                                            else -> "Sincronizando com OneDrive…"
+                                        },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        }
+                        val queueCap = if (coordinatorState.isRunning) 50 else 8
+                        val queueInStatus = syncQueue.take(queueCap)
+                        if (queueInStatus.isNotEmpty()) {
+                            Text(
+                                if (coordinatorState.isRunning && syncQueue.size > queueInStatus.size) {
+                                    "Arquivos na fila (mostrando ${queueInStatus.size} de ${syncQueue.size})"
+                                } else if (syncQueue.size > 1) {
+                                    "Arquivos na fila (${syncQueue.size})"
+                                } else {
+                                    "Arquivo na fila"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                queueInStatus.forEach { row ->
+                                    SyncQueueItemRow(
+                                        row = row,
+                                        activeItem = coordinatorState.activeItem,
+                                        isRunning = coordinatorState.isRunning,
+                                    )
+                                }
+                            }
+                        } else if (coordinatorState.isRunning) {
+                            Text(
+                                "Nenhum envio ou download pendente no índice — indexando ou concluindo…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 12.dp),
                             )
                         }
                         Button(
@@ -160,37 +183,6 @@ fun SyncStatusScreen(
             }
             item {
                 StatsCard(stats, pendingOps)
-            }
-
-            item {
-                SectionTitle(
-                    if (syncQueue.size > 50) {
-                        "Fila de sincronização (mostrando 50 de ${syncQueue.size})"
-                    } else {
-                        "Fila de sincronização (${syncQueue.size})"
-                    },
-                )
-            }
-            if (syncQueue.isEmpty()) {
-                item {
-                    Text(
-                        "Nada na fila. Itens aguardando envio ou download aparecem aqui durante e após o sync.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                }
-            } else {
-                items(
-                    syncQueue.take(50),
-                    key = { "queue-${it.canonicalPath}" },
-                ) { row ->
-                    SyncQueueItemCard(
-                        row = row,
-                        isActive = coordinatorState.activeItem?.displayName == row.displayName &&
-                            coordinatorState.isRunning,
-                    )
-                }
             }
 
             if (problemCount > 0) {
@@ -300,33 +292,57 @@ private fun StatRow(label: String, value: String, emphasized: Boolean = false) {
 }
 
 @Composable
-private fun SyncQueueItemCard(
+private fun SyncQueueItemRow(
     row: SyncMetadataEntity,
-    isActive: Boolean,
+    activeItem: ActiveSyncItem?,
+    isRunning: Boolean,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isActive) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-            },
-        ),
+    val isActive = isRunning &&
+        activeItem?.canonicalPath == row.canonicalPath
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isActive) {
+                    Modifier.padding(8.dp)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(row.displayName, style = MaterialTheme.typography.titleSmall)
-            Text(
-                row.queueDetailLabel(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Text(
+            row.displayName,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 2,
+        )
+        Text(
             if (isActive) {
-                Text(
-                    "Em andamento…",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp),
+                activeItem?.operationLabel ?: row.queueDetailLabel()
+            } else {
+                row.queueDetailLabel()
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = if (isActive) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        if (isActive) {
+            val fraction = activeItem?.progressFraction
+            if (fraction != null) {
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
                 )
             }
         }

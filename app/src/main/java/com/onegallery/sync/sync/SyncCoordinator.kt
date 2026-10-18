@@ -559,12 +559,19 @@ class SyncCoordinator(
         val target = mediaCacheRepository.originalFile(canonicalPath)
         setActiveSyncItem(
             ActiveSyncItem(
+                canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
                 operationLabel = "Baixando da nuvem…",
             ),
         )
         return try {
-            downloadRemoteFile(itemId, target).map {
+            downloadRemoteFile(
+                remoteId = itemId,
+                target = target,
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                operationLabel = "Baixando da nuvem…",
+            ).map {
                 val location = mediaLocationResolver.resolveFromFile(target)
                 syncMetadataDao.upsert(
                     row.copy(
@@ -854,6 +861,7 @@ class SyncCoordinator(
         ensureSyncMayContinue()
         setActiveSyncItem(
             ActiveSyncItem(
+                canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
                 operationLabel = "Enviando para OneDrive…",
             ),
@@ -875,6 +883,8 @@ class SyncCoordinator(
                 canonicalPath = row.canonicalPath,
                 sourceFile = temp,
                 mimeType = item.mimeType,
+                displayName = row.displayName,
+                operationLabel = "Enviando para OneDrive…",
             ).getOrThrow()
             val synced = row.copy(
                 oneDriveItemId = remoteId,
@@ -1183,21 +1193,65 @@ class SyncCoordinator(
         canonicalPath: String,
         sourceFile: File,
         mimeType: String?,
+        displayName: String,
+        operationLabel: String,
     ): Result<String> {
+        val onProgress: ((Long, Long?) -> Unit)? =
+            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                { done, total ->
+                    setActiveSyncItem(
+                        ActiveSyncItem(
+                            canonicalPath = canonicalPath,
+                            displayName = displayName,
+                            operationLabel = operationLabel,
+                            bytesCompleted = done,
+                            totalBytes = total,
+                        ),
+                    )
+                }
+            } else {
+                null
+            }
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
-            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
-                .map { it.id }
+            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.uploadLocalFile(
+                canonicalPath,
+                sourceFile,
+                mimeType,
+                onProgress,
+            ).map { it.id }
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
         }
     }
 
-    private suspend fun downloadRemoteFile(remoteId: String, target: File): Result<Unit> {
+    private suspend fun downloadRemoteFile(
+        remoteId: String,
+        target: File,
+        canonicalPath: String,
+        displayName: String,
+        operationLabel: String,
+    ): Result<Unit> {
+        val onProgress: ((Long, Long?) -> Unit)? =
+            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                { done, total ->
+                    setActiveSyncItem(
+                        ActiveSyncItem(
+                            canonicalPath = canonicalPath,
+                            displayName = displayName,
+                            operationLabel = operationLabel,
+                            bytesCompleted = done,
+                            totalBytes = total,
+                        ),
+                    )
+                }
+            } else {
+                null
+            }
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.downloadToFile(remoteId, target)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.downloadToFile(remoteId, target)
-            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.downloadToFile(remoteId, target)
+            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.downloadToFile(remoteId, target, onProgress)
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
         }
     }

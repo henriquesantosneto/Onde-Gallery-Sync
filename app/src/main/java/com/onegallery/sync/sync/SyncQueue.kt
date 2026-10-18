@@ -9,9 +9,19 @@ enum class SyncQueueOperation(val queueLabel: String) {
 }
 
 data class ActiveSyncItem(
+    val canonicalPath: String,
     val displayName: String,
     val operationLabel: String,
-)
+    val bytesCompleted: Long = 0L,
+    val totalBytes: Long? = null,
+) {
+    val progressFraction: Float?
+        get() {
+            val total = totalBytes ?: return null
+            if (total <= 0L) return null
+            return (bytesCompleted.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
+        }
+}
 
 fun SyncMetadataEntity.queueOperation(): SyncQueueOperation? {
     if (pendingDeleteTarget != PendingDeleteTarget.NONE) {
