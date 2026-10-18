@@ -37,9 +37,12 @@ private val monthFormatter = DateTimeFormatter.ofPattern("MMMM", ptBr)
 fun isDateTimelineSort(sortOrder: GallerySortOrder): Boolean =
     sortOrder == GallerySortOrder.DATE_NEWEST || sortOrder == GallerySortOrder.DATE_OLDEST
 
-/** Miniaturas menores (escala ≤ ~1) → agrupar por dia. */
+/**
+ * Pinça para fora (escala baixa) → seções por mês/ano ([TimelineGrouping.RELAXED]).
+ * Pinça para dentro → uma seção por dia.
+ */
 fun timelineGroupingForGridScale(gridScale: Float): TimelineGrouping =
-    if (gridScale <= 1.05f) TimelineGrouping.BY_DAY else TimelineGrouping.RELAXED
+    if (gridScale <= 0.72f) TimelineGrouping.RELAXED else TimelineGrouping.BY_DAY
 
 private fun timestampToDate(epochSeconds: Long): LocalDate {
     if (epochSeconds <= 0L) return LocalDate.EPOCH

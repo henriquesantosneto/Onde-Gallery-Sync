@@ -17,7 +17,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 object GridPinchZoom {
-    const val MIN_SCALE = 0.55f
+    /** ~32 dp de célula na galeria (120 × 0,28) — visão mês/ano. */
+    const val MIN_SCALE = 0.28f
     const val MAX_SCALE = 1.75f
     /** Quanto menor, mais lenta a pinça (0.25 ≈ 25% do gesto bruto). */
     const val PINCH_SENSITIVITY = 0.25f
@@ -71,6 +72,6 @@ fun rememberGalleryGridZoom(initial: Float, onPersist: (Float) -> Unit): Gallery
 
 /** Escala maior → células maiores (menos colunas), como na galeria Samsung. */
 fun gridAdaptiveMinSize(baseMinDp: Float, zoomScale: Float): Dp {
-    val min = (baseMinDp * zoomScale).coerceIn(72f, 260f)
+    val min = (baseMinDp * zoomScale).coerceIn(32f, 260f)
     return min.dp
 }

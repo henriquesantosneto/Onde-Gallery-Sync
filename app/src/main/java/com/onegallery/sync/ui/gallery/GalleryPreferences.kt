@@ -26,12 +26,18 @@ class GalleryPreferences(context: Context) {
     /** Pinça na grade de álbuns: maior = capas maiores (menos colunas). */
     var albumGridZoom: Float
         get() = prefs.getFloat(KEY_ALBUM_GRID_ZOOM, 1f)
-        set(value) = prefs.edit().putFloat(KEY_ALBUM_GRID_ZOOM, value.coerceIn(0.55f, 1.75f)).apply()
+        set(value) = prefs.edit().putFloat(
+            KEY_ALBUM_GRID_ZOOM,
+            value.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE),
+        ).apply()
 
     /** Pinça na galeria de fotos/vídeos. */
     var galleryGridZoom: Float
         get() = prefs.getFloat(KEY_GALLERY_GRID_ZOOM, 1f)
-        set(value) = prefs.edit().putFloat(KEY_GALLERY_GRID_ZOOM, value.coerceIn(0.55f, 1.75f)).apply()
+        set(value) = prefs.edit().putFloat(
+            KEY_GALLERY_GRID_ZOOM,
+            value.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE),
+        ).apply()
 
     companion object {
         private const val KEY_SORT = "sort_order"
