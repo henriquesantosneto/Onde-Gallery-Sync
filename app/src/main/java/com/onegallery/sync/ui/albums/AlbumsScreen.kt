@@ -284,7 +284,8 @@ fun AlbumsScreen(
                                         if (!isPlace && state.albumSelectionMode) {
                                             viewModel.toggleAlbumSelection(entry.album.title)
                                         } else if (isPlace) {
-                                            viewModel.setPlaceFilter(entry.album.title)
+                                            val matchKey = entry.album.bucketId.removePrefix("place:")
+                                            viewModel.setPlaceFilter(entry.album.title, matchKey)
                                             onOpenAlbum(entry.album.title)
                                         } else {
                                             viewModel.setAlbumFilter(entry.album.title)
@@ -415,7 +416,8 @@ fun AlbumsScreen(
             onDismiss = { detailsAlbum = null },
             onOpenAlbum = {
                 if (isPlace) {
-                    viewModel.setPlaceFilter(album.title)
+                    val matchKey = album.bucketId.removePrefix("place:")
+                    viewModel.setPlaceFilter(album.title, matchKey)
                 } else {
                     viewModel.setAlbumFilter(album.title)
                 }

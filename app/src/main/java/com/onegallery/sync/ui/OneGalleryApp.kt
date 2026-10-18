@@ -359,7 +359,7 @@ fun OneGalleryApp(
                         navController.navigate("media/$encoded")
                     },
                     onShowAllAtPlace = { placeLabel ->
-                        galleryViewModel.setPlaceFilter(placeLabel)
+                        galleryViewModel.setPlaceFilterFromLocationLabel(placeLabel)
                         navController.navigate(ALBUMS_BROWSE_ROUTE) {
                             launchSingleTop = true
                         }

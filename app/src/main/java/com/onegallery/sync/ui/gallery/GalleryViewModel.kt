@@ -6,6 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.PlaceComponents
+import com.onegallery.sync.data.local.PlaceLevel
+import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.matchesPlace
+import com.onegallery.sync.data.local.preferredBrowseKey
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
@@ -120,19 +125,23 @@ class GalleryViewModel(
                 when (val filter = controls.browseFilter) {
                     GalleryBrowseFilter.All -> true
                     is GalleryBrowseFilter.AlbumFolder -> item.albumName == filter.name
-                    is GalleryBrowseFilter.Place -> item.locationLabel == filter.label
+                    is GalleryBrowseFilter.Place -> {
+                        PlaceMatchKey.decode(filter.matchKey)?.let { key ->
+                            item.matchesPlace(key)
+                        } ?: (item.locationLabel == filter.displayName)
+                    }
                 }
             }
             .sortedBy(controls.order)
 
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
-        val locationFilter = (controls.browseFilter as? GalleryBrowseFilter.Place)?.label
+        val locationFilter = (controls.browseFilter as? GalleryBrowseFilter.Place)?.displayName
 
         GalleryUiState(
             isLoading = controls.isLoading,
             items = items,
             albums = buildAlbums(allItems, userAlbums, controls.albumSort),
-            placeAlbums = sortMediaAlbums(buildPlaceAlbums(allItems), controls.albumSort),
+            placeAlbums = sortPlaceAlbums(buildPlaceAlbums(allItems), controls.albumSort),
             userAlbums = userAlbums,
             albumFilter = albumFilter,
             locationFilter = locationFilter,
@@ -162,13 +171,25 @@ class GalleryViewModel(
         clearSelection()
     }
 
-    fun setPlaceFilter(placeLabel: String?) {
-        browseFilter.value = if (placeLabel == null) {
+    fun setPlaceFilter(displayName: String?, matchKey: String? = null) {
+        browseFilter.value = if (displayName == null) {
             GalleryBrowseFilter.All
         } else {
-            GalleryBrowseFilter.Place(placeLabel)
+            val key = matchKey ?: PlaceMatchKey.legacyLabel(displayName).encode()
+            GalleryBrowseFilter.Place(displayName = displayName, matchKey = key)
         }
         clearSelection()
+    }
+
+    /** Abre filtro a partir do rótulo salvo na foto (mapa / detalhes). */
+    fun setPlaceFilterFromLocationLabel(locationLabel: String) {
+        val components = PlaceComponents.fromGeocoderLabel(locationLabel)
+        if (components != null && components.hasAnyNamedLevel()) {
+            val matchKey = components.preferredBrowseKey(locationLabel).encode()
+            setPlaceFilter(components.hierarchicalDisplayTitle(), matchKey)
+        } else {
+            setPlaceFilter(locationLabel)
+        }
     }
 
     fun setSortOrder(order: GallerySortOrder) {
@@ -379,20 +400,79 @@ private fun sortMediaAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List
 }
 
 private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> {
-    return items
-        .mapNotNull { item -> item.locationLabel?.let { label -> label to item } }
-        .groupBy({ it.first }, { it.second })
-        .map { (label, group) ->
+    val located = items.mapNotNull { item ->
+        val label = item.locationLabel?.trim().orEmpty()
+        val components = PlaceComponents.forItem(item)
+            ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
+        when {
+            components != null -> {
+                val matchKey = PlaceMatchKey.forComponents(components, item.locationLabel)
+                Triple(components, matchKey, item)
+            }
+            label.isNotEmpty() -> Triple(null, PlaceMatchKey.legacyLabel(label), item)
+            else -> null
+        }
+    }
+    return located
+        .groupBy({ it.second.encode() }, { it.third })
+        .map { (encodedKey, group) ->
+            val sampleComponents = PlaceComponents.forItem(group.first())
+                ?: group.first().locationLabel?.let { PlaceComponents.fromGeocoderLabel(it) }
+            val title = sampleComponents?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
+                ?: group.first().locationLabel.orEmpty()
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
             MediaAlbum(
-                bucketId = "place:$label",
-                title = label,
+                bucketId = "place:$encodedKey",
+                title = title,
                 itemCount = group.size,
                 coverUri = group.maxByOrNull { it.sortTimestamp }?.localUri
                     ?: group.firstNotNullOfOrNull { it.cachedOriginal?.let(android.net.Uri::fromFile) },
                 sortTimestamp = latest,
             )
         }
+}
+
+private fun sortPlaceAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
+    fun hierarchyKey(album: MediaAlbum): List<String> {
+        val raw = album.bucketId.removePrefix("place:")
+        val match = PlaceMatchKey.decode(raw)
+        if (match != null && match.level != PlaceLevel.LEGACY_LABEL) {
+            return when (match.level) {
+                PlaceLevel.COUNTRY -> listOf(match.parts.getOrElse(0) { "" }, "", "", "")
+                PlaceLevel.ADMIN_AREA -> listOf(
+                    match.parts.getOrElse(0) { "" },
+                    match.parts.getOrElse(1) { "" },
+                    "",
+                    "",
+                )
+                PlaceLevel.LOCALITY -> listOf(
+                    match.parts.getOrElse(0) { "" },
+                    match.parts.getOrElse(1) { "" },
+                    match.parts.getOrElse(2) { "" },
+                    "",
+                )
+                PlaceLevel.SUB_LOCALITY -> listOf(
+                    match.parts.getOrElse(0) { "" },
+                    match.parts.getOrElse(1) { "" },
+                    match.parts.getOrElse(2) { "" },
+                    match.parts.getOrElse(3) { "" },
+                )
+                PlaceLevel.LEGACY_LABEL -> listOf(match.parts.firstOrNull().orEmpty().lowercase())
+            }.map { it.lowercase() }
+        }
+        return listOf(album.title.lowercase())
+    }
+    val byHierarchy = compareBy<MediaAlbum>(
+        { hierarchyKey(it).getOrElse(0) { "" } },
+        { hierarchyKey(it).getOrElse(1) { "" } },
+        { hierarchyKey(it).getOrElse(2) { "" } },
+        { hierarchyKey(it).getOrElse(3) { "" } },
+    )
+    return when (sort) {
+        AlbumListSort.NAME_A_Z -> albums.sortedWith(byHierarchy)
+        AlbumListSort.NAME_Z_A -> albums.sortedWith(byHierarchy.reversed())
+        AlbumListSort.DATE_NEWEST -> albums.sortedByDescending { it.sortTimestamp }
+    }
 }
 
 class GalleryViewModelFactory(
