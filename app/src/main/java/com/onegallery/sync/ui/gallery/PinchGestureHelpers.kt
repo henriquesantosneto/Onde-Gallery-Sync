@@ -8,8 +8,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * Na fase Initial, detecta dois ou mais dedos, notifica o caller e consome o evento para que
- * pager, LazyGrid e clickables não tratem como swipe ou toque.
+ * Detecta dois ou mais dedos cedo (Initial) para bloquear pager/scroll/cliques via estado,
+ * **sem** consumir o evento — assim [detectTransformGestures] ainda recebe a pinça.
  */
 fun Modifier.observeMultiTouchPinch(
     onMultiTouchActive: (Boolean) -> Unit,
@@ -19,9 +19,6 @@ fun Modifier.observeMultiTouchPinch(
             val event = awaitPointerEvent(PointerEventPass.Initial)
             val active = event.changes.count { it.pressed } >= 2
             onMultiTouchActive(active)
-            if (active) {
-                event.changes.forEach { change -> change.consume() }
-            }
         }
     }
 }
@@ -35,11 +32,7 @@ fun Modifier.gridPinchZoomDetector(
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
-                    val active = event.changes.count { it.pressed } >= 2
-                    onMultiTouchActive(active)
-                    if (active) {
-                        event.changes.forEach { change -> change.consume() }
-                    }
+                    onMultiTouchActive(event.changes.count { it.pressed } >= 2)
                 }
             }
         }
