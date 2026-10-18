@@ -215,7 +215,7 @@ fun MediaDetailScreen(
                     )
                 }
                 Text(
-                    "Pinça ou duplo toque para zoom · vídeo: use os controles do player para play",
+                    "Dois dedos: pinça para ampliar ou reduzir · arraste quando ampliado",
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier
@@ -311,18 +311,12 @@ private fun MediaDetailPage(
                     val playback = display.playbackUri()
                     when {
                         display.kind == MediaKind.VIDEO && playback != null -> {
-                            ZoomableMediaContainer(
-                                resetKey = playback,
+                            VideoPlayerView(
+                                uri = playback,
                                 modifier = mediaModifier,
-                                interceptSingleTap = false,
+                                playWhenReady = true,
                                 onZoomActiveChanged = onZoomActiveChanged,
-                            ) {
-                                VideoPlayerView(
-                                    uri = playback,
-                                    modifier = Modifier.fillMaxSize(),
-                                    playWhenReady = true,
-                                )
-                            }
+                            )
                         }
                         display.kind == MediaKind.VIDEO -> {
                             ZoomableMediaContainer(

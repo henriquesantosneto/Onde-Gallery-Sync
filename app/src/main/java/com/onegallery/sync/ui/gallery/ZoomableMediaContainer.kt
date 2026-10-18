@@ -10,10 +10,18 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.abs
+
+private const val MIN_SCALE = 1f
+private const val MAX_SCALE = 5f
+private const val ZOOM_ACTIVE_THRESHOLD = 1.02f
 
 @Composable
 fun ZoomableMediaContainer(
@@ -26,23 +34,27 @@ fun ZoomableMediaContainer(
 ) {
     var scale by remember(resetKey) { mutableFloatStateOf(1f) }
     var offset by remember(resetKey) { mutableStateOf(Offset.Zero) }
+    var containerSize by remember(resetKey) { mutableStateOf(IntSize.Zero) }
 
     fun notifyZoom() {
-        onZoomActiveChanged(scale > 1.05f)
+        onZoomActiveChanged(scale > ZOOM_ACTIVE_THRESHOLD)
     }
 
-    fun toggleDoubleTapZoom() {
-        if (scale > 1.05f) {
-            scale = 1f
-            offset = Offset.Zero
-        } else {
-            scale = 2.5f
-            offset = Offset.Zero
-        }
-        notifyZoom()
+    fun clampOffset(raw: Offset, currentScale: Float): Offset {
+        if (currentScale <= MIN_SCALE || containerSize == IntSize.Zero) return Offset.Zero
+        val maxX = containerSize.width * (currentScale - 1f) / 2f
+        val maxY = containerSize.height * (currentScale - 1f) / 2f
+        return Offset(
+            x = raw.x.coerceIn(-maxX, maxX),
+            y = raw.y.coerceIn(-maxY, maxY),
+        )
     }
 
-    Box(modifier = modifier) {
+    Box(
+        modifier = modifier
+            .onSizeChanged { containerSize = it },
+        contentAlignment = Alignment.Center,
+    ) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -51,33 +63,36 @@ fun ZoomableMediaContainer(
                     scaleY = scale
                     translationX = offset.x
                     translationY = offset.y
+                }
+                .pointerInput(resetKey) {
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        val previousScale = scale
+                        val newScale = (previousScale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+                        val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
+                        offset = clampOffset(
+                            (offset + centroid) * scaleFactor - centroid + pan,
+                            newScale,
+                        )
+                        scale = newScale
+                        if (scale <= MIN_SCALE + 0.001f) {
+                            scale = MIN_SCALE
+                            offset = Offset.Zero
+                        }
+                        notifyZoom()
+                    }
+                }
+                .pointerInput(resetKey, interceptSingleTap, scale) {
+                    if (!interceptSingleTap) return@pointerInput
+                    detectTapGestures(
+                        onTap = {
+                            if (abs(scale - MIN_SCALE) < 0.05f) {
+                                onSingleTap()
+                            }
+                        },
+                    )
                 },
         ) {
             content()
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(resetKey, scale) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                        scale = newScale
-                        offset = if (newScale > 1f) offset + pan else Offset.Zero
-                        notifyZoom()
-                    }
-                }
-                .pointerInput(resetKey, interceptSingleTap) {
-                    if (interceptSingleTap) {
-                        detectTapGestures(
-                            onDoubleTap = { toggleDoubleTapZoom() },
-                            onTap = { onSingleTap() },
-                        )
-                    } else {
-                        detectTapGestures(
-                            onDoubleTap = { toggleDoubleTapZoom() },
-                        )
-                    }
-                },
-        )
     }
 }
