@@ -1,10 +1,12 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,6 +18,8 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,16 +36,17 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
@@ -57,9 +62,13 @@ fun MediaDetailScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val items = state.items
+    val liveItems = state.items
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
+    var immersive by remember { mutableStateOf(false) }
+    var pagerScrollEnabled by remember { mutableStateOf(true) }
+
+    ImmersiveSystemBarsEffect(immersive)
 
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
@@ -68,103 +77,154 @@ fun MediaDetailScreen(
         }
     }
 
-    if (items.isEmpty()) {
+    if (liveItems.isEmpty()) {
         LaunchedEffect(Unit) { onBack() }
         return
     }
 
-    val initialIndex = items.indexOfFirst { it.canonicalPath == initialCanonicalPath }
-        .let { if (it < 0) 0 else it }
-    val pagerState = rememberPagerState(initialPage = initialIndex) { items.size }
-
-    LaunchedEffect(initialCanonicalPath, items) {
-        val idx = items.indexOfFirst { it.canonicalPath == initialCanonicalPath }
-        if (idx >= 0 && idx != pagerState.currentPage) {
-            pagerState.scrollToPage(idx)
+    val frozenPaths = remember { mutableStateListOf<String>() }
+    LaunchedEffect(liveItems) {
+        val paths = liveItems.map { it.canonicalPath }
+        if (frozenPaths.isEmpty()) {
+            frozenPaths.addAll(paths)
+            return@LaunchedEffect
+        }
+        val known = frozenPaths.toSet()
+        val liveSet = paths.toSet()
+        frozenPaths.removeAll { it !in liveSet }
+        paths.forEach { path ->
+            if (path !in known) {
+                frozenPaths.add(path)
+            }
         }
     }
 
-    val currentItem = items.getOrNull(pagerState.currentPage)
-    val currentPath = currentItem?.canonicalPath
+    val pagerPaths = if (frozenPaths.isNotEmpty()) frozenPaths.toList() else liveItems.map { it.canonicalPath }
+    val initialPage = pagerPaths.indexOf(initialCanonicalPath).coerceAtLeast(0)
+    val pagerState = rememberPagerState(
+        initialPage = initialPage.coerceIn(0, (pagerPaths.size - 1).coerceAtLeast(0)),
+    ) { pagerPaths.size.coerceAtLeast(1) }
+
+    val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
+    val currentItem = currentPath?.let { path -> liveItems.find { it.canonicalPath == path } }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
 
+    val chromeVisible = !immersive
+
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            when {
-                                state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
-                                currentItem?.kind == MediaKind.VIDEO -> currentItem.displayName
-                                else -> currentItem?.displayName ?: "Foto"
-                            },
-                            maxLines = 1,
-                        )
-                        if (!state.selectionMode) {
+            if (chromeVisible) {
+                TopAppBar(
+                    title = {
+                        Column {
                             Text(
-                                "${pagerState.currentPage + 1} / ${items.size} · deslize para navegar",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                when {
+                                    state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+                                    else -> currentItem?.displayName ?: "Mídia"
+                                },
+                                maxLines = 1,
                             )
-                        } else {
-                            Text(
-                                "Deslize e toque ○ para incluir mais fotos",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            if (!state.selectionMode) {
+                                Text(
+                                    "${pagerState.currentPage + 1} / ${pagerPaths.size} · deslize para navegar",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
-                    }
-                },
-                actions = {
-                    if (state.selectionMode) {
-                        IconButton(onClick = { showMoveDialog = true }) {
-                            Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
                         }
-                        IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
-                            Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
+                    },
+                    actions = {
+                        if (!state.selectionMode && currentItem != null) {
+                            IconButton(onClick = { immersive = true }) {
+                                Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
+                            }
                         }
-                        IconButton(onClick = { viewModel.deleteSelected() }) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
+                        if (state.selectionMode) {
+                            IconButton(onClick = { showMoveDialog = true }) {
+                                Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
+                            }
+                            IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
+                                Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
+                            }
+                            IconButton(onClick = { viewModel.deleteSelected() }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
+                            }
+                            TextButton(onClick = { viewModel.clearSelection() }) {
+                                Text("Cancelar")
+                            }
+                        } else if (currentPath != null) {
+                            IconButton(onClick = { viewModel.toggleSelection(currentPath) }) {
+                                Icon(
+                                    if (currentSelected) Icons.Outlined.CheckCircle
+                                    else Icons.Outlined.RadioButtonUnchecked,
+                                    contentDescription = "Selecionar",
+                                )
+                            }
                         }
-                        TextButton(onClick = { viewModel.clearSelection() }) {
-                            Text("Cancelar")
-                        }
-                    } else if (currentPath != null) {
-                        IconButton(
-                            onClick = { viewModel.toggleSelection(currentPath) },
-                        ) {
-                            Icon(
-                                if (currentSelected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                                contentDescription = "Selecionar",
-                            )
-                        }
-                    }
-                },
-            )
+                    },
+                )
+            }
         },
     ) { padding ->
-        HorizontalPager(
-            state = pagerState,
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            key = { page -> items[page].canonicalPath },
-        ) { page ->
-            MediaDetailPage(
-                canonicalPath = items[page].canonicalPath,
-                syncCoordinator = syncCoordinator,
-                mediaCacheRepository = mediaCacheRepository,
-                viewModel = viewModel,
-                onRemoved = onBack,
+                .padding(if (chromeVisible) padding else PaddingValues()),
+        ) {
+            HorizontalPager(
+                state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-            )
+                userScrollEnabled = pagerScrollEnabled,
+                key = { page -> pagerPaths[page] },
+            ) { page ->
+                val path = pagerPaths[page]
+                val live = liveItems.find { it.canonicalPath == path }
+                MediaDetailPage(
+                    canonicalPath = path,
+                    liveItem = live,
+                    syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    viewModel = viewModel,
+                    onRemoved = onBack,
+                    immersive = immersive,
+                    showChrome = chromeVisible,
+                    onToggleImmersive = { immersive = !immersive },
+                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            if (immersive) {
+                IconButton(
+                    onClick = { immersive = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                ) {
+                    Icon(
+                        Icons.Outlined.FullscreenExit,
+                        contentDescription = "Sair da tela cheia",
+                        tint = Color.White,
+                    )
+                }
+                Text(
+                    "Toque na mídia · pinça para zoom · duplo toque amplia",
+                    color = Color.White.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 16.dp)
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
     }
 
@@ -184,16 +244,20 @@ fun MediaDetailScreen(
             },
         )
     }
-
 }
 
 @Composable
 private fun MediaDetailPage(
     canonicalPath: String,
+    liveItem: GalleryDisplayItem?,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     viewModel: GalleryViewModel,
     onRemoved: () -> Unit,
+    immersive: Boolean,
+    showChrome: Boolean,
+    onToggleImmersive: () -> Unit,
+    onZoomActiveChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -202,7 +266,7 @@ private fun MediaDetailPage(
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(canonicalPath) {
-        loading = true
+        if (item == null) loading = true
         error = null
         var display = syncCoordinator.getMetadata(canonicalPath)?.let {
             GalleryMapper.toDisplayItem(it, mediaCacheRepository)
@@ -215,43 +279,46 @@ private fun MediaDetailPage(
                         display = display?.copy(cachedOriginal = file)
                         syncCoordinator.ensureThumbnailCached(canonicalPath)
                     }
-                    .onFailure { error = it.message }
+                    .onFailure { err -> error = err.message }
             }
         }
         item = display
         loading = false
     }
 
-    Box(modifier = modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+    val display = item
+    val cloudLabel = liveItem?.cloudState?.name ?: display?.cloudState?.name
+
+    Box(
+        modifier = modifier
+            .padding(if (immersive) PaddingValues() else PaddingValues(horizontal = 8.dp, vertical = 4.dp)),
+    ) {
         when {
-            loading -> {
+            loading && display == null -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            item == null -> {
+            display == null -> {
                 Text("Item não encontrado.", modifier = Modifier.align(Alignment.Center))
             }
             else -> {
-                val display = item!!
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    val mediaModifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                     val playback = display.playbackUri()
                     when {
                         display.kind == MediaKind.VIDEO && playback != null -> {
                             VideoPlayerView(
                                 uri = playback,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
+                                modifier = mediaModifier,
+                                playWhenReady = true,
                             )
                         }
                         display.kind == MediaKind.VIDEO -> {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                            ) {
+                            Box(modifier = mediaModifier) {
                                 MediaThumbnailImage(
                                     item = display,
                                     syncCoordinator = syncCoordinator,
@@ -262,52 +329,53 @@ private fun MediaDetailPage(
                             }
                         }
                         display.detailPreviewModel() != null -> {
-                            AsyncImage(
+                            ZoomableImageContent(
                                 model = display.detailPreviewModel(),
                                 contentDescription = display.displayName,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
+                                modifier = mediaModifier,
                                 contentScale = ContentScale.Fit,
+                                onZoomActiveChanged = onZoomActiveChanged,
+                                onSingleTap = onToggleImmersive,
                             )
                         }
                         else -> {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
+                                modifier = mediaModifier,
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text("Original na nuvem — use o botão abaixo para baixar.")
                             }
                         }
                     }
-                    Text(
-                        display.cloudState.name,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
-                    if (error != null) {
-                        Text(error ?: "", color = MaterialTheme.colorScheme.error)
+
+                    if (showChrome) {
+                        Text(
+                            cloudLabel ?: "",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(vertical = 6.dp),
+                        )
+                        if (error != null) {
+                            Text(error ?: "", color = MaterialTheme.colorScheme.error)
+                        }
+                        if (display.localUri == null && display.cachedOriginal == null) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        syncCoordinator.downloadOriginalOnDemand(canonicalPath)
+                                            .onSuccess { file ->
+                                                item = display.copy(cachedOriginal = file)
+                                                syncCoordinator.ensureThumbnailCached(canonicalPath)
+                                            }
+                                            .onFailure { err -> error = err.message }
+                                    }
+                                },
+                            ) { Text("Baixar original") }
+                        }
+                        RowWithActions(
+                            onDeleteAll = { viewModel.deleteSingle(canonicalPath, onRemoved) },
+                            onFreeSpace = { viewModel.releaseSingle(canonicalPath) },
+                        )
                     }
-                    if (display.localUri == null && display.cachedOriginal == null) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    syncCoordinator.downloadOriginalOnDemand(canonicalPath)
-                                        .onSuccess { file ->
-                                            item = display.copy(cachedOriginal = file)
-                                            syncCoordinator.ensureThumbnailCached(canonicalPath)
-                                        }
-                                        .onFailure { err -> error = err.message }
-                                }
-                            },
-                        ) { Text("Baixar original") }
-                    }
-                    RowWithActions(
-                        onDeleteAll = { viewModel.deleteSingle(canonicalPath, onRemoved) },
-                        onFreeSpace = { viewModel.releaseSingle(canonicalPath) },
-                    )
                 }
             }
         }
@@ -316,7 +384,7 @@ private fun MediaDetailPage(
 
 @Composable
 private fun RowWithActions(onDeleteAll: () -> Unit, onFreeSpace: () -> Unit) {
-    androidx.compose.foundation.layout.Row(
+    Row(
         modifier = Modifier.padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
