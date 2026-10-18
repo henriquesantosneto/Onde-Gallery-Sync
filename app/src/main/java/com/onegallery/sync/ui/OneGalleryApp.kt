@@ -48,6 +48,7 @@ import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
 import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
+import com.onegallery.sync.ui.onedrive.OneDriveSafBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
 import com.onegallery.sync.ui.welcome.WelcomeScreen
@@ -80,6 +81,7 @@ fun OneGalleryApp(
     var setupDone by remember { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var showOptionalMicrosoftLogin by remember { mutableStateOf(false) }
     var cloudSetupStep by remember { mutableStateOf(CloudSetupStep.Hidden) }
+    var showSafOneDriveBrowser by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val authState by authManager.state.collectAsStateWithLifecycle()
@@ -129,6 +131,19 @@ fun OneGalleryApp(
         }
     }
 
+    if (showSafOneDriveBrowser) {
+        OneDriveSafBrowserScreen(
+            onFolderConfirmed = { uri ->
+                syncCoordinator.connectOneDriveFolder(uri)
+                showSafOneDriveBrowser = false
+                setupDone = true
+                scope.launch { syncCoordinator.runBidirectionalSync() }
+            },
+            onBack = { showSafOneDriveBrowser = false },
+        )
+        return
+    }
+
     if (cloudSetupStep == CloudSetupStep.Browse) {
         OneDriveCloudBrowserScreen(
             oneDriveRepository = oneDriveRepository,
@@ -169,6 +184,7 @@ fun OneGalleryApp(
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
             onFinished = { setupDone = true },
+            onBrowseOneDriveLikeFileManager = { showSafOneDriveBrowser = true },
         )
         return
     }
@@ -276,6 +292,7 @@ fun OneGalleryApp(
                     oneDriveFolderPreferences = oneDriveFolderPreferences,
                     onOpenOptionalMicrosoftLogin = { showOptionalMicrosoftLogin = true },
                     onBrowseOneDriveCloud = { openCloudFolderPicker() },
+                    onBrowseOneDriveSaf = { showSafOneDriveBrowser = true },
                 )
             }
             composable(

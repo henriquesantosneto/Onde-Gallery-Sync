@@ -31,6 +31,7 @@ import com.onegallery.sync.sync.SyncPolicy
 fun WelcomeScreen(
     syncCoordinator: SyncCoordinator,
     onFinished: () -> Unit,
+    onBrowseOneDriveLikeFileManager: () -> Unit,
 ) {
     val context = LocalContext.current
     val oneDriveInstalled = OneDrivePickerHelper.isOneDriveAppInstalled(context)
@@ -125,6 +126,18 @@ fun WelcomeScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+        )
+        OutlinedButton(
+            onClick = onBrowseOneDriveLikeFileManager,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Navegar OneDrive (estilo gerenciador de arquivos)")
+        }
+        Text(
+            "Só funciona se o OneDrive expuser pastas ao sistema; em muitos Samsung a lista vem vazia.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )
         OutlinedButton(
             onClick = { openPicturesPicker() },

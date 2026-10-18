@@ -43,6 +43,7 @@ fun SettingsScreen(
     oneDriveFolderPreferences: OneDriveFolderPreferences,
     onOpenOptionalMicrosoftLogin: () -> Unit,
     onBrowseOneDriveCloud: () -> Unit,
+    onBrowseOneDriveSaf: () -> Unit,
 ) {
     val context = LocalContext.current
     val authState by authManager.state.collectAsStateWithLifecycle()
@@ -93,11 +94,17 @@ fun SettingsScreen(
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
             }
-            Button(onClick = {
-                val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
-                folderPicker.launch(OneDrivePickerHelper.openTreeIntent(context, initial))
-            }) {
-                Text("Escolher pasta Pictures (sem OneDrive no seletor)")
+            Button(onClick = onBrowseOneDriveSaf) {
+                Text("Navegar OneDrive (estilo gerenciador)")
+            }
+            Button(
+                onClick = {
+                    val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
+                    folderPicker.launch(OneDrivePickerHelper.openTreeIntent(context, initial))
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text("Escolher pasta Pictures (seletor do sistema)")
             }
             Text(
                 OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON,

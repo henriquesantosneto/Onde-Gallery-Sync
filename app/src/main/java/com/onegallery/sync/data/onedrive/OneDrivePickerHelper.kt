@@ -22,10 +22,10 @@ object OneDrivePickerHelper {
 
     /** Por que o OneDrive não entra no seletor de pastas (OPEN_DOCUMENT_TREE). */
     const val ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON =
-        "No Android, o OneDrive quase nunca aparece ao escolher uma pasta (incluindo Samsung). " +
-            "A Microsoft não libera a nuvem nem a pasta offline privada do app para outros apps — " +
-            "só o backup de fotos a partir de pastas públicas do telefone (ex.: Pictures). " +
-            "A galeria Samsung antiga usava integração exclusiva; apps comuns não têm isso."
+        "O seletor de pastas do Android (OPEN_DOCUMENT_TREE) quase nunca lista OneDrive. " +
+            "Gerenciadores de arquivos enxergam OneDrive de outro jeito: login na nuvem (API), " +
+            "integração da Samsung, ou consulta direta ao provedor de documentos — não o mesmo diálogo. " +
+            "Sem isso, use Pictures/OneGallerySync + backup de fotos no app OneDrive."
 
     fun isOneDriveAppInstalled(context: Context): Boolean {
         return runCatching {
