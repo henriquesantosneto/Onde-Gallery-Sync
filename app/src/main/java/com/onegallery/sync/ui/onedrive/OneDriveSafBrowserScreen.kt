@@ -1,9 +1,7 @@
 package com.onegallery.sync.ui.onedrive
 
-import android.app.Activity
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,34 +47,32 @@ private data class SafCrumb(
 fun OneDriveSafBrowserScreen(
     onFolderConfirmed: (Uri) -> Unit,
     onBack: () -> Unit,
+    onOpenSystemPicker: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val crumbs = remember { mutableStateListOf<SafCrumb>() }
+    var roots by remember { mutableStateOf<List<OneDriveDocumentBrowser.BrowseEntry>>(emptyList()) }
     var folders by remember { mutableStateOf<List<OneDriveDocumentBrowser.BrowseEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val current = crumbs.lastOrNull()?.entry
+    val atRootPicker = crumbs.isEmpty()
 
-    val grantTree = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let(onFolderConfirmed)
-        }
-    }
+    val launchGrant = rememberConnectFolderLauncher(
+        syncCoordinator = null,
+        onConnected = {},
+        onUriGranted = onFolderConfirmed,
+    )
 
     LaunchedEffect(Unit) {
         loading = true
-        val roots = OneDriveDocumentBrowser.loadRoots(context)
+        error = null
+        roots = OneDriveDocumentBrowser.loadRoots(context)
         if (roots.isEmpty()) {
-            error = "OneDrive não expõe pastas para outros apps neste aparelho (0 raízes). " +
-                "Gerenciadores que mostram OneDrive costumam usar login na nuvem (API) ou integração Samsung."
-            loading = false
-            return@LaunchedEffect
+            error =
+                "OneDrive não expôs pastas ao sistema (0 raízes). Use Meus Arquivos abaixo ou login na nuvem."
         }
-        val first = roots.first()
-        crumbs.add(SafCrumb(first, first.name))
         loading = false
     }
 
@@ -92,11 +89,19 @@ fun OneDriveSafBrowserScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(crumbs.lastOrNull()?.pathLabel ?: "OneDrive") },
+                title = {
+                    Text(
+                        when {
+                            atRootPicker -> "OneDrive — escolha a origem"
+                            else -> crumbs.last().pathLabel
+                        },
+                    )
+                },
                 navigationIcon = {
                     IconButton(
                         onClick = {
                             if (crumbs.size > 1) crumbs.removeAt(crumbs.lastIndex)
+                            else if (crumbs.size == 1) crumbs.clear()
                             else onBack()
                         },
                     ) {
@@ -113,8 +118,8 @@ fun OneDriveSafBrowserScreen(
                 .padding(horizontal = 16.dp),
         ) {
             Text(
-                "Mesma técnica de gerenciadores: consulta direta ao provedor de documentos do OneDrive. " +
-                    "Ao confirmar, o Android pede permissão persistente na pasta.",
+                "Gerenciador dentro do app: navegue pelas pastas expostas pelo OneDrive/Meus Arquivos. " +
+                    "Ao confirmar, o Android pede permissão na pasta escolhida.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -126,27 +131,50 @@ fun OneDriveSafBrowserScreen(
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp))
             }
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(folders, key = { it.documentId }) { entry ->
-                    ListItem(
-                        headlineContent = { Text(entry.name) },
-                        leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
-                        modifier = Modifier.clickable {
-                            val parentPath = crumbs.last().pathLabel
-                            val newPath = if (parentPath.isEmpty()) entry.name else "$parentPath/${entry.name}"
-                            crumbs.add(SafCrumb(entry, newPath))
-                        },
-                    )
+                if (atRootPicker) {
+                    items(roots, key = { "root-${it.documentId}" }) { entry ->
+                        ListItem(
+                            headlineContent = { Text(entry.name) },
+                            leadingContent = {
+                                Icon(Icons.Outlined.Cloud, contentDescription = null)
+                            },
+                            modifier = Modifier.clickable {
+                                crumbs.add(SafCrumb(entry, entry.name))
+                            },
+                        )
+                    }
+                } else {
+                    items(folders, key = { it.documentId }) { entry ->
+                        ListItem(
+                            headlineContent = { Text(entry.name) },
+                            leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                            modifier = Modifier.clickable {
+                                val parentPath = crumbs.last().pathLabel
+                                val newPath = if (parentPath.isEmpty()) entry.name else "$parentPath/${entry.name}"
+                                crumbs.add(SafCrumb(entry, newPath))
+                            },
+                        )
+                    }
                 }
             }
             current?.let { node ->
                 Button(
                     onClick = {
-                        val intent = OneDrivePickerHelper.openFullTreeIntent(context, node.documentUri)
-                        grantTree.launch(intent)
+                        val intent = OneDrivePickerHelper.openSamsungMyFilesTreeIntent(context)
+                            ?: OneDrivePickerHelper.openFullTreeIntent(context, node.documentUri)
+                        launchGrant(intent)
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 ) {
-                    Text("Usar esta pasta para sync")
+                    Text("Sincronizar esta pasta")
+                }
+            }
+            if (onOpenSystemPicker != null) {
+                OutlinedButton(
+                    onClick = onOpenSystemPicker,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Abrir Meus Arquivos (sistema)")
                 }
             }
             OutlinedButton(

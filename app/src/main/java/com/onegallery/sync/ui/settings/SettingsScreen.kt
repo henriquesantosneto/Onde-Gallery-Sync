@@ -41,6 +41,7 @@ fun SettingsScreen(
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
     onOpenCloudFolderPicker: () -> Unit,
+    onOpenLocalSafBrowser: () -> Unit,
 ) {
     val context = LocalContext.current
     val authState by authManager.state.collectAsStateWithLifecycle()
@@ -114,6 +115,12 @@ fun SettingsScreen(
                 },
             ) {
                 Text("Usar Pictures/OneGallerySync")
+            }
+            Button(
+                onClick = onOpenLocalSafBrowser,
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text("Explorar OneDrive no app")
             }
             if (OneDrivePickerHelper.isSamsungDevice() && OneDrivePickerHelper.isSamsungMyFilesInstalled(context)) {
                 Button(

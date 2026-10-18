@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.onedrive
 
+import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,9 +12,10 @@ import com.onegallery.sync.sync.SyncCoordinator
 
 @Composable
 fun rememberConnectFolderLauncher(
-    syncCoordinator: SyncCoordinator,
+    syncCoordinator: SyncCoordinator?,
     onConnected: () -> Unit = {},
-): (android.content.Intent) -> Unit {
+    onUriGranted: ((Uri) -> Unit)? = null,
+): (Intent) -> Unit {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -24,12 +26,21 @@ fun rememberConnectFolderLauncher(
                 if (uri == null) {
                     Toast.makeText(
                         context,
-                        "Nenhuma pasta recebida. Tente “Meus Arquivos (Samsung)” de novo.",
+                        "Nenhuma pasta recebida. Tente de novo ou use Meus Arquivos (sistema).",
                         Toast.LENGTH_LONG,
                     ).show()
                     return@rememberLauncherForActivityResult
                 }
-                syncCoordinator.connectOneDriveFolder(uri)
+                if (onUriGranted != null) {
+                    onUriGranted.invoke(uri)
+                    return@rememberLauncherForActivityResult
+                }
+                val coordinator = syncCoordinator
+                    ?: run {
+                        Toast.makeText(context, "Erro interno ao conectar pasta", Toast.LENGTH_SHORT).show()
+                        return@rememberLauncherForActivityResult
+                    }
+                coordinator.connectOneDriveFolder(uri)
                     .onSuccess { onConnected() }
                     .onFailure {
                         Toast.makeText(

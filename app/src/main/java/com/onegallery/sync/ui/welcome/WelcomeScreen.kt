@@ -32,6 +32,7 @@ fun WelcomeScreen(
     syncCoordinator: SyncCoordinator,
     onFinished: () -> Unit,
     onConnectOneDriveCloud: () -> Unit,
+    onBrowseLocalOneDrive: () -> Unit,
 ) {
     val context = LocalContext.current
     val diagnostics = remember { SyncSetupDiagnosticsFactory.create(context) }
@@ -102,8 +103,15 @@ fun WelcomeScreen(
         ) {
             Text("Alternativa: Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} + backup OneDrive")
         }
+        OutlinedButton(
+            onClick = onBrowseLocalOneDrive,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) {
+            Text("Explorar OneDrive no app (gerenciador)")
+        }
         Text(
-            "Se o seletor do Samsung não mostra OneDrive, use o botão principal acima ou este modo local.",
+            "Lista pastas OneDrive/Meus Arquivos dentro do app — como antes. " +
+                "Sem login Microsoft; precisa do OneDrive instalado.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
