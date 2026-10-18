@@ -187,7 +187,13 @@ fun MediaDetailScreen(
         ) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .observeMultiTouchPinch { multiTouch ->
+                        if (multiTouch) {
+                            pagerScrollEnabled = false
+                        }
+                    },
                 userScrollEnabled = pagerScrollEnabled,
                 key = { page -> pagerPaths[page] },
             ) { page ->

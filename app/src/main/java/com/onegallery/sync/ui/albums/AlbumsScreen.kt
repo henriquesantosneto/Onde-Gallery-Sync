@@ -65,10 +65,10 @@ fun AlbumsScreen(
     onOpenMap: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val (gridZoom, pinchModifier) = rememberGalleryGridZoom(galleryPreferences.albumGridZoom) { scale ->
+    val gridPinch = rememberGalleryGridZoom(galleryPreferences.albumGridZoom) { scale ->
         galleryPreferences.albumGridZoom = scale
     }
-    val albumCellMin = gridAdaptiveMinSize(baseMinDp = 156f, zoomScale = gridZoom)
+    val albumCellMin = gridAdaptiveMinSize(baseMinDp = 156f, zoomScale = gridPinch.scale)
     val compactTiles = albumCellMin < 112.dp
     var showSortMenu by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -134,7 +134,7 @@ fun AlbumsScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .then(pinchModifier),
+                        .then(gridPinch.gridModifier),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -161,6 +161,7 @@ fun AlbumsScreen(
                                     album = entry.album,
                                     compact = compactTiles,
                                     isPlace = entry.isPlace,
+                                    gesturesEnabled = !gridPinch.blockItemGestures,
                                     onClick = {
                                         if (entry.isPlace) {
                                             viewModel.setPlaceFilter(entry.album.title)
@@ -240,12 +241,19 @@ private fun AlbumGridTile(
     album: MediaAlbum,
     compact: Boolean,
     isPlace: Boolean,
+    gesturesEnabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .then(
+                if (gesturesEnabled) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         Box(
             modifier = Modifier

@@ -25,6 +25,7 @@ fun VideoPlayerView(
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             repeatMode = Player.REPEAT_MODE_OFF
+            volume = 0f
             this.playWhenReady = playWhenReady
             prepare()
         }
@@ -33,7 +34,11 @@ fun VideoPlayerView(
         onDispose { player.release() }
     }
     AndroidView(
-        modifier = modifier,
+        modifier = modifier.observeMultiTouchPinch { active ->
+            if (active) {
+                zoomCallback.value(true)
+            }
+        },
         factory = { ctx ->
             ZoomablePlayerLayout(ctx).also { layout ->
                 layout.playerView.player = player

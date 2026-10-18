@@ -66,10 +66,10 @@ fun GalleryScreen(
     onExitAlbumFilter: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val (gridZoom, pinchModifier) = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
+    val gridPinch = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
         galleryPreferences.galleryGridZoom = scale
     }
-    val mediaCellMin = gridAdaptiveMinSize(baseMinDp = 120f, zoomScale = gridZoom)
+    val mediaCellMin = gridAdaptiveMinSize(baseMinDp = 120f, zoomScale = gridPinch.scale)
     val snackbarHostState = remember { SnackbarHostState() }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
@@ -184,7 +184,7 @@ fun GalleryScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .then(pinchModifier),
+                        .then(gridPinch.gridModifier),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -214,6 +214,7 @@ fun GalleryScreen(
                                     syncCoordinator = syncCoordinator,
                                     selectionMode = state.selectionMode,
                                     selected = selected,
+                                    gesturesEnabled = !gridPinch.blockItemGestures,
                                     onClick = {
                                         if (state.selectionMode) {
                                             viewModel.toggleSelection(item.canonicalPath)
@@ -286,13 +287,20 @@ private fun MediaThumbnail(
     syncCoordinator: SyncCoordinator,
     selectionMode: Boolean,
     selected: Boolean,
+    gesturesEnabled: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .then(
+                if (gesturesEnabled) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         MediaThumbnailImage(
             item = item,
