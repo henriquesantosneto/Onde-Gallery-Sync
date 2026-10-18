@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.local.MediaLocation
 import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.VideoThumbnailHelper
@@ -299,6 +300,7 @@ class SyncCoordinator(
             }
             ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)
+            backfillMissingGpsLocations()
             if (manageRunningState) {
                 _state.value = _state.value.copy(
                     lastIndexedLocalCount = items.size,
@@ -551,10 +553,14 @@ class SyncCoordinator(
         )
         return try {
             downloadRemoteFile(itemId, target).map {
+                val location = mediaLocationResolver.resolveFromFile(target)
                 syncMetadataDao.upsert(
                     row.copy(
                         cachedFilePath = target.absolutePath,
                         cloudState = CloudSyncState.CLOUD_ONLY,
+                        locationLabel = location?.label ?: row.locationLabel,
+                        latitude = location?.latitude ?: row.latitude,
+                        longitude = location?.longitude ?: row.longitude,
                     ),
                 )
                 target
@@ -1014,8 +1020,45 @@ class SyncCoordinator(
         ) {
             return Triple(existing.locationLabel, existing.latitude, existing.longitude)
         }
-        val resolved = mediaLocationResolver.resolveFromUri(item.uri) ?: return Triple(null, null, null)
-        return Triple(resolved.label, resolved.latitude, resolved.longitude)
+        val resolved = resolveLocationFromSources(item.uri, existing?.cachedFilePath)
+        if (resolved != null) {
+            return Triple(resolved.label, resolved.latitude, resolved.longitude)
+        }
+        return Triple(null, null, null)
+    }
+
+    private fun resolveLocationFromSources(uri: Uri?, cachedFilePath: String?): MediaLocation? {
+        uri?.let { mediaLocationResolver.resolveFromUri(it) }?.let { return it }
+        cachedFilePath?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                mediaLocationResolver.resolveFromFile(file)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private suspend fun backfillMissingGpsLocations() {
+        val rows = syncMetadataDao.getAll().filter { row ->
+            row.latitude == null && row.longitude == null &&
+                (row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null)
+        }
+        if (rows.isEmpty()) return
+        rows.forEachIndexed { index, row ->
+            if (index % 24 == 0) {
+                ensureNotCancelled()
+                coroutineContext.ensureActive()
+            }
+            val uri = localContentUri(row)
+            val resolved = resolveLocationFromSources(uri, row.cachedFilePath) ?: return@forEachIndexed
+            syncMetadataDao.upsert(
+                row.copy(
+                    locationLabel = resolved.label,
+                    latitude = resolved.latitude,
+                    longitude = resolved.longitude,
+                ),
+            )
+        }
     }
 
     private fun restoredCloudState(row: SyncMetadataEntity): CloudSyncState {
