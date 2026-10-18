@@ -58,10 +58,15 @@ import java.nio.charset.StandardCharsets
 fun GalleryScreen(
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
+    galleryPreferences: GalleryPreferences,
     onOpenItem: (String) -> Unit,
     onExitAlbumFilter: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val (gridZoom, pinchModifier) = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
+        galleryPreferences.galleryGridZoom = scale
+    }
+    val mediaCellMin = gridAdaptiveMinSize(baseMinDp = 120f, zoomScale = gridZoom)
     val snackbarHostState = remember { SnackbarHostState() }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
@@ -167,8 +172,11 @@ fun GalleryScreen(
             }
             else -> {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(120.dp),
-                    modifier = Modifier.fillMaxSize().padding(padding),
+                    columns = GridCells.Adaptive(minSize = mediaCellMin),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .then(pinchModifier),
                     contentPadding = PaddingValues(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),

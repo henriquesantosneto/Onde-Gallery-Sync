@@ -47,15 +47,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumListSort
+import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
+import com.onegallery.sync.ui.gallery.gridAdaptiveMinSize
+import com.onegallery.sync.ui.gallery.rememberGalleryGridZoom
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsScreen(
     viewModel: GalleryViewModel,
+    galleryPreferences: GalleryPreferences,
     onOpenAlbum: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val (gridZoom, pinchModifier) = rememberGalleryGridZoom(galleryPreferences.albumGridZoom) { scale ->
+        galleryPreferences.albumGridZoom = scale
+    }
+    val albumCellMin = gridAdaptiveMinSize(baseMinDp = 156f, zoomScale = gridZoom)
+    val compactTiles = albumCellMin < 112.dp
     var showSortMenu by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var newAlbumName by remember { mutableStateOf("") }
@@ -110,17 +119,19 @@ fun AlbumsScreen(
             }
             else -> {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
+                    columns = GridCells.Adaptive(minSize = albumCellMin),
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                        .padding(padding)
+                        .then(pinchModifier),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     items(state.albums, key = { it.bucketId }) { album ->
                         AlbumGridTile(
                             album = album,
+                            compact = compactTiles,
                             onClick = {
                                 viewModel.setAlbumFilter(album.title)
                                 onOpenAlbum(album.title)
@@ -174,6 +185,7 @@ fun AlbumsScreen(
 @Composable
 private fun AlbumGridTile(
     album: MediaAlbum,
+    compact: Boolean,
     onClick: () -> Unit,
 ) {
     Column(
@@ -185,7 +197,7 @@ private fun AlbumGridTile(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(if (compact) 10.dp else 16.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center,
         ) {
@@ -205,20 +217,32 @@ private fun AlbumGridTile(
                 )
             }
         }
-        Text(
-            text = album.title,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp),
-        )
-        Text(
-            text = "${album.itemCount} ${if (album.itemCount == 1) "item" else "itens"}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        if (!compact) {
+            Text(
+                text = album.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+            )
+            Text(
+                text = "${album.itemCount} ${if (album.itemCount == 1) "item" else "itens"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        } else {
+            Text(
+                text = album.title,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+            )
+        }
     }
 }

@@ -254,6 +254,7 @@ fun OneGalleryApp(
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
+                    galleryPreferences = galleryPreferences,
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
                     },
@@ -269,6 +270,7 @@ fun OneGalleryApp(
             composable(MainTab.Albums.route) {
                 AlbumsScreen(
                     viewModel = galleryViewModel,
+                    galleryPreferences = galleryPreferences,
                     onOpenAlbum = {
                         navController.navigate(MainTab.Gallery.route) {
                             popUpTo(MainTab.Gallery.route) { inclusive = true }
