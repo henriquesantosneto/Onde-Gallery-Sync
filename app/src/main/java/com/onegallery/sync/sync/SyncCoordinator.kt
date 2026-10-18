@@ -93,6 +93,7 @@ class SyncCoordinator(
 
     fun requestCancelSync() {
         syncCancelRequested.set(true)
+        syncPreferences.pauseAutoSyncAfterUserCancel()
         _state.value = _state.value.copy(lastMessage = "Cancelando…")
         val job = activeLongTaskJob.get()
         if (job != null) {
@@ -100,10 +101,24 @@ class SyncCoordinator(
         } else if (_state.value.isRunning) {
             _state.value = _state.value.copy(
                 isRunning = false,
-                lastMessage = "Operação interrompida.",
+                lastMessage = autoSyncPausedMessage("Operação interrompida."),
             )
             resetSyncCancel()
         }
+    }
+
+    fun autoSyncPausedRemainingMs(): Long = syncPreferences.autoSyncPausedRemainingMs()
+
+    private fun autoSyncPausedMessage(prefix: String): String {
+        val minutes = (syncPreferences.autoSyncPausedRemainingMs() / 60_000L).coerceAtLeast(1L)
+        return "$prefix Sync automático pausado ~${minutes} min (use Sincronizar agora quando quiser)."
+    }
+
+    private fun ensureAutoSyncAllowed(userInitiated: Boolean): Result<Unit>? {
+        if (userInitiated || !syncPreferences.isAutoSyncPaused()) return null
+        val msg = autoSyncPausedMessage("Sync automático em pausa após cancelamento.")
+        _state.value = _state.value.copy(isRunning = false, lastMessage = msg)
+        return Result.failure(IllegalStateException(msg))
     }
 
     private suspend fun bindActiveLongTaskJob() {
@@ -162,8 +177,12 @@ class SyncCoordinator(
         return syncMetadataDao.getByCanonicalPath(canonicalPath)
     }
 
-    suspend fun indexLocalLibrary(manageRunningState: Boolean = true): Result<Int> {
+    suspend fun indexLocalLibrary(
+        manageRunningState: Boolean = true,
+        userInitiated: Boolean = false,
+    ): Result<Int> {
         if (manageRunningState) {
+            ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
             return longTaskMutex.withLock {
                 foregroundGuard.runWithForeground {
                     indexLocalLibraryBody(manageRunningState)
@@ -213,7 +232,7 @@ class SyncCoordinator(
                 _state.value = _state.value.copy(
                     isRunning = false,
                     lastMessage = if (cancelled) {
-                        "Indexação cancelada."
+                        autoSyncPausedMessage("Indexação cancelada.")
                     } else {
                         error.message ?: "Falha ao indexar mídia local."
                     },
@@ -224,7 +243,8 @@ class SyncCoordinator(
         }
     }
 
-    suspend fun runBidirectionalSync(): Result<SyncSummary> {
+    suspend fun runBidirectionalSync(userInitiated: Boolean = false): Result<SyncSummary> {
+        ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
         if (!SyncCapability.bidirectionalSyncEnabled) {
             return Result.failure(UnsupportedOperationException(SyncCapability.NOT_ENABLED_MESSAGE))
         }
@@ -374,7 +394,7 @@ class SyncCoordinator(
                     _state.value = _state.value.copy(
                         isRunning = false,
                         lastMessage = when {
-                            cancelled -> "Sincronismo cancelado."
+                            cancelled -> autoSyncPausedMessage("Sincronismo cancelado.")
                             else -> error.message ?: "Erro na sincronização."
                         },
                     )

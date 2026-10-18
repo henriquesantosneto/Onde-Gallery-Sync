@@ -56,6 +56,21 @@ class SyncPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_FREE_LOCAL, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_FREE_LOCAL, value).apply()
 
+    /** Pausa sync/index automáticos após o usuário cancelar (epoch ms). */
+    var autoSyncPausedUntilMs: Long
+        get() = prefs.getLong(KEY_AUTO_SYNC_PAUSED_UNTIL, 0L)
+        private set(value) = prefs.edit().putLong(KEY_AUTO_SYNC_PAUSED_UNTIL, value).apply()
+
+    fun pauseAutoSyncAfterUserCancel(durationMs: Long = CANCEL_COOLDOWN_MS) {
+        autoSyncPausedUntilMs = System.currentTimeMillis() + durationMs
+    }
+
+    fun autoSyncPausedRemainingMs(): Long {
+        return (autoSyncPausedUntilMs - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    fun isAutoSyncPaused(): Boolean = autoSyncPausedRemainingMs() > 0
+
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_SETUP_DONE = "setup_done"
@@ -63,5 +78,9 @@ class SyncPreferences(context: Context) {
         private const val KEY_LAST_VERSION = "last_version_code"
         private const val KEY_AUTO_DELETE_REMOTE = "auto_delete_remote"
         private const val KEY_AUTO_FREE_LOCAL = "auto_free_local"
+        private const val KEY_AUTO_SYNC_PAUSED_UNTIL = "auto_sync_paused_until"
+
+        /** Tempo de respiro após cancelar antes de sync/index automáticos. */
+        const val CANCEL_COOLDOWN_MS = 10 * 60 * 1000L
     }
 }

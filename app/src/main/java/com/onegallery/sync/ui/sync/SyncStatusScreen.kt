@@ -126,7 +126,7 @@ fun SyncStatusScreen(
                             )
                         }
                         Button(
-                            onClick = { syncTasks.runBidirectionalSync() },
+                            onClick = { syncTasks.runBidirectionalSync(userInitiated = true) },
                             enabled = !coordinatorState.isRunning,
                             modifier = Modifier
                                 .fillMaxWidth()

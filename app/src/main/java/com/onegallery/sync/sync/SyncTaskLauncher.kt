@@ -9,12 +9,12 @@ class SyncTaskLauncher(
     private val scope: CoroutineScope,
     private val coordinator: SyncCoordinator,
 ) {
-    fun runBidirectionalSync() {
-        scope.launch { coordinator.runBidirectionalSync() }
+    fun runBidirectionalSync(userInitiated: Boolean = false) {
+        scope.launch { coordinator.runBidirectionalSync(userInitiated = userInitiated) }
     }
 
-    fun indexLocalLibrary() {
-        scope.launch { coordinator.indexLocalLibrary() }
+    fun indexLocalLibrary(userInitiated: Boolean = false) {
+        scope.launch { coordinator.indexLocalLibrary(userInitiated = userInitiated) }
     }
 
     fun clearStoredItemErrors(onDone: (Int) -> Unit = {}) {

@@ -142,9 +142,7 @@ class GalleryViewModel(
         viewModelScope.launch {
             loading.value = true
             errorState.value = null
-            syncCoordinator.indexLocalLibrary()
-                .onFailure { errorState.value = it.message }
-            syncCoordinator.runBidirectionalSync()
+            syncCoordinator.runBidirectionalSync(userInitiated = false)
                 .onFailure {
                     if (errorState.value == null) {
                         errorState.value = it.message
