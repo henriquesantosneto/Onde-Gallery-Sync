@@ -288,11 +288,11 @@ class MsalAuthManager(
         return silent
     }
 
-    suspend fun acquireTokenSilent(): Result<String> {
-        val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
+    suspend fun acquireTokenSilent(): Result<String> = withContext(Dispatchers.IO) {
+        val msal = client ?: return@withContext Result.failure(IllegalStateException("MSAL não inicializado"))
         val account = msal.currentAccount?.currentAccount
-            ?: return Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
-        return suspendCancellableCoroutine { cont ->
+            ?: return@withContext Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
+        suspendCancellableCoroutine { cont ->
             val params = AcquireTokenSilentParameters.Builder()
                 .withScopes(scopes.toList())
                 .forAccount(account)
