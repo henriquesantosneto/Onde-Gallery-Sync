@@ -39,6 +39,7 @@ fun SettingsScreen(
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
+    onOpenOptionalMicrosoftLogin: () -> Unit,
 ) {
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -84,11 +85,20 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
             )
-            Text("Conta Microsoft (modo avançado)", style = MaterialTheme.typography.titleMedium)
+            Text("Login Microsoft (opcional)", style = MaterialTheme.typography.titleMedium)
             Text(
-                authState.displayName ?: "—",
-                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                "Só necessário se quiser o modo API/Azure. O modo pasta acima não usa Client ID.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
+            Text(
+                authState.displayName ?: "Não conectado",
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Button(onClick = onOpenOptionalMicrosoftLogin) {
+                Text("Configurar Client ID / Azure…")
+            }
             Text("Sync apenas em Wi‑Fi", style = MaterialTheme.typography.titleMedium)
             Switch(
                 checked = wifiOnly,

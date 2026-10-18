@@ -23,7 +23,6 @@ import com.onegallery.sync.sync.SyncCoordinator
 fun WelcomeScreen(
     syncCoordinator: SyncCoordinator,
     onFinished: () -> Unit,
-    onAdvancedMicrosoftLogin: () -> Unit,
 ) {
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -43,12 +42,11 @@ fun WelcomeScreen(
     ) {
         Text("OneGallery Sync", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Versão ${BuildConfig.VERSION_NAME}",
+            "Versão ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             modifier = Modifier.padding(bottom = 16.dp),
         )
         Text(
-            "Modo simples: use o app OneDrive que você já tem no Samsung. " +
-                "Não precisa de Azure nem registrar app na Microsoft.",
+            "Sem Azure e sem Client ID. Use o OneDrive que você já tem no telefone.",
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(bottom = 24.dp),
         )
@@ -59,8 +57,8 @@ fun WelcomeScreen(
             Text("Escolher pasta no OneDrive")
         }
         Text(
-            "Instale/faça login no OneDrive antes. Depois selecione uma pasta (ex.: Fotos). " +
-                "O app cria a subpasta OneGallerySync dentro dela.",
+            "Abra o app OneDrive e faça login antes. Depois escolha uma pasta; " +
+                "criamos OneGallerySync dentro dela.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
@@ -73,12 +71,6 @@ fun WelcomeScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Só galeria local (sem nuvem)")
-        }
-        OutlinedButton(
-            onClick = onAdvancedMicrosoftLogin,
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-        ) {
-            Text("Avançado: login Microsoft / Azure")
         }
     }
 }

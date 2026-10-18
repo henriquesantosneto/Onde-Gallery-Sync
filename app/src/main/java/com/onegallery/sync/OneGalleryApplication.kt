@@ -6,6 +6,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.onegallery.sync.BuildConfig
 import com.onegallery.sync.auth.AuthPreferences
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
@@ -48,7 +49,9 @@ class OneGalleryApplication : Application() {
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
         oneDriveRepository = OneDriveRepository(authManager)
-        syncPreferences = SyncPreferences(this)
+        syncPreferences = SyncPreferences(this).also {
+            it.migrateForAppVersion(BuildConfig.VERSION_CODE)
+        }
         oneDriveFolderPreferences = OneDriveFolderPreferences(this)
         val mediaCacheRepository = MediaCacheRepository(this)
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)

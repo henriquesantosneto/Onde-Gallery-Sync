@@ -5,6 +5,17 @@ import android.content.Context
 class SyncPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("onegallery_sync", Context.MODE_PRIVATE)
 
+    fun migrateForAppVersion(currentVersionCode: Int) {
+        val last = prefs.getInt(KEY_LAST_VERSION, 0)
+        if (last < currentVersionCode) {
+            prefs.edit()
+                .putBoolean(KEY_SETUP_DONE, false)
+                .putString(KEY_SYNC_MODE, SyncMode.LOCAL_ONLY.name)
+                .putInt(KEY_LAST_VERSION, currentVersionCode)
+                .apply()
+        }
+    }
+
     var wifiOnly: Boolean
         get() = prefs.getBoolean(KEY_WIFI_ONLY, true)
         set(value) = prefs.edit().putBoolean(KEY_WIFI_ONLY, value).apply()
@@ -21,5 +32,6 @@ class SyncPreferences(context: Context) {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_SETUP_DONE = "setup_done"
         private const val KEY_SYNC_MODE = "sync_mode"
+        private const val KEY_LAST_VERSION = "last_version_code"
     }
 }

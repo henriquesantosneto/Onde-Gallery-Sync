@@ -66,9 +66,8 @@ fun OneGalleryApp(
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
 ) {
-    var showAdvancedLogin by remember { mutableStateOf(false) }
     var setupDone by remember { mutableStateOf(syncPreferences.hasCompletedSetup) }
-    var msalError by remember { mutableStateOf<String?>(null) }
+    var showOptionalMicrosoftLogin by remember { mutableStateOf(false) }
 
     val authState by authManager.state.collectAsStateWithLifecycle()
 
@@ -105,27 +104,19 @@ fun OneGalleryApp(
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
             onFinished = { setupDone = true },
-            onAdvancedMicrosoftLogin = {
-                syncCoordinator.useGraphMode()
-                setupDone = true
-                showAdvancedLogin = true
-            },
         )
         return
     }
 
-    if (showAdvancedLogin && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH && !authState.isSignedIn) {
+    if (showOptionalMicrosoftLogin) {
         SignInGate(
             authManager = authManager,
-            msalConfigurationError = msalError,
+            msalConfigurationError = null,
             onClientConfigured = {
-                msalError = null
-                showAdvancedLogin = false
+                syncCoordinator.useGraphMode()
+                showOptionalMicrosoftLogin = false
             },
-            onLocalOnly = {
-                syncCoordinator.useLocalOnlyMode()
-                showAdvancedLogin = false
-            },
+            onLocalOnly = { showOptionalMicrosoftLogin = false },
         )
         return
     }
@@ -216,6 +207,7 @@ fun OneGalleryApp(
                     syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
                     oneDriveFolderPreferences = oneDriveFolderPreferences,
+                    onOpenOptionalMicrosoftLogin = { showOptionalMicrosoftLogin = true },
                 )
             }
             composable(
