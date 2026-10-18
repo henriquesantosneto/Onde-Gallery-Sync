@@ -348,7 +348,8 @@ class GalleryViewModel(
             syncCoordinator.releaseLocalSpace(paths)
                 .onSuccess { count ->
                     actionMessage.value =
-                        "$count item(ns): cópia local removida; miniatura e OneDrive mantidos."
+                        "$count item(ns): só a cópia local foi removida; miniatura no app e " +
+                            "arquivo no OneDrive mantidos."
                     clearSelection()
                 }
                 .onFailure { actionMessage.value = it.message }

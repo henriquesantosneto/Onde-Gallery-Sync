@@ -26,4 +26,6 @@ data class SyncMetadataEntity(
     val locationLabel: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    /** Liberar espaço: cópia local removida de propósito; não espelhar como exclusão na nuvem. */
+    val localReleasedForSpace: Boolean = false,
 )

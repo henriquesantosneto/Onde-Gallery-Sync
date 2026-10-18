@@ -953,6 +953,13 @@ class SyncCoordinator(
         if (canonicalPaths.isEmpty()) return Result.success(0)
         return runCatching {
             val rows = canonicalPaths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
+            val withoutCloud = rows.filter { it.oneDriveItemId == null }
+            if (withoutCloud.isNotEmpty()) {
+                error(
+                    "Só é possível liberar espaço de itens já no OneDrive. " +
+                        "Sincronize antes ou escolha outro item.",
+                )
+            }
             val freed = releaseLocalSpaceForRows(rows, allowSystemDialog = true)
             if (rows.isNotEmpty() && freed == 0) {
                 error(
@@ -987,7 +994,10 @@ class SyncCoordinator(
         allowSystemDialog: Boolean,
     ): Int {
         if (rows.isEmpty()) return 0
-        rows.forEach { cachePlaceholderThumbnail(it) }
+        rows.forEach { row ->
+            ensureThumbnailCached(row.canonicalPath).getOrNull()
+            markLocalSpaceReleasePending(row)
+        }
 
         val pairs = rows.mapNotNull { row -> localContentUri(row)?.let { uri -> uri to row } }
         val uriToRow = pairs.associate { it.first to it.second }
@@ -1007,30 +1017,40 @@ class SyncCoordinator(
         var freed = 0
         for ((uri, row) in uriToRow) {
             if (uri !in deleted) continue
-            applyLocalReleasedPlaceholder(row)
+            finalizeLocalSpaceReleased(row)
+            freed++
+        }
+        val handled = uriToRow.values.map { it.canonicalPath }.toSet()
+        for (row in rows) {
+            if (row.canonicalPath in handled) continue
+            if (row.localContentUri != null || row.localMediaId != null) continue
+            if (row.cachedFilePath == null) continue
+            finalizeLocalSpaceReleased(row)
             freed++
         }
         return freed
     }
 
-    private suspend fun applyLocalReleasedPlaceholder(row: SyncMetadataEntity) {
+    /** Antes de apagar no MediaStore: evita que o sync interprete como exclusão na nuvem. */
+    private suspend fun markLocalSpaceReleasePending(row: SyncMetadataEntity) {
+        syncMetadataDao.upsert(row.copy(localReleasedForSpace = true))
+    }
+
+    private suspend fun finalizeLocalSpaceReleased(row: SyncMetadataEntity) {
         val path = row.canonicalPath
         mediaCacheRepository.deleteOriginalOnly(path)
-        if (row.oneDriveItemId != null) {
-            syncMetadataDao.upsert(
-                row.copy(
-                    localMediaId = null,
-                    localContentUri = null,
-                    cachedFilePath = null,
-                    pendingDeleteTarget = PendingDeleteTarget.NONE,
-                    cloudState = CloudSyncState.CLOUD_ONLY,
-                    lastError = null,
-                ),
-            )
-        } else {
-            mediaCacheRepository.deleteCached(path)
-            syncMetadataDao.deleteByCanonicalPath(path)
-        }
+        ensureThumbnailCached(path).getOrNull()
+        syncMetadataDao.upsert(
+            row.copy(
+                localMediaId = null,
+                localContentUri = null,
+                cachedFilePath = null,
+                pendingDeleteTarget = PendingDeleteTarget.NONE,
+                cloudState = CloudSyncState.CLOUD_ONLY,
+                localReleasedForSpace = true,
+                lastError = null,
+            ),
+        )
     }
 
     suspend fun deleteItemsImmediately(
@@ -1201,12 +1221,16 @@ class SyncCoordinator(
             if (index % 32 == 0) ensureNotCancelled()
             if (row.localMediaId == null) return@forEachIndexed
             if (row.canonicalPath in seenPaths) return@forEachIndexed
+            if (row.localReleasedForSpace) {
+                finalizeLocalSpaceReleased(row)
+                return@forEachIndexed
+            }
             if (row.oneDriveItemId != null && syncPreferences.autoDeleteRemoteWhenLocalRemoved) {
                 row.oneDriveItemId?.let { deleteRemoteFile(it).getOrNull() }
                 mediaCacheRepository.deleteCached(row.canonicalPath)
                 syncMetadataDao.deleteByCanonicalPath(row.canonicalPath)
             } else if (row.oneDriveItemId != null) {
-                cachePlaceholderThumbnail(row)
+                ensureThumbnailCached(row.canonicalPath).getOrNull()
                 syncMetadataDao.upsert(
                     row.copy(
                         localMediaId = null,
@@ -1214,6 +1238,7 @@ class SyncCoordinator(
                         cachedFilePath = null,
                         pendingDeleteTarget = PendingDeleteTarget.NONE,
                         cloudState = CloudSyncState.CLOUD_ONLY,
+                        localReleasedForSpace = true,
                         lastError = null,
                     ),
                 )
@@ -1237,12 +1262,23 @@ class SyncCoordinator(
     private fun cachePlaceholderThumbnail(row: SyncMetadataEntity) {
         val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath)
         if (existing != null) return
-        val uri = localContentUri(row) ?: return
         val target = mediaCacheRepository.thumbFile(row.canonicalPath)
-        if (GalleryMapper.isVideoFileName(row.displayName)) {
-            VideoThumbnailHelper.captureToFile(appContext, uri, target)
-        } else {
-            cacheImageThumbnailFromUri(uri, target)
+        localContentUri(row)?.let { uri ->
+            val ok = if (GalleryMapper.isVideoFileName(row.displayName)) {
+                VideoThumbnailHelper.captureToFile(appContext, uri, target)
+            } else {
+                cacheImageThumbnailFromUri(uri, target)
+            }
+            if (ok) return
+        }
+        row.cachedFilePath?.let { path ->
+            val cached = File(path)
+            if (!cached.exists()) return@let
+            if (GalleryMapper.isVideoFileName(row.displayName)) {
+                VideoThumbnailHelper.captureToFile(cached, target)
+            } else {
+                cacheImageThumbnailFromUri(Uri.fromFile(cached), target)
+            }
         }
     }
 
@@ -1269,6 +1305,7 @@ class SyncCoordinator(
             userAlbumName = existing?.userAlbumName,
             localMediaId = item.id,
             localContentUri = item.uri.toString(),
+            localReleasedForSpace = false,
             oneDriveItemId = existing?.oneDriveItemId,
             localModifiedAt = item.dateModifiedSeconds,
             capturedAtSeconds = capturedAt,

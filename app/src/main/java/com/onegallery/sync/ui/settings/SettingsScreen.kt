@@ -135,8 +135,8 @@ fun SettingsScreen(
                     headlineContent = { Text("Liberação automática de espaço") },
                     supportingContent = {
                         Text(
-                            "Após backup no OneDrive, remove a cópia local e mantém miniatura " +
-                                "(placeholder). Desligado: mantém o arquivo no aparelho.",
+                            "Após backup no OneDrive, remove só a cópia local e mantém miniatura " +
+                                "no app; o arquivo na nuvem não é apagado.",
                         )
                     },
                     trailingContent = {
