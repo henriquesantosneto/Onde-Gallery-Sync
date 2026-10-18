@@ -135,16 +135,9 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
         onZoomActiveChanged?.invoke(false)
     }
 
-    private fun handlingZoomGestures(event: MotionEvent): Boolean {
-        return event.pointerCount >= 2 || scale > 1.02f
-    }
-
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.pointerCount == 1 && scale <= 1.02f) {
-            parent?.requestDisallowInterceptTouchEvent(false)
-            return false
-        }
-        if (handlingZoomGestures(event)) {
+        if (event.pointerCount >= 2 || scale > 1.02f) {
+            parent?.requestDisallowInterceptTouchEvent(true)
             scaleDetector.onTouchEvent(event)
             if (scale > 1.02f && event.pointerCount == 1) {
                 panDetector.onTouchEvent(event)
@@ -157,6 +150,10 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
                 }
             }
             return true
+        }
+        if (event.pointerCount == 1 && scale <= 1.02f) {
+            // Mantém o alvo de toque (pinça funciona no 2º dedo) e deixa o pager interceptar arraste horizontal.
+            parent?.requestDisallowInterceptTouchEvent(false)
         }
         return super.dispatchTouchEvent(event)
     }
@@ -173,7 +170,8 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (handlingZoomGestures(event)) {
+        if (event.pointerCount >= 2 || scale > 1.02f) {
+            parent?.requestDisallowInterceptTouchEvent(true)
             scaleDetector.onTouchEvent(event)
             if (scale > 1.02f && event.pointerCount == 1) {
                 panDetector.onTouchEvent(event)

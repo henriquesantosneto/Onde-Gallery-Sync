@@ -87,9 +87,7 @@ fun VideoPlayerView(
             },
     ) {
         AndroidView(
-            modifier = Modifier
-                .matchParentSize()
-                .observeMultiTouchPinch { active -> zoomCallback.value(active) },
+            modifier = Modifier.matchParentSize(),
             factory = { ctx ->
                 ZoomablePlayerLayout(ctx).also { layout ->
                     layout.playerView.player = player
