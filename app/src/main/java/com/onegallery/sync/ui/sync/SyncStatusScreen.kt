@@ -44,8 +44,8 @@ fun SyncStatusScreen(syncCoordinator: SyncCoordinator) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Sincronização bidirecional", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Espelha todas as pastas de mídia (incl. WhatsApp) em OneDrive/OneGallerySync. " +
-                                "Originais na nuvem baixam sob demanda. Teste no seu Samsung após configurar o registro Microsoft.",
+                            "Espelha mídia local (incl. WhatsApp) em Pictures/OneGallerySync. " +
+                                "O app OneDrive envia essa pasta para a nuvem — não é preciso Azure nem escolher OneDrive no seletor.",
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }

@@ -8,6 +8,7 @@ import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
+import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ class SyncCoordinator(
     private val localMediaRepository: LocalMediaRepository,
     private val oneDriveRepository: OneDriveRepository,
     private val saOneDriveRepository: SaOneDriveRepository,
+    private val localMirrorRepository: LocalMirrorRepository,
     private val syncMetadataDao: SyncMetadataDao,
     private val mediaCacheRepository: MediaCacheRepository,
     private val networkMonitor: NetworkMonitor,
@@ -47,6 +49,13 @@ class SyncCoordinator(
         syncPreferences.syncMode = SyncMode.ONEDRIVE_GRAPH
         syncPreferences.hasCompletedSetup = true
     }
+
+    fun useOneDriveLocalMirrorMode() {
+        syncPreferences.syncMode = SyncMode.ONEDRIVE_LOCAL_MIRROR
+        syncPreferences.hasCompletedSetup = true
+    }
+
+    fun localMirrorPathLabel(): String = localMirrorRepository.rootPathLabel()
     private val _state = MutableStateFlow(SyncUiState())
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
 
@@ -98,10 +107,11 @@ class SyncCoordinator(
             }
             SyncMode.ONEDRIVE_FOLDER -> if (!saOneDriveRepository.isConnected()) {
                 _state.value = _state.value.copy(
-                    lastMessage = "Escolha uma pasta OneDrive em Ajustes (modo simples, sem Azure).",
+                    lastMessage = "Escolha a pasta Pictures em Ajustes (modo simples, sem Azure).",
                 )
-                return Result.failure(IllegalStateException("Pasta OneDrive não conectada"))
+                return Result.failure(IllegalStateException("Pasta de sync não conectada"))
             }
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> Unit
             SyncMode.ONEDRIVE_GRAPH -> Unit
         }
         if (!networkMonitor.isOnline()) {
@@ -406,6 +416,7 @@ class SyncCoordinator(
 
     private suspend fun listRemoteFiles(): Result<List<RemoteDriveFile>> {
         return when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.listMirrorFiles()
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.listMirrorFiles()
             SyncMode.ONEDRIVE_GRAPH -> {
                 oneDriveRepository.ensureMirrorRootFolder().getOrThrow()
@@ -421,6 +432,7 @@ class SyncCoordinator(
         mimeType: String?,
     ): Result<String> {
         return when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
             SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
                 .map { it.id }
@@ -430,6 +442,7 @@ class SyncCoordinator(
 
     private suspend fun downloadRemoteFile(remoteId: String, target: File): Result<Unit> {
         return when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.downloadToFile(remoteId, target)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.downloadToFile(remoteId, target)
             SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.downloadToFile(remoteId, target)
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
@@ -438,6 +451,7 @@ class SyncCoordinator(
 
     private suspend fun deleteRemoteFile(remoteId: String): Result<Unit> {
         return when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.deleteRemote(remoteId)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.deleteRemote(remoteId)
             SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.deleteRemoteItem(remoteId)
             SyncMode.LOCAL_ONLY -> Result.success(Unit)

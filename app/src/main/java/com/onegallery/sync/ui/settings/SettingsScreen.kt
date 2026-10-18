@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
+import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPolicy
@@ -45,11 +46,14 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri: Uri? ->
-        if (uri != null) {
-            syncCoordinator.connectOneDriveFolder(uri)
-            scope.launch { syncCoordinator.runBidirectionalSync() }
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val uri = result.data?.data
+            if (uri != null) {
+                syncCoordinator.connectOneDriveFolder(uri)
+                scope.launch { syncCoordinator.runBidirectionalSync() }
+            }
         }
     }
 
@@ -65,7 +69,8 @@ fun SettingsScreen(
             Text("Modo de sync", style = MaterialTheme.typography.titleMedium)
             Text(
                 when (syncPreferences.syncMode) {
-                    SyncMode.ONEDRIVE_FOLDER -> "OneDrive por pasta (simples, sem Azure)"
+                    SyncMode.ONEDRIVE_LOCAL_MIRROR -> "Pictures/OneGallerySync + backup OneDrive"
+                    SyncMode.ONEDRIVE_FOLDER -> "Pasta escolhida (SAF / Pictures)"
                     SyncMode.ONEDRIVE_GRAPH -> "API Microsoft (Azure)"
                     SyncMode.LOCAL_ONLY -> "Só galeria local"
                 },
@@ -76,11 +81,29 @@ fun SettingsScreen(
                 oneDriveFolderPreferences.displayName ?: "Não conectada",
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
-            Button(onClick = { folderPicker.launch(null) }) {
-                Text("Escolher / trocar pasta OneDrive")
+            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_LOCAL_MIRROR) {
+                Text(
+                    syncCoordinator.localMirrorPathLabel(),
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+            Button(onClick = {
+                val intent = OneDrivePickerHelper.openTreeIntent(OneDrivePickerHelper.picturesFolderUri())
+                folderPicker.launch(intent)
+            }) {
+                Text("Escolher pasta Pictures")
+            }
+            Button(
+                onClick = {
+                    syncCoordinator.useOneDriveLocalMirrorMode()
+                    scope.launch { syncCoordinator.runBidirectionalSync() }
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text("Modo automático Pictures/OneGallerySync")
             }
             Text(
-                "Use o app OneDrive já logado. Subpasta: ${SyncPolicy.ONEDRIVE_MIRROR_ROOT}/",
+                "No seletor use Armazenamento interno → Pictures. O app OneDrive faz o upload. Subpasta: ${SyncPolicy.ONEDRIVE_MIRROR_ROOT}/",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),

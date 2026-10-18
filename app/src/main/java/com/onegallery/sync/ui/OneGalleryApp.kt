@@ -93,6 +93,7 @@ fun OneGalleryApp(
             SyncMode.ONEDRIVE_FOLDER -> if (oneDriveFolderPreferences.treeUri != null) {
                 syncCoordinator.runBidirectionalSync()
             }
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> syncCoordinator.runBidirectionalSync()
             SyncMode.ONEDRIVE_GRAPH -> if (authState.isSignedIn) {
                 syncCoordinator.runBidirectionalSync()
             }

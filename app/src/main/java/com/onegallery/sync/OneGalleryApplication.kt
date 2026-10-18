@@ -14,6 +14,7 @@ import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
+import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
@@ -55,10 +56,12 @@ class OneGalleryApplication : Application() {
         oneDriveFolderPreferences = OneDriveFolderPreferences(this)
         val mediaCacheRepository = MediaCacheRepository(this)
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
+        val localMirrorRepository = LocalMirrorRepository(this)
         syncCoordinator = SyncCoordinator(
             localMediaRepository = localMediaRepository,
             oneDriveRepository = oneDriveRepository,
             saOneDriveRepository = saOneDriveRepository,
+            localMirrorRepository = localMirrorRepository,
             syncMetadataDao = database.syncMetadataDao(),
             mediaCacheRepository = mediaCacheRepository,
             networkMonitor = NetworkMonitor(this),
