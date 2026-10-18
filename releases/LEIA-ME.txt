@@ -1,0 +1,17 @@
+OneGallery Sync — APK de debug
+================================
+
+Arquivo: OneGallerySync-debug.apk (~24 MB)
+
+Clone só desta branch:
+
+  git clone --branch cursor/apk-download-0dd7 --single-branch \
+    https://origin.cursor.com/henriquekako/tmp-a53cc6c3697b04a5.git onegallery-apk
+
+  cd onegallery-apk/releases
+  # instale OneGallerySync-debug.apk no Samsung
+
+Hash MSAL (deste build debug):
+  pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
+
+Pacote Android: com.onegallery.sync
