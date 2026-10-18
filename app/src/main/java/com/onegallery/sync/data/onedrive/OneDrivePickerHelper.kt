@@ -2,10 +2,12 @@ package com.onegallery.sync.data.onedrive
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 
@@ -18,11 +20,26 @@ object OneDrivePickerHelper {
         val initialDocumentUri: Uri,
     )
 
+    /** Por que o OneDrive não entra no seletor de pastas (OPEN_DOCUMENT_TREE). */
+    const val ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON =
+        "No Android, o OneDrive quase nunca aparece ao escolher uma pasta (incluindo Samsung). " +
+            "A Microsoft não libera a nuvem nem a pasta offline privada do app para outros apps — " +
+            "só o backup de fotos a partir de pastas públicas do telefone (ex.: Pictures). " +
+            "A galeria Samsung antiga usava integração exclusiva; apps comuns não têm isso."
+
     fun isOneDriveAppInstalled(context: Context): Boolean {
         return runCatching {
             context.packageManager.getPackageInfo(ONEDRIVE_PACKAGE, 0)
             true
         }.getOrDefault(false)
+    }
+
+    fun isDocumentTreePickerAvailable(context: Context): Boolean {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        return context.packageManager.queryIntentActivities(
+            intent,
+            PackageManager.MATCH_DEFAULT_ONLY,
+        ).isNotEmpty()
     }
 
     fun openOneDriveApp(context: Context): Boolean {
@@ -32,20 +49,31 @@ object OneDrivePickerHelper {
         return true
     }
 
-    /** Raízes expostas pelo app OneDrive no celular (pasta local / cache sincronizado), se existirem. */
     fun listOneDriveStorageRoots(context: Context): List<StorageRoot> {
         if (!isOneDriveAppInstalled(context)) return emptyList()
-        val rootsUri = DocumentsContract.buildRootsUri(ONEDRIVE_DOCS_AUTHORITY)
         val out = mutableListOf<StorageRoot>()
-        runCatching {
-            context.contentResolver.query(rootsUri, null, null, null, null)?.use { cursor ->
-                appendRootsFromCursor(cursor, out)
+        discoverAuthorities(context).forEach { authority ->
+            runCatching {
+                val rootsUri = DocumentsContract.buildRootsUri(authority)
+                context.contentResolver.query(rootsUri, null, null, null, null)?.use { cursor ->
+                    appendRootsFromCursor(cursor, authority, out)
+                }
             }
         }
-        return out
+        return out.distinctBy { it.initialDocumentUri.toString() }
     }
 
-    private fun appendRootsFromCursor(cursor: Cursor, out: MutableList<StorageRoot>) {
+    private fun discoverAuthorities(context: Context): List<String> {
+        val fromPackage = runCatching {
+            val intent = Intent(DocumentsContract.PROVIDER_INTERFACE)
+            context.packageManager.queryIntentContentProviders(intent, PackageManager.GET_META_DATA)
+                .filter { it.providerInfo.packageName == ONEDRIVE_PACKAGE }
+                .map { it.providerInfo.authority }
+        }.getOrDefault(emptyList())
+        return (fromPackage + ONEDRIVE_DOCS_AUTHORITY).distinct()
+    }
+
+    private fun appendRootsFromCursor(cursor: Cursor, authority: String, out: MutableList<StorageRoot>) {
         val idCol = cursor.getColumnIndex(DocumentsContract.Root.COLUMN_ROOT_ID)
         val titleCol = cursor.getColumnIndex(DocumentsContract.Root.COLUMN_TITLE)
         val docCol = cursor.getColumnIndex(DocumentsContract.Root.COLUMN_DOCUMENT_ID)
@@ -57,7 +85,7 @@ object OneDrivePickerHelper {
             out.add(
                 StorageRoot(
                     title = title ?: "OneDrive",
-                    initialDocumentUri = DocumentsContract.buildDocumentUri(ONEDRIVE_DOCS_AUTHORITY, docKey),
+                    initialDocumentUri = DocumentsContract.buildDocumentUri(authority, docKey),
                 ),
             )
         }
@@ -70,22 +98,40 @@ object OneDrivePickerHelper {
         )
     }
 
-    /** Melhor ponto de partida: pasta do provedor OneDrive no aparelho, senão Pictures. */
     fun preferredLocalSyncPickerInitialUri(context: Context): Uri {
         return listOneDriveStorageRoots(context).firstOrNull()?.initialDocumentUri
             ?: picturesFolderUri()
     }
 
-    fun openTreeIntent(initialUri: Uri? = null): Intent {
+    /** Intent do seletor de pastas; no Samsung usa o volume primário quando possível. */
+    fun openTreeIntent(context: Context, initialUri: Uri? = null): Intent {
+        val base = createDocumentTreeIntent(context)
+        if (initialUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            base.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+        }
+        return base
+    }
+
+    private fun createDocumentTreeIntent(context: Context): Intent {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                val sm = context.getSystemService(StorageManager::class.java)
+                val volume = sm.primaryStorageVolume
+                val volumeIntent = volume.createOpenDocumentTreeIntent()
+                volumeIntent.addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                )
+                return volumeIntent
+            }
+        }
         return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
             )
-            if (initialUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
-            }
         }
     }
 

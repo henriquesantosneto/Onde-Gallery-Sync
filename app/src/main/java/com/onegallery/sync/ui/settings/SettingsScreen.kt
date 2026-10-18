@@ -95,10 +95,16 @@ fun SettingsScreen(
             }
             Button(onClick = {
                 val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
-                folderPicker.launch(OneDrivePickerHelper.openTreeIntent(initial))
+                folderPicker.launch(OneDrivePickerHelper.openTreeIntent(context, initial))
             }) {
-                Text("Escolher pasta local (OneDrive / Pictures)")
+                Text("Escolher pasta Pictures (sem OneDrive no seletor)")
             }
+            Text(
+                OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
             Button(
                 onClick = {
                     syncCoordinator.useOneDriveLocalMirrorMode()
