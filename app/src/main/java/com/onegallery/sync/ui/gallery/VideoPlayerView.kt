@@ -2,12 +2,13 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.VolumeOff
-import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -19,7 +20,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -36,24 +44,48 @@ fun VideoPlayerView(
 ) {
     val context = LocalContext.current
     val zoomCallback = rememberUpdatedState(onZoomActiveChanged)
-    var muted by remember(uri) { mutableStateOf(false) }
+    var muted by remember(uri) { mutableStateOf(true) }
+    val mutedState = rememberUpdatedState(muted)
+    val focusRequester = remember(uri) { FocusRequester() }
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             repeatMode = Player.REPEAT_MODE_OFF
-            volume = 1f
+            volume = 0f
             this.playWhenReady = playWhenReady
             prepare()
         }
     }
+
+    fun unmuteIfNeeded() {
+        if (mutedState.value) {
+            muted = false
+        }
+    }
+
     DisposableEffect(muted) {
         player.volume = if (muted) 0f else 1f
         onDispose { }
     }
     DisposableEffect(uri) {
+        focusRequester.requestFocus()
         onDispose { player.release() }
     }
-    Box(modifier = modifier) {
+    Box(
+        modifier = modifier
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.VolumeUp || event.key == Key.VolumeDown)
+                ) {
+                    unmuteIfNeeded()
+                    false
+                } else {
+                    false
+                }
+            },
+    ) {
         AndroidView(
             modifier = Modifier
                 .matchParentSize()
@@ -63,15 +95,18 @@ fun VideoPlayerView(
                     layout.playerView.player = player
                     layout.playerView.useController = true
                     layout.playerView.controllerShowTimeoutMs = 5_000
-                    layout.playerView.showController()
                     layout.onZoomActiveChanged = { active -> zoomCallback.value(active) }
+                    layout.onVolumeKeyPressed = { unmuteIfNeeded() }
+                    layout.requestFocus()
                 }
             },
             update = { layout ->
                 layout.onZoomActiveChanged = { active -> zoomCallback.value(active) }
+                layout.onVolumeKeyPressed = { unmuteIfNeeded() }
                 if (layout.playerView.player != player) {
                     layout.playerView.player = player
                 }
+                layout.requestFocus()
             },
         )
         IconButton(
@@ -82,7 +117,7 @@ fun VideoPlayerView(
                 .background(Color.Black.copy(alpha = 0.45f), CircleShape),
         ) {
             Icon(
-                imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,
+                imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
                 contentDescription = if (muted) "Ativar som" else "Silenciar",
                 tint = Color.White,
             )

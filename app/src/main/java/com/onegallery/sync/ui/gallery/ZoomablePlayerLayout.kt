@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.content.Context
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.widget.FrameLayout
@@ -17,6 +18,9 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     val playerView: PlayerView = PlayerView(context)
 
     var onZoomActiveChanged: ((Boolean) -> Unit)? = null
+
+    /** Volume físico: o Compose decide se deve desmutar. */
+    var onVolumeKeyPressed: (() -> Unit)? = null
 
     private var scale = 1f
     private var panX = 0f
@@ -67,10 +71,22 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     )
 
     init {
+        isFocusable = true
+        isFocusableInTouchMode = true
         addView(
             playerView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            onVolumeKeyPressed?.invoke()
+            return false
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun applyPinch(factor: Float, focusX: Float, focusY: Float) {
