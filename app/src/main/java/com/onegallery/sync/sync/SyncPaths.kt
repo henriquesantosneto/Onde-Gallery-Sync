@@ -13,9 +13,10 @@ object SyncPaths {
         return if (rel.isEmpty()) item.displayName else "$rel/${item.displayName}"
     }
 
-    fun drivePathFromCanonical(canonicalPath: String): String {
+    fun drivePathFromCanonical(canonicalPath: String, baseFolderPath: String = SyncPolicy.ONEDRIVE_MIRROR_ROOT): String {
         val clean = canonicalPath.trim('/').replace('\\', '/')
-        return "${SyncPolicy.ONEDRIVE_MIRROR_ROOT}/$clean"
+        val base = baseFolderPath.trim('/')
+        return if (base.isEmpty()) clean else "$base/$clean"
     }
 
     fun canonicalFromDrivePath(driveItemPath: String?): String? {

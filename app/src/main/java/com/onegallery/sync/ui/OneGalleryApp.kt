@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -36,6 +37,7 @@ import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
+import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
@@ -45,17 +47,25 @@ import com.onegallery.sync.ui.gallery.GalleryScreen
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
+import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
 import com.onegallery.sync.ui.welcome.WelcomeScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.launch
 
 private enum class MainTab(val route: String) {
     Gallery("gallery"),
     Albums("albums"),
     Sync("sync"),
     Settings("settings"),
+}
+
+private enum class CloudSetupStep {
+    Hidden,
+    SignIn,
+    Browse,
 }
 
 @Composable
@@ -65,9 +75,12 @@ fun OneGalleryApp(
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
+    oneDriveRepository: OneDriveRepository,
 ) {
     var setupDone by remember { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var showOptionalMicrosoftLogin by remember { mutableStateOf(false) }
+    var cloudSetupStep by remember { mutableStateOf(CloudSetupStep.Hidden) }
+    val scope = rememberCoroutineScope()
 
     val authState by authManager.state.collectAsStateWithLifecycle()
 
@@ -101,10 +114,62 @@ fun OneGalleryApp(
         }
     }
 
+    LaunchedEffect(authState.isSignedIn, cloudSetupStep) {
+        if (cloudSetupStep == CloudSetupStep.SignIn && authState.isSignedIn) {
+            cloudSetupStep = CloudSetupStep.Browse
+        }
+    }
+
+    fun openCloudFolderPicker() {
+        cloudSetupStep = CloudSetupStep.SignIn
+        scope.launch {
+            if (!authManager.needsUserClientId()) {
+                authManager.initialize()
+            }
+        }
+    }
+
+    if (cloudSetupStep == CloudSetupStep.Browse) {
+        OneDriveCloudBrowserScreen(
+            oneDriveRepository = oneDriveRepository,
+            onFolderSelected = { itemId, path, label ->
+                syncCoordinator.connectGraphSyncFolder(itemId, path, label)
+                cloudSetupStep = CloudSetupStep.Hidden
+                setupDone = true
+                scope.launch { syncCoordinator.runBidirectionalSync() }
+            },
+            onBack = { cloudSetupStep = CloudSetupStep.Hidden },
+        )
+        return
+    }
+
+    if (cloudSetupStep == CloudSetupStep.SignIn) {
+        SignInGate(
+            authManager = authManager,
+            msalConfigurationError = null,
+            forCloudFolderPicker = true,
+            onClientConfigured = {
+                scope.launch {
+                    authManager.initialize().onSuccess {
+                        if (!authState.isSignedIn) {
+                            /* usuário toca em Entrar */
+                        } else {
+                            cloudSetupStep = CloudSetupStep.Browse
+                        }
+                    }
+                }
+            },
+            onLocalOnly = { cloudSetupStep = CloudSetupStep.Hidden },
+            onSignedIn = { cloudSetupStep = CloudSetupStep.Browse },
+        )
+        return
+    }
+
     if (!setupDone) {
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
             onFinished = { setupDone = true },
+            onExploreOneDriveInCloud = { openCloudFolderPicker() },
         )
         return
     }
@@ -113,11 +178,13 @@ fun OneGalleryApp(
         SignInGate(
             authManager = authManager,
             msalConfigurationError = null,
+            forCloudFolderPicker = false,
             onClientConfigured = {
                 syncCoordinator.useGraphMode()
                 showOptionalMicrosoftLogin = false
             },
             onLocalOnly = { showOptionalMicrosoftLogin = false },
+            onSignedIn = { showOptionalMicrosoftLogin = false },
         )
         return
     }
@@ -209,6 +276,7 @@ fun OneGalleryApp(
                     syncPreferences = syncPreferences,
                     oneDriveFolderPreferences = oneDriveFolderPreferences,
                     onOpenOptionalMicrosoftLogin = { showOptionalMicrosoftLogin = true },
+                    onBrowseOneDriveCloud = { openCloudFolderPicker() },
                 )
             }
             composable(

@@ -41,6 +41,7 @@ fun SettingsScreen(
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
     onOpenOptionalMicrosoftLogin: () -> Unit,
+    onBrowseOneDriveCloud: () -> Unit,
 ) {
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -78,9 +79,15 @@ fun SettingsScreen(
             )
             Text("Pasta OneDrive", style = MaterialTheme.typography.titleMedium)
             Text(
-                oneDriveFolderPreferences.displayName ?: "Não conectada",
+                when (syncPreferences.syncMode) {
+                    SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Nuvem (não escolhida)"
+                    else -> oneDriveFolderPreferences.displayName ?: "Não conectada"
+                },
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
+            Button(onClick = onBrowseOneDriveCloud) {
+                Text("Explorar OneDrive na nuvem…")
+            }
             if (syncPreferences.syncMode == SyncMode.ONEDRIVE_LOCAL_MIRROR) {
                 Text(
                     syncCoordinator.localMirrorPathLabel(),

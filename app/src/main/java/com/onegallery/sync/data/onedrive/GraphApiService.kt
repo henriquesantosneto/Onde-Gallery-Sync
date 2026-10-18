@@ -14,6 +14,11 @@ import retrofit2.http.Streaming
 import retrofit2.http.Url
 
 interface GraphApiService {
+    @GET("v1.0/me/drive/root")
+    suspend fun getDriveRoot(
+        @Header("Authorization") authorization: String,
+    ): DriveItem
+
     @GET("v1.0/me/drive/root/children")
     suspend fun listDriveRootChildren(
         @Header("Authorization") authorization: String,
@@ -42,6 +47,13 @@ interface GraphApiService {
     @POST("v1.0/me/drive/root/children")
     suspend fun createFolderUnderDriveRoot(
         @Header("Authorization") authorization: String,
+        @Body body: CreateFolderRequest,
+    ): DriveItem
+
+    @POST("v1.0/me/drive/items/{parentId}/children")
+    suspend fun createFolderUnderParent(
+        @Header("Authorization") authorization: String,
+        @Path("parentId") parentId: String,
         @Body body: CreateFolderRequest,
     ): DriveItem
 

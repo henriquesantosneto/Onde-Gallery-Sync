@@ -46,14 +46,23 @@ class MsalAuthManager(
         .filter { it.isNotBlank() }
         .toTypedArray()
 
-    fun savedClientId(): String = authPreferences.azureClientId
+    fun savedClientId(): String = effectiveClientId()
+
+    fun effectiveClientId(): String {
+        val saved = authPreferences.azureClientId
+        if (saved.isNotBlank() && !saved.startsWith("00000000")) return saved
+        val baked = BuildConfig.MSAL_CLIENT_ID
+        return if (baked.isNotBlank() && !baked.startsWith("00000000")) baked else saved
+    }
+
+    fun needsUserClientId(): Boolean = effectiveClientId().isBlank() || effectiveClientId().startsWith("00000000")
 
     fun saveClientId(clientId: String) {
         authPreferences.azureClientId = clientId
     }
 
     suspend fun initialize(): Result<Unit> {
-        val clientId = authPreferences.azureClientId
+        val clientId = effectiveClientId()
         if (clientId.isBlank() || clientId.startsWith("00000000")) {
             return Result.failure(
                 IllegalStateException("Informe o Application (client) ID do Azure em Ajustes ou abaixo."),

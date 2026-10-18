@@ -31,6 +31,7 @@ import com.onegallery.sync.sync.SyncPolicy
 fun WelcomeScreen(
     syncCoordinator: SyncCoordinator,
     onFinished: () -> Unit,
+    onExploreOneDriveInCloud: () -> Unit,
 ) {
     val context = LocalContext.current
     val oneDriveInstalled = OneDrivePickerHelper.isOneDriveAppInstalled(context)
@@ -106,13 +107,26 @@ fun WelcomeScreen(
             )
         }
         Button(
+            onClick = onExploreOneDriveInCloud,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Explorar OneDrive na nuvem (escolher pasta)")
+        }
+        Text(
+            "Navega pastas do seu OneDrive como no site/app e define onde a galeria sincronizada ficará. " +
+                "Requer login Microsoft (não usa o seletor de arquivos do Android).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+        )
+        OutlinedButton(
             onClick = {
                 syncCoordinator.useOneDriveLocalMirrorMode()
                 onFinished()
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Usar Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} (recomendado)")
+            Text("Usar Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} (sem login)")
         }
         Text(
             "Cria e usa a pasta interna Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT}. " +

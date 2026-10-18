@@ -12,6 +12,7 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.onedrive.GraphFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
@@ -44,12 +45,16 @@ class OneGalleryApplication : Application() {
     lateinit var oneDriveFolderPreferences: OneDriveFolderPreferences
         private set
 
+    lateinit var graphFolderPreferences: GraphFolderPreferences
+        private set
+
     override fun onCreate() {
         super.onCreate()
         authManager = MsalAuthManager(this, AuthPreferences(this))
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
-        oneDriveRepository = OneDriveRepository(authManager)
+        graphFolderPreferences = GraphFolderPreferences(this)
+        oneDriveRepository = OneDriveRepository(authManager, graphFolderPreferences)
         syncPreferences = SyncPreferences(this).also {
             it.migrateForAppVersion(BuildConfig.VERSION_CODE)
         }

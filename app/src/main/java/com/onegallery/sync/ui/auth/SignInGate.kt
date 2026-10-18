@@ -42,8 +42,10 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 fun SignInGate(
     authManager: MsalAuthManager,
     msalConfigurationError: String?,
+    forCloudFolderPicker: Boolean = false,
     onClientConfigured: () -> Unit,
     onLocalOnly: () -> Unit,
+    onSignedIn: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -51,6 +53,7 @@ fun SignInGate(
     var busy by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     val redirect = remember { authManager.redirectUriForAzure }
+    val needsClientId = authManager.needsUserClientId()
 
     Column(
         modifier = Modifier
@@ -66,29 +69,46 @@ fun SignInGate(
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
         )
-        Text(
-            "1) Registre o app no Azure. 2) Cole o Client ID abaixo. 3) Use o redirect exibido no registro Android.",
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(bottom = 16.dp),
-        )
-        OutlinedTextField(
-            value = clientId,
-            onValueChange = { clientId = it.trim() },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Application (client) ID") },
-            singleLine = true,
-        )
-        Text(
-            "Redirect URI (copie para o Azure → Android):",
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(top = 16.dp),
-        )
-        Text(
-            redirect,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-        )
+        if (forCloudFolderPicker) {
+            Text(
+                "Para abrir o OneDrive como explorador (pastas na nuvem), o app usa login Microsoft. " +
+                    "Isso é diferente do seletor de arquivos do Android, que só mostra pastas locais.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+        if (needsClientId) {
+            Text(
+                "Informe o Application (client) ID do registro Azure do app (uma vez). " +
+                    "Quem publica o APK pode embutir esse ID para você só precisar entrar com sua conta Microsoft.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+            OutlinedTextField(
+                value = clientId,
+                onValueChange = { clientId = it.trim() },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Application (client) ID") },
+                singleLine = true,
+            )
+            Text(
+                "Redirect URI (copie para o Azure → Android):",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            Text(
+                redirect,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
+        } else {
+            Text(
+                "Entre com sua conta Microsoft para listar pastas do OneDrive na nuvem.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+        }
         val error = localError ?: msalConfigurationError
         if (error != null) {
             Text(
@@ -97,36 +117,51 @@ fun SignInGate(
                 modifier = Modifier.padding(vertical = 8.dp),
             )
         }
-        Button(
-            onClick = {
-                if (clientId.isBlank()) {
-                    localError = "Informe o Client ID do Azure."
-                    return@Button
-                }
-                busy = true
-                localError = null
-                authManager.saveClientId(clientId)
-                scope.launch {
-                    authManager.initialize()
-                        .onSuccess { onClientConfigured() }
-                        .onFailure { localError = it.message }
-                    busy = false
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("Salvar Client ID e continuar")
+        if (needsClientId) {
+            Button(
+                onClick = {
+                    if (clientId.isBlank()) {
+                        localError = "Informe o Client ID do Azure."
+                        return@Button
+                    }
+                    busy = true
+                    localError = null
+                    authManager.saveClientId(clientId)
+                    scope.launch {
+                        authManager.initialize()
+                            .onSuccess { onClientConfigured() }
+                            .onFailure { localError = it.message }
+                        busy = false
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text("Salvar Client ID e continuar")
+            }
         }
         Button(
             onClick = {
                 val hostActivity = context.findActivity() ?: return@Button
+                busy = true
+                localError = null
                 scope.launch {
+                    if (authManager.needsUserClientId() && clientId.isNotBlank()) {
+                        authManager.saveClientId(clientId)
+                    }
+                    authManager.initialize()
+                        .onFailure {
+                            localError = it.message
+                            busy = false
+                            return@launch
+                        }
                     authManager.signInInteractive(hostActivity)
+                        .onSuccess { onSignedIn() }
                         .onFailure { localError = it.message }
+                    busy = false
                 }
             },
-            enabled = !busy && authManager.savedClientId().isNotBlank(),
+            enabled = !busy && (!needsClientId || clientId.isNotBlank() || authManager.savedClientId().isNotBlank()),
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) {
             Text(stringResource(R.string.auth_sign_in))
@@ -135,7 +170,13 @@ fun SignInGate(
             onClick = onLocalOnly,
             modifier = Modifier.padding(top = 16.dp),
         ) {
-            Text("Usar galeria local sem OneDrive (por enquanto)")
+            Text(
+                if (forCloudFolderPicker) {
+                    "Voltar (usar modo pasta local / backup OneDrive)"
+                } else {
+                    "Usar galeria local sem OneDrive (por enquanto)"
+                },
+            )
         }
     }
 }

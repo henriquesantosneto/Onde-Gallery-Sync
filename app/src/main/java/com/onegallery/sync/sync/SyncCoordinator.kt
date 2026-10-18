@@ -50,6 +50,13 @@ class SyncCoordinator(
         syncPreferences.hasCompletedSetup = true
     }
 
+    fun connectGraphSyncFolder(itemId: String, driveRelativePath: String, label: String) {
+        oneDriveRepository.setSyncRoot(itemId, driveRelativePath, label)
+        useGraphMode()
+    }
+
+    fun graphSyncRootLabel(): String? = oneDriveRepository.syncRootLabel()
+
     fun useOneDriveLocalMirrorMode() {
         syncPreferences.syncMode = SyncMode.ONEDRIVE_LOCAL_MIRROR
         syncPreferences.hasCompletedSetup = true
@@ -112,7 +119,20 @@ class SyncCoordinator(
                 return Result.failure(IllegalStateException("Pasta de sync não conectada"))
             }
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> Unit
-            SyncMode.ONEDRIVE_GRAPH -> Unit
+            SyncMode.ONEDRIVE_GRAPH -> {
+                if (!oneDriveRepository.isSyncRootConfigured()) {
+                    _state.value = _state.value.copy(
+                        lastMessage = "Escolha uma pasta no OneDrive (explorador na nuvem) em Ajustes.",
+                    )
+                    return Result.failure(IllegalStateException("Pasta na nuvem não escolhida"))
+                }
+                oneDriveRepository.accessToken().getOrElse {
+                    _state.value = _state.value.copy(
+                        lastMessage = "Faça login Microsoft para sync na nuvem.",
+                    )
+                    return Result.failure(it)
+                }
+            }
         }
         if (!networkMonitor.isOnline()) {
             _state.value = _state.value.copy(
@@ -418,10 +438,7 @@ class SyncCoordinator(
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.listMirrorFiles()
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.listMirrorFiles()
-            SyncMode.ONEDRIVE_GRAPH -> {
-                oneDriveRepository.ensureMirrorRootFolder().getOrThrow()
-                oneDriveRepository.listMirrorFiles()
-            }
+            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.listMirrorFiles()
             SyncMode.LOCAL_ONLY -> Result.success(emptyList())
         }
     }

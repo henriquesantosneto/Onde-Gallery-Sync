@@ -27,8 +27,16 @@ data class RemoteDriveFile(
     val sizeBytes: Long?,
 )
 
+data class OneDriveBrowseEntry(
+    val id: String,
+    val name: String,
+    val isFolder: Boolean,
+    val childCount: Int?,
+)
+
 class OneDriveRepository(
     private val authManager: MsalAuthManager,
+    private val graphFolderPreferences: GraphFolderPreferences,
 ) {
     private val graphApi: GraphApiService by lazy {
         val logging = HttpLoggingInterceptor().apply {
@@ -55,7 +63,55 @@ class OneDriveRepository(
         return authManager.acquireTokenSilent()
     }
 
+    fun syncRootLabel(): String? = graphFolderPreferences.displayLabel
+
+    fun isSyncRootConfigured(): Boolean = graphFolderPreferences.isConfigured()
+
+    fun setSyncRoot(itemId: String, driveRelativePath: String, label: String) {
+        graphFolderPreferences.setSyncRoot(itemId, driveRelativePath, label)
+    }
+
+    suspend fun getDriveRootId(): Result<String> {
+        return runWithToken { token ->
+            graphApi.getDriveRoot("Bearer $token").id
+        }
+    }
+
+    suspend fun listBrowseChildren(folderId: String): Result<List<OneDriveBrowseEntry>> {
+        return runWithToken { token ->
+            val page = graphApi.listFolderChildren("Bearer $token", folderId)
+            page.value.map { item ->
+                OneDriveBrowseEntry(
+                    id = item.id,
+                    name = item.name,
+                    isFolder = item.folder != null,
+                    childCount = item.folder?.childCount,
+                )
+            }.filter { it.isFolder }
+                .sortedBy { it.name.lowercase() }
+        }
+    }
+
+    suspend fun createSubfolder(parentId: String, name: String): Result<OneDriveBrowseEntry> {
+        return runWithToken { token ->
+            val created = graphApi.createFolderUnderParent(
+                authorization = "Bearer $token",
+                parentId = parentId,
+                body = CreateFolderRequest(name = name),
+            )
+            OneDriveBrowseEntry(
+                id = created.id,
+                name = created.name,
+                isFolder = true,
+                childCount = 0,
+            )
+        }
+    }
+
     suspend fun ensureMirrorRootFolder(): Result<String> {
+        if (graphFolderPreferences.isConfigured()) {
+            return Result.success(graphFolderPreferences.syncRootItemId!!)
+        }
         return runWithToken { token ->
             val rootPath = encodeDrivePath(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
             try {
@@ -64,8 +120,14 @@ class OneDriveRepository(
                 if (http.code() != 404) throw http
                 graphApi.createFolderUnderDriveRoot(
                     authorization = "Bearer $token",
-                    body = CreateFolderRequest(name = rootPath),
+                    body = CreateFolderRequest(name = SyncPolicy.ONEDRIVE_MIRROR_ROOT),
                 ).id
+            }.also { id ->
+                graphFolderPreferences.setSyncRoot(
+                    itemId = id,
+                    driveRelativePath = SyncPolicy.ONEDRIVE_MIRROR_ROOT,
+                    label = SyncPolicy.ONEDRIVE_MIRROR_ROOT,
+                )
             }
         }
     }
@@ -86,7 +148,7 @@ class OneDriveRepository(
         mimeType: String?,
     ): Result<DriveItem> {
         return runWithToken { token ->
-            val drivePath = encodeDrivePath(SyncPaths.drivePathFromCanonical(canonicalPath))
+            val drivePath = encodeDrivePath(syncDrivePathFromCanonical(canonicalPath))
             val mediaType = mimeType?.toMediaTypeOrNull()
             val body = sourceFile.asRequestBody(mediaType)
             graphApi.uploadSmallFile("Bearer $token", drivePath, body)
@@ -125,6 +187,12 @@ class OneDriveRepository(
         return runWithToken { token ->
             graphApi.deleteItem("Bearer $token", itemId)
         }
+    }
+
+    private fun syncDrivePathFromCanonical(canonicalPath: String): String {
+        val base = graphFolderPreferences.syncRootDrivePath?.trim('/')
+            ?: SyncPolicy.ONEDRIVE_MIRROR_ROOT
+        return SyncPaths.drivePathFromCanonical(canonicalPath, base)
     }
 
     private suspend fun listFilesRecursive(

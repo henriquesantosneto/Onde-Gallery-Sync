@@ -20,6 +20,7 @@ class MainActivity : ComponentActivity() {
                     syncCoordinator = app.syncCoordinator,
                     syncPreferences = app.syncPreferences,
                     oneDriveFolderPreferences = app.oneDriveFolderPreferences,
+                    oneDriveRepository = app.oneDriveRepository,
                 )
             }
         }
