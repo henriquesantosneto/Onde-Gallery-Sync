@@ -1,13 +1,12 @@
-OneGallery Sync — APK 0.8.35 (versionCode 91)
+OneGallery Sync — APK 0.8.36 (versionCode 92)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.35-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.36-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Mapa estilo Fotos (iPhone): ao abrir, enquadra os locais das fotos com GPS; pinça e toque no pin
-- Botão “Minha localização” para ver onde você está em relação às fotos (permissão do aparelho)
-- v0.8.34: sair da seleção de álbuns; v0.8.33: gerenciar álbuns
+- Locais (aba Álbuns): blocos agrupados e ordenados País · Estado · Cidade · Bairro
+- v0.8.35: mapa estilo Fotos + minha localização; v0.8.34: seleção de álbuns
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
