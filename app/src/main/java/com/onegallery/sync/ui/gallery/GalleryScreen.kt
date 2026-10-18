@@ -3,6 +3,7 @@ package com.onegallery.sync.ui.gallery
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -180,15 +181,12 @@ fun GalleryScreen(
                 val dateTimeline = isDateTimelineSort(state.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val gridState = rememberLazyGridState()
-                val timelinePhotos = remember(state.items, state.sortOrder) {
-                    sortedTimelinePhotos(state.items, state.sortOrder)
-                }
                 val gridEntries = remember(state.items, state.sortOrder, timelineGrouping) {
                     buildGalleryGridEntries(state.items, state.sortOrder, timelineGrouping)
                 }
                 val stickyLabel = rememberStickyTimelineLabel(
                     gridState = gridState,
-                    photos = if (dateTimeline) timelinePhotos else emptyList(),
+                    entries = if (dateTimeline) gridEntries else emptyList(),
                     gridScale = gridPinch.scale,
                     enabled = dateTimeline,
                 )
@@ -212,48 +210,32 @@ fun GalleryScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        if (dateTimeline) {
-                            items(
-                                items = timelinePhotos,
-                                key = { it.canonicalPath },
-                            ) { item ->
-                                TimelinePhotoCell(
-                                    item = item,
-                                    state = state,
-                                    syncCoordinator = syncCoordinator,
-                                    gridPinch = gridPinch,
-                                    viewModel = viewModel,
-                                    onOpenItem = onOpenItem,
-                                )
-                            }
-                        } else {
-                            items(
-                                items = gridEntries,
-                                key = { it.key },
-                                span = { entry ->
-                                    when (entry) {
-                                        is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
-                                        is GalleryGridEntry.Photo -> GridItemSpan(1)
-                                    }
-                                },
-                            ) { entry ->
+                        items(
+                            items = gridEntries,
+                            key = { it.key },
+                            span = { entry ->
                                 when (entry) {
-                                    is GalleryGridEntry.Header -> {
-                                        TimelineSectionHeader(
-                                            title = entry.header.title,
-                                            kind = entry.header.kind,
-                                        )
-                                    }
-                                    is GalleryGridEntry.Photo -> {
-                                        TimelinePhotoCell(
-                                            item = entry.item,
-                                            state = state,
-                                            syncCoordinator = syncCoordinator,
-                                            gridPinch = gridPinch,
-                                            viewModel = viewModel,
-                                            onOpenItem = onOpenItem,
-                                        )
-                                    }
+                                    is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
+                                    is GalleryGridEntry.Photo -> GridItemSpan(1)
+                                }
+                            },
+                        ) { entry ->
+                            when (entry) {
+                                is GalleryGridEntry.Header -> {
+                                    TimelineSectionHeader(
+                                        title = entry.header.title,
+                                        kind = entry.header.kind,
+                                    )
+                                }
+                                is GalleryGridEntry.Photo -> {
+                                    TimelinePhotoCell(
+                                        item = entry.item,
+                                        state = state,
+                                        syncCoordinator = syncCoordinator,
+                                        gridPinch = gridPinch,
+                                        viewModel = viewModel,
+                                        onOpenItem = onOpenItem,
+                                    )
                                 }
                             }
                         }
@@ -326,22 +308,23 @@ private fun TimelineSectionHeader(
     title: String,
     kind: TimelineHeaderKind,
 ) {
-    Text(
-        text = title,
-        style = when (kind) {
-            TimelineHeaderKind.YEAR -> MaterialTheme.typography.headlineSmall
-            TimelineHeaderKind.MONTH, TimelineHeaderKind.DAY -> MaterialTheme.typography.titleMedium
-        },
-        fontWeight = FontWeight.SemiBold,
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(
-                start = 4.dp,
-                end = 4.dp,
-                top = if (kind == TimelineHeaderKind.YEAR) 16.dp else 10.dp,
-                bottom = 6.dp,
-            ),
-    )
+            .padding(top = if (kind == TimelineHeaderKind.YEAR) 12.dp else 6.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Text(
+            text = title,
+            style = when (kind) {
+                TimelineHeaderKind.YEAR -> MaterialTheme.typography.headlineSmall
+                TimelineHeaderKind.MONTH, TimelineHeaderKind.DAY -> MaterialTheme.typography.titleMedium
+            },
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

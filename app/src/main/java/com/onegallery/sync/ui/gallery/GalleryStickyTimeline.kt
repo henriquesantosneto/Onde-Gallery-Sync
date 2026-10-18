@@ -14,22 +14,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+fun stickyLabelForGridIndex(
+    entries: List<GalleryGridEntry>,
+    index: Int,
+    gridScale: Float,
+): String? {
+    if (index !in entries.indices) return null
+    for (i in index downTo 0) {
+        when (val entry = entries[i]) {
+            is GalleryGridEntry.Header -> {
+                if (entry.header.kind == TimelineHeaderKind.YEAR) continue
+                return entry.header.title
+            }
+            is GalleryGridEntry.Photo -> {
+                return timelineStickyLabel(entry.item.sortTimestamp, gridScale)
+            }
+        }
+    }
+    return null
+}
+
 @Composable
 fun rememberStickyTimelineLabel(
     gridState: LazyGridState,
-    photos: List<GalleryDisplayItem>,
+    entries: List<GalleryGridEntry>,
     gridScale: Float,
     enabled: Boolean,
 ): String? {
-    val label by remember(gridState, photos, gridScale, enabled) {
+    val label by remember(gridState, entries, gridScale, enabled) {
         derivedStateOf {
-            if (!enabled || photos.isEmpty()) return@derivedStateOf null
+            if (!enabled || entries.isEmpty()) return@derivedStateOf null
             val anchor = gridState.layoutInfo.visibleItemsInfo
-                .filter { info -> info.index in photos.indices }
+                .filter { info -> info.index in entries.indices }
                 .minByOrNull { it.offset.y }
                 ?: return@derivedStateOf null
-            val item = photos[anchor.index]
-            timelineStickyLabel(item.sortTimestamp, gridScale)
+            stickyLabelForGridIndex(entries, anchor.index, gridScale)
         }
     }
     return label
