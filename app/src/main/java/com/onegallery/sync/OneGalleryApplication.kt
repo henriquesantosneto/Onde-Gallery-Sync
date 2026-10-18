@@ -55,6 +55,9 @@ class OneGalleryApplication : Application() {
 
     val mediaDeleteRequestRouter = MediaDeleteRequestRouter()
 
+    lateinit var mediaCacheRepository: MediaCacheRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
         authManager = MsalAuthManager(this, AuthPreferences(this))
@@ -67,7 +70,7 @@ class OneGalleryApplication : Application() {
         }
         oneDriveFolderPreferences = OneDriveFolderPreferences(this)
         galleryPreferences = GalleryPreferences(this)
-        val mediaCacheRepository = MediaCacheRepository(this)
+        mediaCacheRepository = MediaCacheRepository(this)
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
         syncCoordinator = SyncCoordinator(

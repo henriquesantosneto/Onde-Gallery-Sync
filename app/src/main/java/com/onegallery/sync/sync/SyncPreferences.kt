@@ -28,10 +28,16 @@ class SyncPreferences(context: Context) {
         get() = SyncMode.valueOf(prefs.getString(KEY_SYNC_MODE, SyncMode.LOCAL_ONLY.name)!!)
         set(value) = prefs.edit().putString(KEY_SYNC_MODE, value.name).apply()
 
+    /** Se a mídia sumir do aparelho, apaga também no OneDrive (sem pedir confirmação). */
+    var autoDeleteRemoteWhenLocalRemoved: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_DELETE_REMOTE, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_DELETE_REMOTE, value).apply()
+
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_SETUP_DONE = "setup_done"
         private const val KEY_SYNC_MODE = "sync_mode"
         private const val KEY_LAST_VERSION = "last_version_code"
+        private const val KEY_AUTO_DELETE_REMOTE = "auto_delete_remote"
     }
 }

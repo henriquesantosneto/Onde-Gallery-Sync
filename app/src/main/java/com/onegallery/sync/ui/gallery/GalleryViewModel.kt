@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaAlbum
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
@@ -59,6 +60,7 @@ class GalleryViewModel(
     private val localMediaRepository: LocalMediaRepository,
     private val syncCoordinator: SyncCoordinator,
     private val galleryPreferences: GalleryPreferences,
+    private val mediaCacheRepository: MediaCacheRepository,
 ) : ViewModel() {
 
     private val albumFilter = MutableStateFlow<String?>(null)
@@ -98,7 +100,7 @@ class GalleryViewModel(
 
     val state: StateFlow<GalleryUiState> = combine(libraryFlow, uiControls) { (metadata, userAlbums), controls ->
         val items = metadata
-            .map { GalleryMapper.toDisplayItem(it) }
+            .map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) }
             .filter { controls.filter == null || it.albumName == controls.filter }
             .sortedBy(controls.order)
 
@@ -212,7 +214,43 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
                 .onSuccess { count ->
-                    actionMessage.value = "$count item(ns) excluído(s) no aparelho e na nuvem (quando aplicável)."
+                    actionMessage.value = "$count item(ns) removido(s) no aparelho e no OneDrive."
+                    clearSelection()
+                }
+                .onFailure { actionMessage.value = it.message }
+        }
+    }
+
+    fun deleteSingle(canonicalPath: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            syncCoordinator.deleteItemsImmediately(listOf(canonicalPath), PendingDeleteTarget.BOTH)
+                .onSuccess {
+                    actionMessage.value = "Removido no aparelho e no OneDrive."
+                    onDone()
+                }
+                .onFailure { actionMessage.value = it.message }
+        }
+    }
+
+    fun releaseSingle(canonicalPath: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            syncCoordinator.releaseLocalSpace(listOf(canonicalPath))
+                .onSuccess {
+                    actionMessage.value = "Cópia local removida; nuvem e miniatura mantidas."
+                    onDone()
+                }
+                .onFailure { actionMessage.value = it.message }
+        }
+    }
+
+    fun releaseLocalSpaceSelected() {
+        val paths = selectedPaths.value.toList()
+        if (paths.isEmpty()) return
+        viewModelScope.launch {
+            syncCoordinator.releaseLocalSpace(paths)
+                .onSuccess { count ->
+                    actionMessage.value =
+                        "$count item(ns): cópia local removida; miniatura e OneDrive mantidos."
                     clearSelection()
                 }
                 .onFailure { actionMessage.value = it.message }
@@ -251,11 +289,17 @@ class GalleryViewModelFactory(
     private val localMediaRepository: LocalMediaRepository,
     private val syncCoordinator: SyncCoordinator,
     private val galleryPreferences: GalleryPreferences,
+    private val mediaCacheRepository: MediaCacheRepository,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(GalleryViewModel::class.java)) {
-            return GalleryViewModel(localMediaRepository, syncCoordinator, galleryPreferences) as T
+            return GalleryViewModel(
+                localMediaRepository,
+                syncCoordinator,
+                galleryPreferences,
+                mediaCacheRepository,
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

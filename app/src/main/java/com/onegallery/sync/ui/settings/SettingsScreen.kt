@@ -63,6 +63,7 @@ fun SettingsScreen(
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
+    var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var localAdvancedExpanded by remember { mutableStateOf(false) }
     val launchFolderPicker = rememberConnectFolderLauncher(syncCoordinator) {
         scope.launch { syncCoordinator.runBidirectionalSync() }
@@ -222,6 +223,23 @@ fun SettingsScreen(
 
             item {
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Apagar na nuvem se sumir do aparelho") },
+                    supportingContent = {
+                        Text("Sem confirmação — espelha exclusões da galeria do sistema")
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = autoDeleteRemote,
+                            onCheckedChange = {
+                                autoDeleteRemote = it
+                                syncPreferences.autoDeleteRemoteWhenLocalRemoved = it
+                            },
+                        )
+                    },
+                )
             }
             item {
                 ListItem(

@@ -23,4 +23,11 @@ class MediaCacheRepository(context: Context) {
         originalFile(canonicalPath).delete()
         thumbFile(canonicalPath).delete()
     }
+
+    fun deleteOriginalOnly(canonicalPath: String) {
+        originalFile(canonicalPath).delete()
+    }
+
+    fun thumbnailIfCached(canonicalPath: String): File? =
+        thumbFile(canonicalPath).takeIf { it.exists() && it.length() > 0L }
 }

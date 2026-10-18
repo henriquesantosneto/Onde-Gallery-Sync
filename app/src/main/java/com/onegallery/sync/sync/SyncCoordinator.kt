@@ -159,6 +159,7 @@ class SyncCoordinator(
 
         _state.value = _state.value.copy(isRunning = true, lastMessage = "Sincronizando com OneDrive…")
         return runCatching {
+            flushLegacyPendingDeletes()
             indexLocalLibrary().getOrThrow()
             val remoteFiles = listRemoteFiles().getOrThrow()
             val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
@@ -178,9 +179,10 @@ class SyncCoordinator(
                     remote == null && row.oneDriveItemId != null -> {
                         syncMetadataDao.upsert(
                             row.copy(
-                                pendingDeleteTarget = PendingDeleteTarget.LOCAL,
-                                cloudState = CloudSyncState.CONFLICT,
-                                lastError = "Removido do OneDrive — confirme exclusão local.",
+                                oneDriveItemId = null,
+                                pendingDeleteTarget = PendingDeleteTarget.NONE,
+                                cloudState = CloudSyncState.LOCAL_ONLY,
+                                lastError = null,
                             ),
                         )
                     }
@@ -377,6 +379,46 @@ class SyncCoordinator(
         return Result.success(canonicalPaths.size)
     }
 
+    suspend fun releaseLocalSpace(canonicalPaths: List<String>): Result<Int> {
+        if (canonicalPaths.isEmpty()) return Result.success(0)
+        return runCatching {
+            val rows = canonicalPaths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
+            rows.forEach { cachePlaceholderThumbnail(it) }
+            val uris = rows.mapNotNull { localContentUri(it) }
+            if (uris.isNotEmpty()) {
+                val removed = mediaDeleteRequestRouter.requestDelete(appContext, uris)
+                if (!removed) {
+                    error(
+                        "Não foi possível remover a cópia local. " +
+                            "Confirme no diálogo do Android se aparecer.",
+                    )
+                }
+            }
+            var freed = 0
+            for (row in rows) {
+                val path = row.canonicalPath
+                mediaCacheRepository.deleteOriginalOnly(path)
+                if (row.oneDriveItemId != null) {
+                    syncMetadataDao.upsert(
+                        row.copy(
+                            localMediaId = null,
+                            localContentUri = null,
+                            cachedFilePath = null,
+                            pendingDeleteTarget = PendingDeleteTarget.NONE,
+                            cloudState = CloudSyncState.CLOUD_ONLY,
+                            lastError = null,
+                        ),
+                    )
+                } else {
+                    mediaCacheRepository.deleteCached(path)
+                    syncMetadataDao.deleteByCanonicalPath(path)
+                }
+                freed++
+            }
+            freed
+        }
+    }
+
     suspend fun deleteItemsImmediately(
         canonicalPaths: List<String>,
         target: PendingDeleteTarget = PendingDeleteTarget.BOTH,
@@ -481,18 +523,46 @@ class SyncCoordinator(
         syncMetadataDao.getAll().forEach { row ->
             if (row.localMediaId == null) return@forEach
             if (row.canonicalPath in seenPaths) return@forEach
-            if (row.oneDriveItemId != null) {
+            if (row.oneDriveItemId != null && syncPreferences.autoDeleteRemoteWhenLocalRemoved) {
+                row.oneDriveItemId?.let { deleteRemoteFile(it).getOrNull() }
+                mediaCacheRepository.deleteCached(row.canonicalPath)
+                syncMetadataDao.deleteByCanonicalPath(row.canonicalPath)
+            } else if (row.oneDriveItemId != null) {
+                cachePlaceholderThumbnail(row)
                 syncMetadataDao.upsert(
                     row.copy(
                         localMediaId = null,
                         localContentUri = null,
-                        pendingDeleteTarget = PendingDeleteTarget.LOCAL,
+                        cachedFilePath = null,
+                        pendingDeleteTarget = PendingDeleteTarget.NONE,
                         cloudState = CloudSyncState.CLOUD_ONLY,
-                        lastError = "Removido do aparelho — confirme exclusão.",
+                        lastError = null,
                     ),
                 )
             } else {
                 syncMetadataDao.deleteByCanonicalPath(row.canonicalPath)
+            }
+        }
+    }
+
+    private suspend fun flushLegacyPendingDeletes() {
+        val pending = syncMetadataDao.getAll().filter { it.pendingDeleteTarget != PendingDeleteTarget.NONE }
+        if (pending.isEmpty()) return
+        pending.forEach { row ->
+            runCatching {
+                deleteItemsImmediately(listOf(row.canonicalPath), row.pendingDeleteTarget)
+            }
+        }
+    }
+
+    private fun cachePlaceholderThumbnail(row: SyncMetadataEntity) {
+        val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath)
+        if (existing != null) return
+        val uri = localContentUri(row) ?: return
+        runCatching {
+            val target = mediaCacheRepository.thumbFile(row.canonicalPath)
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
             }
         }
     }

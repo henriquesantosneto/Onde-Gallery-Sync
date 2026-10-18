@@ -19,7 +19,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,21 +47,14 @@ fun SyncStatusScreen(
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
     val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
-    val pendingDeletes by syncCoordinator.pendingDeleteItems.collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = rememberCoroutineScope()
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
-    val pendingDeletePaths = remember(pendingDeletes) {
-        pendingDeletes.map { it.canonicalPath }.toSet()
-    }
-    val problemItems = remember(metadata, pendingDeletePaths) {
+    val problemItems = remember(metadata) {
         metadata.filter {
-            it.canonicalPath !in pendingDeletePaths &&
-                (
-                    it.cloudState == CloudSyncState.ERROR ||
-                        it.cloudState == CloudSyncState.CONFLICT ||
-                        !it.lastError.isNullOrBlank()
-                    )
+            it.cloudState == CloudSyncState.ERROR ||
+                it.cloudState == CloudSyncState.CONFLICT ||
+                !it.lastError.isNullOrBlank()
         }.take(25)
     }
 
@@ -159,65 +151,11 @@ fun SyncStatusScreen(
                 }
             }
 
-            if (pendingDeletes.isNotEmpty()) {
-                item {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    SectionTitle("Exclusões aguardando confirmação")
-                }
-                items(
-                    pendingDeletes,
-                    key = { "pending-delete-${it.canonicalPath}" },
-                ) { row ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(row.displayName, style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                pendingDeleteLabel(row.pendingDeleteTarget),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (!row.lastError.isNullOrBlank()) {
-                                Text(
-                                    row.lastError.orEmpty(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            syncCoordinator.deleteItemsImmediately(
-                                                listOf(row.canonicalPath),
-                                                row.pendingDeleteTarget,
-                                            )
-                                        }
-                                    },
-                                ) { Text("Confirmar") }
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            syncCoordinator.resolvePendingDelete(
-                                                row.canonicalPath,
-                                                confirmed = false,
-                                            )
-                                        }
-                                    },
-                                ) { Text("Ignorar") }
-                            }
-                        }
-                    }
-                }
-            }
-
             item {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                 Text(
-                    "Os números vêm do índice local e da última sync com o OneDrive. " +
-                        "Abra a galeria para ver cada foto com o ícone de nuvem.",
+                    "Exclusões na galeria propagam para o OneDrive automaticamente. " +
+                        "Use Liberar espaço (ícone nuvem riscada) para manter só miniatura + nuvem.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 24.dp),
@@ -353,11 +291,4 @@ private fun cloudStateLabel(state: CloudSyncState): String = when (state) {
     CloudSyncState.PENDING_DOWNLOAD -> "Aguardando download"
     CloudSyncState.CONFLICT -> "Conflito"
     CloudSyncState.ERROR -> "Erro"
-}
-
-private fun pendingDeleteLabel(target: PendingDeleteTarget): String = when (target) {
-    PendingDeleteTarget.LOCAL -> "Confirmar exclusão no aparelho"
-    PendingDeleteTarget.REMOTE -> "Confirmar exclusão na nuvem"
-    PendingDeleteTarget.BOTH -> "Confirmar exclusão no aparelho e na nuvem"
-    PendingDeleteTarget.NONE -> ""
 }

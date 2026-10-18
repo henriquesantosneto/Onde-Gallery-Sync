@@ -1,8 +1,10 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,6 +13,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
@@ -39,7 +42,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.onegallery.sync.sync.PendingDeleteTarget
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.sync.SyncCoordinator
 import kotlinx.coroutines.launch
 
@@ -49,13 +52,13 @@ fun MediaDetailScreen(
     initialCanonicalPath: String,
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
+    mediaCacheRepository: MediaCacheRepository,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val items = state.items
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
@@ -122,8 +125,11 @@ fun MediaDetailScreen(
                         IconButton(onClick = { showMoveDialog = true }) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir")
+                        IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
+                            Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
+                        }
+                        IconButton(onClick = { viewModel.deleteSelected() }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
                         }
                         TextButton(onClick = { viewModel.clearSelection() }) {
                             Text("Cancelar")
@@ -152,6 +158,9 @@ fun MediaDetailScreen(
             MediaDetailPage(
                 canonicalPath = items[page].canonicalPath,
                 syncCoordinator = syncCoordinator,
+                mediaCacheRepository = mediaCacheRepository,
+                viewModel = viewModel,
+                onRemoved = onBack,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -174,34 +183,28 @@ fun MediaDetailScreen(
         )
     }
 
-    if (showDeleteDialog) {
-        DeleteSelectionDialog(
-            count = state.selectedPaths.size,
-            onDismiss = { showDeleteDialog = false },
-            onConfirm = {
-                showDeleteDialog = false
-                viewModel.deleteSelected()
-            },
-        )
-    }
 }
 
 @Composable
 private fun MediaDetailPage(
     canonicalPath: String,
     syncCoordinator: SyncCoordinator,
+    mediaCacheRepository: MediaCacheRepository,
+    viewModel: GalleryViewModel,
+    onRemoved: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     var item by remember(canonicalPath) { mutableStateOf<GalleryDisplayItem?>(null) }
     var loading by remember(canonicalPath) { mutableStateOf(true) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
-    var showSingleDelete by remember(canonicalPath) { mutableStateOf(false) }
 
     LaunchedEffect(canonicalPath) {
         loading = true
         error = null
-        var display = syncCoordinator.getMetadata(canonicalPath)?.let { GalleryMapper.toDisplayItem(it) }
+        var display = syncCoordinator.getMetadata(canonicalPath)?.let {
+            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
+        }
         if (display != null && display.localUri == null && display.cachedOriginal == null) {
             syncCoordinator.downloadOriginalOnDemand(canonicalPath)
                 .onSuccess { file -> display = display?.copy(cachedOriginal = file) }
@@ -264,25 +267,29 @@ private fun MediaDetailPage(
                             },
                         ) { Text("Baixar original") }
                     }
-                    TextButton(onClick = { showSingleDelete = true }) {
-                        Text("Excluir esta foto…")
-                    }
+                    RowWithActions(
+                        onDeleteAll = { viewModel.deleteSingle(canonicalPath, onRemoved) },
+                        onFreeSpace = { viewModel.releaseSingle(canonicalPath) },
+                    )
                 }
             }
         }
     }
+}
 
-    if (showSingleDelete) {
-        DeleteSelectionDialog(
-            count = 1,
-            onDismiss = { showSingleDelete = false },
-            onConfirm = {
-                showSingleDelete = false
-                scope.launch {
-                    syncCoordinator.deleteItemsImmediately(listOf(canonicalPath), PendingDeleteTarget.BOTH)
-                        .onFailure { error = it.message }
-                }
-            },
-        )
+@Composable
+private fun RowWithActions(onDeleteAll: () -> Unit, onFreeSpace: () -> Unit) {
+    androidx.compose.foundation.layout.Row(
+        modifier = Modifier.padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TextButton(onClick = onFreeSpace) {
+            Icon(Icons.Outlined.CloudOff, contentDescription = null)
+            Text(" Liberar espaço")
+        }
+        TextButton(onClick = onDeleteAll) {
+            Icon(Icons.Outlined.Delete, contentDescription = null)
+            Text(" Excluir tudo")
+        }
     }
 }

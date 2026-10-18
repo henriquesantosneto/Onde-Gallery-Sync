@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
                     oneDriveFolderPreferences = app.oneDriveFolderPreferences,
                     oneDriveRepository = app.oneDriveRepository,
                     galleryPreferences = app.galleryPreferences,
+                    mediaCacheRepository = app.mediaCacheRepository,
                 )
             }
         }

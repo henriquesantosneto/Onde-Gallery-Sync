@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
@@ -61,8 +62,6 @@ fun GalleryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
-
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -86,8 +85,11 @@ fun GalleryScreen(
                         IconButton(onClick = { showMoveDialog = true }) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir")
+                        IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
+                            Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
+                        }
+                        IconButton(onClick = { viewModel.deleteSelected() }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
                         }
                         TextButton(onClick = { viewModel.clearSelection() }) {
                             Text("Cancelar")
@@ -197,16 +199,6 @@ fun GalleryScreen(
         )
     }
 
-    if (showDeleteDialog) {
-        DeleteSelectionDialog(
-            count = state.selectedPaths.size,
-            onDismiss = { showDeleteDialog = false },
-            onConfirm = {
-                showDeleteDialog = false
-                viewModel.deleteSelected()
-            },
-        )
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

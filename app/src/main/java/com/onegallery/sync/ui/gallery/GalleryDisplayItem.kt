@@ -17,10 +17,11 @@ data class GalleryDisplayItem(
     val pendingDeleteTarget: PendingDeleteTarget,
     val localUri: Uri?,
     val cachedOriginal: File?,
+    val cachedPlaceholderThumb: File? = null,
     val sortTimestamp: Long,
 ) {
     val thumbnailModel: Any?
-        get() = localUri ?: cachedOriginal
+        get() = localUri ?: cachedOriginal ?: cachedPlaceholderThumb
 
     val isOfflineAvailable: Boolean
         get() = localUri != null || (cachedOriginal?.exists() == true)
