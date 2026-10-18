@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,6 +44,7 @@ fun SettingsScreen(
     onOpenOptionalMicrosoftLogin: () -> Unit,
     onBrowseOneDriveCloud: () -> Unit,
 ) {
+    val context = LocalContext.current
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
@@ -71,13 +73,13 @@ fun SettingsScreen(
             Text(
                 when (syncPreferences.syncMode) {
                     SyncMode.ONEDRIVE_LOCAL_MIRROR -> "Pictures/OneGallerySync + backup OneDrive"
-                    SyncMode.ONEDRIVE_FOLDER -> "Pasta escolhida (SAF / Pictures)"
+                    SyncMode.ONEDRIVE_FOLDER -> "Pasta local (app OneDrive sincroniza)"
                     SyncMode.ONEDRIVE_GRAPH -> "API Microsoft (Azure)"
                     SyncMode.LOCAL_ONLY -> "Só galeria local"
                 },
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
-            Text("Pasta OneDrive", style = MaterialTheme.typography.titleMedium)
+            Text("Pasta no celular", style = MaterialTheme.typography.titleMedium)
             Text(
                 when (syncPreferences.syncMode) {
                     SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Nuvem (não escolhida)"
@@ -85,9 +87,6 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
-            Button(onClick = onBrowseOneDriveCloud) {
-                Text("Explorar OneDrive na nuvem…")
-            }
             if (syncPreferences.syncMode == SyncMode.ONEDRIVE_LOCAL_MIRROR) {
                 Text(
                     syncCoordinator.localMirrorPathLabel(),
@@ -95,10 +94,10 @@ fun SettingsScreen(
                 )
             }
             Button(onClick = {
-                val intent = OneDrivePickerHelper.openTreeIntent(OneDrivePickerHelper.picturesFolderUri())
-                folderPicker.launch(intent)
+                val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
+                folderPicker.launch(OneDrivePickerHelper.openTreeIntent(initial))
             }) {
-                Text("Escolher pasta Pictures")
+                Text("Escolher pasta local (OneDrive / Pictures)")
             }
             Button(
                 onClick = {
@@ -110,25 +109,29 @@ fun SettingsScreen(
                 Text("Modo automático Pictures/OneGallerySync")
             }
             Text(
-                "No seletor use Armazenamento interno → Pictures. O app OneDrive faz o upload. Subpasta: ${SyncPolicy.ONEDRIVE_MIRROR_ROOT}/",
+                "Sem Azure: escolha a pasta do telefone que o app OneDrive já sincroniza. " +
+                    "Os arquivos da galeria ficam diretamente nessa pasta.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
             )
-            Text("Login Microsoft (opcional)", style = MaterialTheme.typography.titleMedium)
+            Text("Modo avançado (Azure)", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Só necessário se quiser o modo API/Azure. O modo pasta acima não usa Client ID.",
+                "Opcional — acesso direto à nuvem sem passar pelo app OneDrive no celular.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
+            Button(onClick = onBrowseOneDriveCloud) {
+                Text("Explorar nuvem (requer Azure)")
+            }
+            Button(onClick = onOpenOptionalMicrosoftLogin, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Client ID / login Microsoft…")
+            }
             Text(
                 authState.displayName ?: "Não conectado",
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
             )
-            Button(onClick = onOpenOptionalMicrosoftLogin) {
-                Text("Configurar Client ID / Azure…")
-            }
             Text("Sync apenas em Wi‑Fi", style = MaterialTheme.typography.titleMedium)
             Switch(
                 checked = wifiOnly,

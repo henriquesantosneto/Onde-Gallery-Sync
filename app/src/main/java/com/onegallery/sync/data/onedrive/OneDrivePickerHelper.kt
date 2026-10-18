@@ -2,6 +2,7 @@ package com.onegallery.sync.data.onedrive
 
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -10,6 +11,12 @@ import androidx.documentfile.provider.DocumentFile
 
 object OneDrivePickerHelper {
     const val ONEDRIVE_PACKAGE = "com.microsoft.skydrive"
+    private const val ONEDRIVE_DOCS_AUTHORITY = "com.microsoft.skydrive.content.StorageAccessProvider"
+
+    data class StorageRoot(
+        val title: String,
+        val initialDocumentUri: Uri,
+    )
 
     fun isOneDriveAppInstalled(context: Context): Boolean {
         return runCatching {
@@ -18,7 +25,6 @@ object OneDrivePickerHelper {
         }.getOrDefault(false)
     }
 
-    /** Abre o app OneDrive para o usuário ativar backup de Pictures (não abre pasta na nuvem). */
     fun openOneDriveApp(context: Context): Boolean {
         val launch = context.packageManager.getLaunchIntentForPackage(ONEDRIVE_PACKAGE) ?: return false
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -26,7 +32,37 @@ object OneDrivePickerHelper {
         return true
     }
 
-    /** Abre o seletor já em Pictures (armazenamento interno). */
+    /** Raízes expostas pelo app OneDrive no celular (pasta local / cache sincronizado), se existirem. */
+    fun listOneDriveStorageRoots(context: Context): List<StorageRoot> {
+        if (!isOneDriveAppInstalled(context)) return emptyList()
+        val rootsUri = DocumentsContract.buildRootsUri(ONEDRIVE_DOCS_AUTHORITY)
+        val out = mutableListOf<StorageRoot>()
+        runCatching {
+            context.contentResolver.query(rootsUri, null, null, null, null)?.use { cursor ->
+                appendRootsFromCursor(cursor, out)
+            }
+        }
+        return out
+    }
+
+    private fun appendRootsFromCursor(cursor: Cursor, out: MutableList<StorageRoot>) {
+        val idCol = cursor.getColumnIndex(DocumentsContract.Root.COLUMN_ROOT_ID)
+        val titleCol = cursor.getColumnIndex(DocumentsContract.Root.COLUMN_TITLE)
+        val docCol = cursor.getColumnIndex(DocumentsContract.Root.COLUMN_DOCUMENT_ID)
+        while (cursor.moveToNext()) {
+            val documentId = if (docCol >= 0) cursor.getString(docCol) else null
+            val rootId = if (idCol >= 0) cursor.getString(idCol) else null
+            val title = if (titleCol >= 0) cursor.getString(titleCol) else "OneDrive"
+            val docKey = documentId ?: rootId ?: continue
+            out.add(
+                StorageRoot(
+                    title = title ?: "OneDrive",
+                    initialDocumentUri = DocumentsContract.buildDocumentUri(ONEDRIVE_DOCS_AUTHORITY, docKey),
+                ),
+            )
+        }
+    }
+
     fun picturesFolderUri(): Uri {
         return DocumentsContract.buildDocumentUri(
             "com.android.externalstorage.documents",
@@ -34,14 +70,10 @@ object OneDrivePickerHelper {
         )
     }
 
-    /** Tentativa opcional de abrir na raiz do OneDrive (nem todo aparelho expõe). */
-    fun oneDriveInitialUri(): Uri? {
-        return runCatching {
-            DocumentsContract.buildRootUri(
-                "com.microsoft.skydrive.content.StorageAccessProvider",
-                "OneDrive",
-            )
-        }.getOrNull()
+    /** Melhor ponto de partida: pasta do provedor OneDrive no aparelho, senão Pictures. */
+    fun preferredLocalSyncPickerInitialUri(context: Context): Uri {
+        return listOneDriveStorageRoots(context).firstOrNull()?.initialDocumentUri
+            ?: picturesFolderUri()
     }
 
     fun openTreeIntent(initialUri: Uri? = null): Intent {

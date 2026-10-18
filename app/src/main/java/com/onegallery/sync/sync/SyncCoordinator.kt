@@ -114,7 +114,7 @@ class SyncCoordinator(
             }
             SyncMode.ONEDRIVE_FOLDER -> if (!saOneDriveRepository.isConnected()) {
                 _state.value = _state.value.copy(
-                    lastMessage = "Escolha a pasta Pictures em Ajustes (modo simples, sem Azure).",
+                    lastMessage = "Escolha a pasta local que o OneDrive sincroniza (Ajustes).",
                 )
                 return Result.failure(IllegalStateException("Pasta de sync não conectada"))
             }

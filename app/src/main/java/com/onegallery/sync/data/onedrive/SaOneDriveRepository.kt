@@ -73,11 +73,10 @@ class SaOneDriveRepository(
         }
     }
 
+    /** Pasta que você escolheu no celular — o app OneDrive sincroniza a partir daqui (sem Azure). */
     private fun mirrorRoot(): DocumentFile? {
         val treeUri = folderPreferences.treeUri ?: return null
-        val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return null
-        return tree.findFile(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
-            ?: tree.createDirectory(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
+        return DocumentFile.fromTreeUri(context, treeUri)
     }
 
     private fun ensureFile(canonicalPath: String, mimeType: String?): DocumentFile? {

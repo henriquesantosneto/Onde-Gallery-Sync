@@ -31,12 +31,12 @@ import com.onegallery.sync.sync.SyncPolicy
 fun WelcomeScreen(
     syncCoordinator: SyncCoordinator,
     onFinished: () -> Unit,
-    onExploreOneDriveInCloud: () -> Unit,
 ) {
     val context = LocalContext.current
     val oneDriveInstalled = OneDrivePickerHelper.isOneDriveAppInstalled(context)
+    val oneDriveRoots = OneDrivePickerHelper.listOneDriveStorageRoots(context)
 
-    val picturesPicker = rememberLauncherForActivityResult(
+    val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -48,16 +48,8 @@ fun WelcomeScreen(
         }
     }
 
-    val cloudPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val uri: Uri? = result.data?.data
-            if (uri != null) {
-                syncCoordinator.connectOneDriveFolder(uri)
-                onFinished()
-            }
-        }
+    fun openLocalFolderPicker(initial: Uri) {
+        folderPicker.launch(OneDrivePickerHelper.openTreeIntent(initial))
     }
 
     Column(
@@ -80,20 +72,19 @@ fun WelcomeScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Não aparece pasta do OneDrive?",
+                    "Sem Azure — pasta no celular",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "No Samsung/Android isso é normal: o seletor do sistema só mostra pastas do telefone " +
-                        "(Armazenamento interno, SD). A Microsoft não expõe a nuvem OneDrive nesse seletor " +
-                        "como a galeria antiga fazia.",
+                    "O OneGallery grava em uma pasta do telefone. O app Microsoft OneDrive (já instalado e logado) " +
+                        "é quem envia e recebe arquivos na sua conta. Você não precisa registrar nada no Azure.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 Text(
-                    "Use uma pasta local em Pictures; o app OneDrive envia para sua conta na nuvem " +
-                        "quando você ativa o backup de fotos.",
+                    "Escolha a mesma pasta que o OneDrive já usa para backup/sincronização — em geral " +
+                        "Pictures ou uma pasta marcada para offline no app OneDrive.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -107,50 +98,48 @@ fun WelcomeScreen(
             )
         }
         Button(
-            onClick = onExploreOneDriveInCloud,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Explorar OneDrive na nuvem (escolher pasta)")
-        }
-        Text(
-            "Navega pastas do seu OneDrive como no site/app e define onde a galeria sincronizada ficará. " +
-                "Requer login Microsoft (não usa o seletor de arquivos do Android).",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
-        )
-        OutlinedButton(
             onClick = {
                 syncCoordinator.useOneDriveLocalMirrorMode()
                 onFinished()
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Usar Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} (sem login)")
+            Text("Usar Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} (recomendado)")
         }
         Text(
-            "Cria e usa a pasta interna Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT}. " +
-                "Depois ative no OneDrive o backup/sincronização de Pictures.",
+            "Cria Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} no armazenamento interno. Ative no OneDrive o backup de fotos/Pictures.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
         )
         OutlinedButton(
             onClick = {
-                val intent = OneDrivePickerHelper.openTreeIntent(OneDrivePickerHelper.picturesFolderUri())
-                picturesPicker.launch(intent)
+                openLocalFolderPicker(OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context))
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Escolher pasta Pictures no seletor")
+            Text("Escolher pasta local sincronizada pelo OneDrive")
         }
         Text(
-            "No seletor: Armazenamento interno → Pictures (ou subpasta ${SyncPolicy.ONEDRIVE_MIRROR_ROOT}). " +
-                "Só ver pastas locais aqui é o comportamento esperado.",
+            if (oneDriveRoots.isNotEmpty()) {
+                "Abrimos o seletor na pasta OneDrive do aparelho (${oneDriveRoots.first().title}). " +
+                    "Confirme ou navegue até a pasta que o OneDrive sincroniza."
+            } else {
+                "No seletor: menu ☰ → OneDrive (se aparecer) ou Armazenamento interno → Pictures. " +
+                    "Só pastas locais é normal; a nuvem é cuidada pelo app OneDrive."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
         )
+        oneDriveRoots.drop(1).forEach { root ->
+            OutlinedButton(
+                onClick = { openLocalFolderPicker(root.initialDocumentUri) },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            ) {
+                Text("Abrir seletor em: ${root.title}")
+            }
+        }
         OutlinedButton(
             onClick = {
                 if (!OneDrivePickerHelper.openOneDriveApp(context)) {
@@ -160,17 +149,7 @@ fun WelcomeScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = oneDriveInstalled,
         ) {
-            Text("Abrir app OneDrive (ativar backup)")
-        }
-        OutlinedButton(
-            onClick = {
-                val initial = OneDrivePickerHelper.oneDriveInitialUri()
-                val intent = OneDrivePickerHelper.openTreeIntent(initial)
-                cloudPicker.launch(intent)
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("Tentar seletor na nuvem (raro no Samsung)")
+            Text("Abrir app OneDrive (backup / pastas offline)")
         }
         OutlinedButton(
             onClick = {

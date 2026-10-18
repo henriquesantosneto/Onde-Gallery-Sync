@@ -169,7 +169,6 @@ fun OneGalleryApp(
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
             onFinished = { setupDone = true },
-            onExploreOneDriveInCloud = { openCloudFolderPicker() },
         )
         return
     }
