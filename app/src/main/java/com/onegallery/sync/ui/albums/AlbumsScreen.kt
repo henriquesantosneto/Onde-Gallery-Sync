@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.albums
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Collections
@@ -111,6 +113,12 @@ fun AlbumsScreen(
         }
     }
 
+    val inAlbumMultiSelect =
+        state.albumSelectionMode && selectedTab == AlbumsBrowseTab.ALBUMS
+    BackHandler(enabled = inAlbumMultiSelect) {
+        viewModel.clearAlbumSelection()
+    }
+
     val selectedAlbumModels = state.albums.filter { it.title in state.selectedAlbumTitles }
     val selectedUserAlbums = selectedAlbumModels.filter { it.isUserManaged }
     val canRename = state.selectedAlbumTitles.size == 1 && selectedUserAlbums.size == 1
@@ -131,14 +139,17 @@ fun AlbumsScreen(
                         )
                     },
                     navigationIcon = {
-                        if (state.albumSelectionMode && selectedTab == AlbumsBrowseTab.ALBUMS) {
-                            TextButton(onClick = { viewModel.clearAlbumSelection() }) {
-                                Text("Cancelar")
+                        if (inAlbumMultiSelect) {
+                            IconButton(onClick = { viewModel.clearAlbumSelection() }) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.ArrowBack,
+                                    contentDescription = "Sair da seleção",
+                                )
                             }
                         }
                     },
                     actions = {
-                        if (state.albumSelectionMode && selectedTab == AlbumsBrowseTab.ALBUMS) {
+                        if (inAlbumMultiSelect) {
                             if (state.selectedAlbumTitles.size == 1) {
                                 IconButton(
                                     onClick = {
@@ -163,6 +174,9 @@ fun AlbumsScreen(
                                 IconButton(onClick = { showDeleteConfirm = true }) {
                                     Icon(Icons.Outlined.Delete, contentDescription = "Excluir álbuns")
                                 }
+                            }
+                            TextButton(onClick = { viewModel.clearAlbumSelection() }) {
+                                Text("Cancelar")
                             }
                         } else {
                             IconButton(onClick = onOpenMap) {

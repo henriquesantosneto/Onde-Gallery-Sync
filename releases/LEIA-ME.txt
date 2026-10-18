@@ -1,14 +1,13 @@
-OneGallery Sync — APK 0.8.33 (versionCode 89)
+OneGallery Sync — APK 0.8.34 (versionCode 90)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.33-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.34-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Álbuns: toque em Info para ver detalhes (título, quantidade, capa, data de criação em álbuns seus)
-- Renomear álbuns criados por você
-- Seleção múltipla (toque longo) para excluir vários álbuns seus de uma vez (fotos permanecem na galeria)
-- Manutenção do índice e demais melhorias das versões anteriores
+- Álbuns: sair do modo seleção (seta voltar, Cancelar, botão Voltar do Android)
+- Desmarcar todos os álbuns também encerra a seleção
+- v0.8.33: info, renomear e excluir álbuns em lote
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=

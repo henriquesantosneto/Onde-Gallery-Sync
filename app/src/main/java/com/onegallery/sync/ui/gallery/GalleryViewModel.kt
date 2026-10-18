@@ -226,7 +226,11 @@ class GalleryViewModel(
 
     fun toggleAlbumSelection(title: String) {
         selectedAlbumTitles.update { current ->
-            if (title in current) current - title else current + title
+            val next = if (title in current) current - title else current + title
+            if (next.isEmpty()) {
+                albumSelectionMode.value = false
+            }
+            next
         }
     }
 
