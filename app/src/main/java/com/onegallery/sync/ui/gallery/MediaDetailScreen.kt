@@ -310,7 +310,9 @@ private fun MediaDetailPage(
             }
             else -> {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .notifyPagerWhenMultiTouch(onZoomActiveChanged),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     val mediaModifier = Modifier

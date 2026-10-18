@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -36,8 +37,12 @@ fun ZoomableMediaContainer(
     var offset by remember(resetKey) { mutableStateOf(Offset.Zero) }
     var containerSize by remember(resetKey) { mutableStateOf(IntSize.Zero) }
 
-    fun notifyZoom() {
-        onZoomActiveChanged(scale > ZOOM_ACTIVE_THRESHOLD)
+    fun notifyZoom(active: Boolean) {
+        onZoomActiveChanged(active)
+    }
+
+    fun updateZoomActive(multiTouch: Boolean) {
+        notifyZoom(multiTouch || scale > ZOOM_ACTIVE_THRESHOLD)
     }
 
     fun clampOffset(raw: Offset, currentScale: Float): Offset {
@@ -52,7 +57,16 @@ fun ZoomableMediaContainer(
 
     Box(
         modifier = modifier
-            .onSizeChanged { containerSize = it },
+            .onSizeChanged { containerSize = it }
+            .pointerInput(resetKey) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val pressed = event.changes.count { it.pressed }
+                        updateZoomActive(pressed >= 2)
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -65,7 +79,12 @@ fun ZoomableMediaContainer(
                     translationY = offset.y
                 }
                 .pointerInput(resetKey) {
-                    detectTransformGestures { centroid, pan, zoom, _ ->
+                    detectTransformGestures(
+                        panZoomLock = true,
+                    ) { centroid, pan, zoom, _ ->
+                        if (zoom != 1f || pan != Offset.Zero) {
+                            updateZoomActive(multiTouch = true)
+                        }
                         val previousScale = scale
                         val newScale = (previousScale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
                         val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
@@ -78,10 +97,10 @@ fun ZoomableMediaContainer(
                             scale = MIN_SCALE
                             offset = Offset.Zero
                         }
-                        notifyZoom()
+                        updateZoomActive(multiTouch = true)
                     }
                 }
-                .pointerInput(resetKey, interceptSingleTap, scale) {
+                .pointerInput(resetKey, interceptSingleTap) {
                     if (!interceptSingleTap) return@pointerInput
                     detectTapGestures(
                         onTap = {

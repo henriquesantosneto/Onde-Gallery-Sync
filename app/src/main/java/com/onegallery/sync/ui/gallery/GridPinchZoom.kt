@@ -18,13 +18,19 @@ object GridPinchZoom {
 
 @Composable
 fun rememberGalleryGridZoom(initial: Float, onPersist: (Float) -> Unit): Pair<Float, Modifier> {
-    var scale by rememberSaveable { mutableFloatStateOf(initial.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)) }
+    var scale by rememberSaveable {
+        mutableFloatStateOf(initial.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE))
+    }
     val modifier = Modifier.pointerInput(Unit) {
-        detectTransformGestures { _, _, zoom, _ ->
-            val next = (scale * zoom).coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
-            if (next != scale) {
-                scale = next
-                onPersist(next)
+        detectTransformGestures(
+            panZoomLock = true,
+        ) { _, _, zoom, _ ->
+            if (zoom != 1f) {
+                val next = (scale * zoom).coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
+                if (next != scale) {
+                    scale = next
+                    onPersist(next)
+                }
             }
         }
     }

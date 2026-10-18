@@ -21,16 +21,27 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     private var scale = 1f
     private var panX = 0f
     private var panY = 0f
+
     private val scaleDetector = ScaleGestureDetector(
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean = true
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                onZoomActiveChanged?.invoke(true)
+                return true
+            }
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 val factor = detector.scaleFactor
                 if (!factor.isFinite() || factor == 0f) return false
-                applyScale(scale * factor, detector.focusX, detector.focusY)
+                applyPinch(factor, detector.focusX, detector.focusY)
                 return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                if (scale <= 1.02f) {
+                    resetTransform()
+                }
             }
         },
     )
@@ -45,6 +56,7 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
                 distanceY: Float,
             ): Boolean {
                 if (scale <= 1.02f) return false
+                parent?.requestDisallowInterceptTouchEvent(true)
                 panX -= distanceX
                 panY -= distanceY
                 clampPan()
@@ -61,18 +73,21 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
         )
     }
 
-    private fun applyScale(newScale: Float, pivotX: Float, pivotY: Float) {
-        scale = newScale.coerceIn(1f, 5f)
-        playerView.pivotX = pivotX
-        playerView.pivotY = pivotY
+    private fun applyPinch(factor: Float, focusX: Float, focusY: Float) {
+        val previous = scale
+        val newScale = (previous * factor).coerceIn(1f, 5f)
+        if (previous <= 0f) return
+        val scaleFactor = newScale / previous
+        panX = focusX - scaleFactor * (focusX - panX)
+        panY = focusY - scaleFactor * (focusY - panY)
+        scale = newScale
         if (scale <= 1.02f) {
-            scale = 1f
-            panX = 0f
-            panY = 0f
+            resetTransform()
+            return
         }
         clampPan()
         applyTransform()
-        onZoomActiveChanged?.invoke(scale > 1.02f)
+        onZoomActiveChanged?.invoke(true)
     }
 
     private fun clampPan() {
@@ -88,25 +103,61 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     }
 
     private fun applyTransform() {
+        playerView.pivotX = width / 2f
+        playerView.pivotY = height / 2f
         playerView.scaleX = scale
         playerView.scaleY = scale
         playerView.translationX = panX
         playerView.translationY = panY
     }
 
+    private fun resetTransform() {
+        scale = 1f
+        panX = 0f
+        panY = 0f
+        applyTransform()
+        onZoomActiveChanged?.invoke(false)
+    }
+
+    private fun handlingZoomGestures(event: MotionEvent): Boolean {
+        return event.pointerCount >= 2 || scale > 1.02f
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (handlingZoomGestures(event)) {
+            scaleDetector.onTouchEvent(event)
+            if (scale > 1.02f && event.pointerCount == 1) {
+                panDetector.onTouchEvent(event)
+            }
+            if (event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+            ) {
+                if (event.pointerCount <= 1 && scale <= 1.02f) {
+                    onZoomActiveChanged?.invoke(false)
+                }
+            }
+            return true
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.pointerCount >= 2) return true
-        if (scale > 1.02f && ev.actionMasked == MotionEvent.ACTION_MOVE) return true
+        if (ev.pointerCount >= 2) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+            return true
+        }
+        if (scale > 1.02f && ev.actionMasked == MotionEvent.ACTION_MOVE) {
+            return true
+        }
         return false
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.pointerCount >= 2) {
+        if (handlingZoomGestures(event)) {
             scaleDetector.onTouchEvent(event)
-            return true
-        }
-        if (scale > 1.02f) {
-            panDetector.onTouchEvent(event)
+            if (scale > 1.02f && event.pointerCount == 1) {
+                panDetector.onTouchEvent(event)
+            }
             return true
         }
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
@@ -118,7 +169,6 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     }
 
     fun resetZoom() {
-        applyScale(1f, width / 2f, height / 2f)
-        onZoomActiveChanged?.invoke(false)
+        resetTransform()
     }
 }
