@@ -157,8 +157,8 @@ fun PlacesMapScreen(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "Nenhuma foto com GPS no índice. Sincronize de novo (Fotos → Sync) para reler EXIF. " +
-                            "Fotos só na nuvem precisam do original baixado para ter GPS.",
+                        "Nenhuma foto com GPS no índice. Com Wi‑Fi, use Sync → Sincronizar agora " +
+                            "(lê EXIF local e trechos na nuvem).",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -465,13 +465,25 @@ class SyncCoordinator(
                         )
                     }
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
+                    backfillMissingGpsLocations()
+                    val gpsNote = _state.value.lastMessage.takeIf {
+                        it.startsWith("Localização GPS:")
+                    }
                     _state.value = _state.value.copy(
                         isRunning = false,
                 activeItem = null,
                         isOffline = false,
                         pendingOperations = pendingCount,
-                        lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
-                            "$cloudOnly só na nuvem$freeMsg.",
+                        lastMessage = buildString {
+                            append(
+                                "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
+                                    "$cloudOnly só na nuvem$freeMsg.",
+                            )
+                            if (gpsNote != null) {
+                                append("\n")
+                                append(gpsNote)
+                            }
+                        },
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
                     SyncSummary(uploaded, markedPendingDownload, cloudOnly)
@@ -1020,14 +1032,17 @@ class SyncCoordinator(
         ) {
             return Triple(existing.locationLabel, existing.latitude, existing.longitude)
         }
-        val resolved = resolveLocationFromSources(item.uri, existing?.cachedFilePath)
+        val resolved = resolveLocationLocalOnly(
+            uri = item.uri,
+            cachedFilePath = existing?.cachedFilePath,
+        )
         if (resolved != null) {
             return Triple(resolved.label, resolved.latitude, resolved.longitude)
         }
         return Triple(null, null, null)
     }
 
-    private fun resolveLocationFromSources(uri: Uri?, cachedFilePath: String?): MediaLocation? {
+    private fun resolveLocationLocalOnly(uri: Uri?, cachedFilePath: String?): MediaLocation? {
         uri?.let { mediaLocationResolver.resolveFromUri(it) }?.let { return it }
         cachedFilePath?.let { path ->
             val file = File(path)
@@ -1038,25 +1053,77 @@ class SyncCoordinator(
         return null
     }
 
+    private suspend fun resolveLocationFromSources(
+        uri: Uri?,
+        cachedFilePath: String?,
+        oneDriveItemId: String?,
+    ): MediaLocation? {
+        resolveLocationLocalOnly(uri, cachedFilePath)?.let { return it }
+        oneDriveItemId?.let { itemId ->
+            probeCloudExifLocation(itemId)?.let { return it }
+        }
+        return null
+    }
+
+    private suspend fun probeCloudExifLocation(oneDriveItemId: String): MediaLocation? {
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return null
+        if (!networkMonitor.isOnline()) return null
+        return oneDriveRepository.probeExifLocationFromItem(oneDriveItemId, mediaLocationResolver)
+            .getOrNull()
+    }
+
     private suspend fun backfillMissingGpsLocations() {
         val rows = syncMetadataDao.getAll().filter { row ->
             row.latitude == null && row.longitude == null &&
-                (row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null)
+                (
+                    row.localMediaId != null || row.localContentUri != null ||
+                        row.cachedFilePath != null || row.oneDriveItemId != null
+                    )
         }
         if (rows.isEmpty()) return
-        rows.forEachIndexed { index, row ->
-            if (index % 24 == 0) {
-                ensureNotCancelled()
-                coroutineContext.ensureActive()
+        var cloudProbes = 0
+        val maxCloudProbesPerRun = 200
+        var indexed = 0
+        rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
+            .forEachIndexed { index, row ->
+                if (index % 16 == 0) {
+                    ensureNotCancelled()
+                    coroutineContext.ensureActive()
+                }
+                val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
+                val resolved = when {
+                    hasLocal -> resolveLocationFromSources(
+                        uri = localContentUri(row),
+                        cachedFilePath = row.cachedFilePath,
+                        oneDriveItemId = null,
+                    )
+                    row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
+                        cloudProbes++
+                        resolveLocationFromSources(
+                            uri = null,
+                            cachedFilePath = null,
+                            oneDriveItemId = row.oneDriveItemId,
+                        )
+                    }
+                    else -> null
+                } ?: return@forEachIndexed
+                syncMetadataDao.upsert(
+                    row.copy(
+                        locationLabel = resolved.label,
+                        latitude = resolved.latitude,
+                        longitude = resolved.longitude,
+                    ),
+                )
+                indexed++
             }
-            val uri = localContentUri(row)
-            val resolved = resolveLocationFromSources(uri, row.cachedFilePath) ?: return@forEachIndexed
-            syncMetadataDao.upsert(
-                row.copy(
-                    locationLabel = resolved.label,
-                    latitude = resolved.latitude,
-                    longitude = resolved.longitude,
-                ),
+        if (indexed > 0) {
+            val suffix = if (cloudProbes >= maxCloudProbesPerRun) {
+                " (limite de nuvem nesta passagem; sincronize de novo para o restante)"
+            } else {
+                ""
+            }
+            _state.value = _state.value.copy(
+                lastMessage = "Localização GPS: $indexed item(ns) indexado(s)$suffix",
             )
         }
     }

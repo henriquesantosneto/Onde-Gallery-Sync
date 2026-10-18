@@ -110,6 +110,32 @@ class GraphResumableTransfer(
         throw IllegalStateException("Upload interrompido antes de concluir.")
     }
 
+    /** Baixa um intervalo HTTP (ex.: `bytes=0-524287`) para ler EXIF sem transferir o arquivo inteiro. */
+    fun downloadByteRange(
+        authorization: String,
+        itemId: String,
+        rangeHeader: String,
+        destination: File,
+    ) {
+        destination.parentFile?.mkdirs()
+        val url = "https://graph.microsoft.com/v1.0/me/drive/items/$itemId/content"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", authorization)
+            .header("Range", rangeHeader)
+            .get()
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful && response.code != 206) {
+                throw IOException("Download parcial falhou: HTTP ${response.code} ${response.message}")
+            }
+            val body = response.body ?: throw IllegalStateException("Corpo vazio no download parcial")
+            destination.outputStream().use { out ->
+                body.byteStream().copyTo(out)
+            }
+        }
+    }
+
     suspend fun downloadToFile(
         authorization: String,
         itemId: String,

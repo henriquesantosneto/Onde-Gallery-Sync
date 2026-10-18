@@ -2,6 +2,8 @@ package com.onegallery.sync.data.onedrive
 
 import android.content.Context
 import com.onegallery.sync.auth.MsalAuthManager
+import com.onegallery.sync.data.local.MediaLocation
+import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -36,11 +38,11 @@ data class OneDriveBrowseEntry(
 )
 
 class OneDriveRepository(
-    context: Context,
+    private val appContext: Context,
     private val authManager: MsalAuthManager,
     private val graphFolderPreferences: GraphFolderPreferences,
 ) {
-    private val uploadSessionStore = UploadSessionStore(context)
+    private val uploadSessionStore = UploadSessionStore(appContext)
     private val resumableTransfer by lazy {
         GraphResumableTransfer(graphApi, uploadSessionStore, graphHttpClient)
     }
@@ -204,6 +206,45 @@ class OneDriveRepository(
                 }
             }
         }
+    }
+
+    /**
+     * Lê GPS do EXIF na nuvem (até ~512 KiB do início/fim do arquivo), sem baixar o original completo.
+     */
+    suspend fun probeExifLocationFromItem(
+        itemId: String,
+        locationResolver: MediaLocationResolver,
+    ): Result<MediaLocation?> {
+        return runWithToken { token ->
+            val temp = File.createTempFile("ogs-exif-probe-", ".bin", appContext.cacheDir)
+            try {
+                resumableTransfer.downloadByteRange(
+                    authorization = "Bearer $token",
+                    itemId = itemId,
+                    rangeHeader = "bytes=0-${EXIF_PROBE_BYTES - 1}",
+                    destination = temp,
+                )
+                locationResolver.resolveFromFile(temp)?.let { return@runWithToken it }
+                val size = graphApi.getDriveItem("Bearer $token", itemId).size
+                if (size != null && size > EXIF_PROBE_BYTES) {
+                    resumableTransfer.downloadByteRange(
+                        authorization = "Bearer $token",
+                        itemId = itemId,
+                        rangeHeader = "bytes=-$EXIF_PROBE_BYTES",
+                        destination = temp,
+                    )
+                    locationResolver.resolveFromFile(temp)
+                } else {
+                    null
+                }
+            } finally {
+                temp.delete()
+            }
+        }
+    }
+
+    private companion object {
+        const val EXIF_PROBE_BYTES = 512 * 1024L
     }
 
     suspend fun deleteRemoteItem(itemId: String): Result<Unit> {
