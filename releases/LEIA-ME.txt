@@ -1,13 +1,13 @@
-OneGallery Sync — APK 0.8.8 (versionCode 64)
+OneGallery Sync — APK 0.8.11 (versionCode 67)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.8-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.11-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Timeline estilo Samsung: separadores por data na grade + barra fixa no topo ao rolar
-- Pinça mais suave; agrupamento por dia com miniaturas pequenas
-- Álbum aberto mantém aba Álbuns selecionada
+- Aba Sync: fila visível (envio, download, exclusão) + arquivo em andamento
+- Timeline estilo Samsung (separadores + data fixa), pinça mais suave
+- Correção: aba Fotos após álbum + pinça
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
