@@ -9,14 +9,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Map
@@ -57,8 +53,10 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.MediaThumbnailImage
+import com.onegallery.sync.ui.gallery.formatMediaCaptureDate
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.maplibre.android.annotations.IconFactory
@@ -89,25 +87,9 @@ fun PlacesMapScreen(
         if (granted) syncTasks.runBidirectionalSync(userInitiated = true)
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val clusters = remember(state.geoItems) { buildPhotoMapClusters(state.geoItems) }
-    var clusterLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    LaunchedEffect(clusters) {
-        if (clusters.isEmpty()) {
-            clusterLabels = emptyMap()
-            return@LaunchedEffect
-        }
-        clusterLabels = withContext(Dispatchers.IO) {
-            clusters.associate { cluster ->
-                cluster.id to syncCoordinator.mapLabelForCoordinates(
-                    cluster.latitude,
-                    cluster.longitude,
-                )
-            }
-        }
-    }
-    var selectedCluster by remember { mutableStateOf<PhotoMapCluster?>(null) }
+    val pins = remember(state.geoItems) { buildPhotoMapPins(state.geoItems) }
+    var selectedPin by remember { mutableStateOf<PhotoMapPin?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val radiusKm = MAP_PIN_CLUSTER_RADIUS_KM
 
     Scaffold(
         topBar = {
@@ -115,10 +97,9 @@ fun PlacesMapScreen(
                 title = {
                     Column {
                         Text("Mapa de fotos")
-                        if (clusters.isNotEmpty()) {
+                        if (pins.isNotEmpty()) {
                             Text(
-                                "${clusters.size} ${if (clusters.size == 1) "região" else "regiões"} " +
-                                    "(~${radiusKm.toInt()} km por pin)",
+                                "${pins.size} ${if (pins.size == 1) "local" else "locais"} · pin na posição GPS da foto",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -134,7 +115,7 @@ fun PlacesMapScreen(
         },
     ) { padding ->
         when {
-            clusters.isEmpty() -> {
+            pins.isEmpty() -> {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -194,89 +175,90 @@ fun PlacesMapScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
-                    clusters = clusters,
-                    clusterLabels = clusterLabels,
+                    pins = pins,
                     syncCoordinator = syncCoordinator,
-                    onClusterSelected = { selectedCluster = it },
+                    onPinSelected = { selectedPin = it },
                 )
             }
         }
     }
 
-    val cluster = selectedCluster
-    if (cluster != null) {
-        val placeTitle = clusterLabels[cluster.id] ?: cluster.title
+    val pin = selectedPin
+    if (pin != null) {
+        val item = pin.item
         ModalBottomSheet(
-            onDismissRequest = { selectedCluster = null },
+            onDismissRequest = { selectedPin = null },
             sheetState = sheetState,
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(placeTitle, style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "${cluster.items.size} ${if (cluster.items.size == 1) "foto" else "fotos"} " +
-                        "nesta região (~${cluster.radiusKm.toInt()} km)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    item.locationLabel?.takeIf { it.isNotBlank() } ?: item.displayName,
+                    style = MaterialTheme.typography.titleLarge,
                 )
+                if (item.locationLabel?.isNotBlank() == true) {
+                    Text(
+                        item.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                val dateLine = formatMediaCaptureDate(item.sortTimestamp).takeIf { it.isNotBlank() }
                 Text(
-                    "O pin no mapa é aproximado. Toque numa foto e use ℹ️ Detalhes para o GPS exato.",
+                    listOfNotNull(
+                        dateLine,
+                        formatPinCoordinates(pin.latitude, pin.longitude),
+                    ).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
                 )
-                val filterLabel = placeTitle.takeIf { it.isNotBlank() && !it.contains("(aprox.") }
-                if (filterLabel != null) {
+                item.locationLabel?.takeIf { it.isNotBlank() }?.let { label ->
                     TextButton(
                         onClick = {
-                            selectedCluster = null
-                            onShowAllAtPlace(filterLabel)
+                            selectedPin = null
+                            onShowAllAtPlace(label)
                         },
                     ) {
-                        Text("Ver todas com este rótulo na galeria")
+                        Text("Ver outras fotos neste lugar")
                     }
                 }
             }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(cluster.items, key = { it.canonicalPath }) { item ->
-                    Box(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .clickable {
-                                selectedCluster = null
-                                val encoded = URLEncoder.encode(
-                                    item.canonicalPath,
-                                    StandardCharsets.UTF_8.name(),
-                                )
-                                onOpenItem(encoded)
-                            },
-                    ) {
-                        MediaThumbnailImage(
-                            item = item,
-                            syncCoordinator = syncCoordinator,
-                            contentDescription = item.displayName,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
+            Box(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
+                    .aspectRatio(1.2f)
+                    .clickable {
+                        selectedPin = null
+                        val encoded = URLEncoder.encode(
+                            item.canonicalPath,
+                            StandardCharsets.UTF_8.name(),
                         )
-                    }
-                }
+                        onOpenItem(encoded)
+                    },
+            ) {
+                MediaThumbnailImage(
+                    item = item,
+                    syncCoordinator = syncCoordinator,
+                    contentDescription = item.displayName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
             }
         }
     }
 }
 
+private fun formatPinCoordinates(latitude: Double, longitude: Double): String {
+    return String.format(Locale.US, "%.5f°, %.5f°", latitude, longitude)
+}
+
 @Composable
 private fun PlacesMapView(
-    clusters: List<PhotoMapCluster>,
-    clusterLabels: Map<String, String>,
+    pins: List<PhotoMapPin>,
     syncCoordinator: SyncCoordinator,
-    onClusterSelected: (PhotoMapCluster) -> Unit,
+    onPinSelected: (PhotoMapPin) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -287,7 +269,7 @@ private fun PlacesMapView(
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     val markers = remember { mutableStateListOf<Marker>() }
-    val markerToCluster = remember { mutableStateMapOf<Marker, PhotoMapCluster>() }
+    val markerToPin = remember { mutableStateMapOf<Marker, PhotoMapPin>() }
     var mapInitialized by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycle, mapView) {
@@ -321,53 +303,52 @@ private fun PlacesMapView(
         }
     }
 
-    LaunchedEffect(clusters, clusterLabels, mapRef, styleReady, syncCoordinator) {
+    LaunchedEffect(pins, mapRef, styleReady, syncCoordinator) {
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         map.setOnMarkerClickListener { marker ->
-            markerToCluster[marker]?.let { onClusterSelected(it) }
+            markerToPin[marker]?.let { onPinSelected(it) }
             true
         }
         markers.forEach { map.removeMarker(it) }
         markers.clear()
-        markerToCluster.clear()
+        markerToPin.clear()
         val iconFactory = IconFactory.getInstance(context)
         val markerArt = withContext(Dispatchers.Default) {
-            clusters.map { cluster ->
+            pins.map { pin ->
                 val bitmap = PhotoStackMarkerBitmap.create(
                     context = context,
-                    items = cluster.items,
+                    items = listOf(pin.item),
                     syncCoordinator = syncCoordinator,
                 )
-                val title = clusterLabels[cluster.id] ?: cluster.title
-                Triple(cluster, bitmap, title)
+                Triple(
+                    pin,
+                    bitmap,
+                    pin.item.locationLabel?.takeIf { it.isNotBlank() } ?: pin.item.displayName,
+                )
             }
         }
-        markerArt.forEach { (cluster, stackBitmap, title) ->
+        markerArt.forEach { (pin, stackBitmap, title) ->
             val added = map.addMarker(
                 org.maplibre.android.annotations.MarkerOptions()
-                    .position(LatLng(cluster.latitude, cluster.longitude))
+                    .position(LatLng(pin.latitude, pin.longitude))
                     .title(title)
-                    .snippet(
-                        "${cluster.items.size} ${if (cluster.items.size == 1) "foto" else "fotos"}",
-                    )
+                    .snippet(pin.item.displayName)
                     .icon(iconFactory.fromBitmap(stackBitmap)),
             )
-            if (added != null) {
-                markers.add(added)
-                markerToCluster[added] = cluster
-            }
+            markers.add(added)
+            markerToPin[added] = pin
         }
-        if (clusters.isEmpty()) return@LaunchedEffect
+        if (pins.isEmpty()) return@LaunchedEffect
         runCatching {
-            if (clusters.size == 1) {
-                val c = clusters.first()
+            if (pins.size == 1) {
+                val p = pins.first()
                 map.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(LatLng(c.latitude, c.longitude), 12.0),
+                    CameraUpdateFactory.newLatLngZoom(LatLng(p.latitude, p.longitude), 15.0),
                 )
             } else {
                 val builder = LatLngBounds.Builder()
-                clusters.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
+                pins.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
                 map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 120))
             }
         }

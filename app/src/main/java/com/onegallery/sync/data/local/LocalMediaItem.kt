@@ -14,6 +14,8 @@ data class LocalMediaItem(
     val bucketDisplayName: String,
     val relativePath: String?,
     val dateAddedSeconds: Long,
+    /** MediaStore DATE_TAKEN (segundos UTC), quando disponível. */
+    val dateTakenSeconds: Long? = null,
     /** MediaStore DATE_MODIFIED (segundos UTC). Usado na reconciliação com a nuvem. */
     val dateModifiedSeconds: Long,
     val sizeBytes: Long,

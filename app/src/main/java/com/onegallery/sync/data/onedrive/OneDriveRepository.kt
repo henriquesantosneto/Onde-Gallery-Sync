@@ -3,6 +3,7 @@ package com.onegallery.sync.data.onedrive
 import android.content.Context
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaLocation
+import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
@@ -245,6 +246,39 @@ class OneDriveRepository(
                         destination = temp,
                     )
                     locationResolver.resolveFromFile(temp)
+                } else {
+                    null
+                }
+            } finally {
+                temp.delete()
+            }
+        }
+    }
+
+    /** Lê data de captura no EXIF na nuvem (mesmo alcance de bytes que o GPS). */
+    suspend fun probeExifCaptureTimeFromItem(
+        itemId: String,
+        captureResolver: MediaCaptureTimeResolver,
+    ): Result<Long?> {
+        return runWithToken { token ->
+            val temp = File.createTempFile("ogs-exif-capture-", ".bin", appContext.cacheDir)
+            try {
+                resumableTransfer.downloadByteRange(
+                    authorization = "Bearer $token",
+                    itemId = itemId,
+                    rangeHeader = "bytes=0-${EXIF_PROBE_BYTES - 1}",
+                    destination = temp,
+                )
+                captureResolver.resolveFromFile(temp)?.let { return@runWithToken it }
+                val size = graphApi.getDriveItem("Bearer $token", itemId).size
+                if (size != null && size > EXIF_PROBE_BYTES) {
+                    resumableTransfer.downloadByteRange(
+                        authorization = "Bearer $token",
+                        itemId = itemId,
+                        rangeHeader = "bytes=-$EXIF_PROBE_BYTES",
+                        destination = temp,
+                    )
+                    captureResolver.resolveFromFile(temp)
                 } else {
                     null
                 }

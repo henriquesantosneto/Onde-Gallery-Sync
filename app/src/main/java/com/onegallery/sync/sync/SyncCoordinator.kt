@@ -5,6 +5,7 @@ import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaLocation
+import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.VideoThumbnailHelper
@@ -68,6 +69,7 @@ class SyncCoordinator(
     private val userAlbumDao: UserAlbumDao,
     private val mediaCacheRepository: MediaCacheRepository,
     private val mediaLocationResolver: MediaLocationResolver,
+    private val mediaCaptureTimeResolver: MediaCaptureTimeResolver,
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
@@ -368,6 +370,7 @@ class SyncCoordinator(
             ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)
             backfillMissingGpsLocations()
+            backfillMissingCaptureTimes()
             if (manageRunningState) {
                 _state.value = _state.value.copy(
                     lastIndexedLocalCount = items.size,
@@ -547,8 +550,9 @@ class SyncCoordinator(
                         lastMessage = "Indexando localização GPS (incl. nuvem)…",
                     )
                     backfillMissingGpsLocations()
+                    backfillMissingCaptureTimes()
                     val gpsNote = _state.value.lastMessage.takeIf {
-                        it.startsWith("Localização GPS:")
+                        it.startsWith("Localização GPS:") || it.startsWith("Data de captura:")
                     }
                     _state.value = _state.value.copy(
                         isRunning = false,
@@ -1140,6 +1144,7 @@ class SyncCoordinator(
         existing: SyncMetadataEntity?,
     ): SyncMetadataEntity {
         val location = resolveLocationForItem(item, existing)
+        val capturedAt = resolveCaptureTimeForItem(item, existing)
         return SyncMetadataEntity(
             canonicalPath = canonical,
             displayName = item.displayName,
@@ -1149,6 +1154,7 @@ class SyncCoordinator(
             localContentUri = item.uri.toString(),
             oneDriveItemId = existing?.oneDriveItemId,
             localModifiedAt = item.dateModifiedSeconds,
+            capturedAtSeconds = capturedAt,
             remoteModifiedAt = existing?.remoteModifiedAt,
             cloudState = when {
                 existing?.oneDriveItemId != null && existing.cloudState != CloudSyncState.LOCAL_ONLY ->
@@ -1163,6 +1169,19 @@ class SyncCoordinator(
             latitude = location.second,
             longitude = location.third,
         )
+    }
+
+    private fun resolveCaptureTimeForItem(
+        item: LocalMediaItem,
+        existing: SyncMetadataEntity?,
+    ): Long? {
+        if (existing?.localMediaId == item.id &&
+            existing.capturedAtSeconds != null &&
+            existing.capturedAtSeconds > 0L
+        ) {
+            return existing.capturedAtSeconds
+        }
+        return mediaCaptureTimeResolver.resolveFromLocalItem(item)
     }
 
     private fun resolveLocationForItem(
@@ -1281,6 +1300,88 @@ class SyncCoordinator(
             }
             _state.value = _state.value.copy(
                 lastMessage = "Localização GPS: $indexed item(ns) indexado(s)$suffix",
+            )
+        }
+    }
+
+    private suspend fun probeCloudExifCaptureTime(oneDriveItemId: String): Long? {
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return null
+        if (!networkMonitor.isOnline()) return null
+        return oneDriveRepository.probeExifCaptureTimeFromItem(oneDriveItemId, mediaCaptureTimeResolver)
+            .getOrNull()
+    }
+
+    private suspend fun resolveCaptureTimeFromSources(
+        uri: Uri?,
+        cachedFilePath: String?,
+        oneDriveItemId: String?,
+    ): Long? {
+        uri?.let { mediaCaptureTimeResolver.resolveFromUri(it) }?.let { return it }
+        cachedFilePath?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                mediaCaptureTimeResolver.resolveFromFile(file)?.let { return it }
+            }
+        }
+        oneDriveItemId?.let { probeCloudExifCaptureTime(it) }?.let { return it }
+        return null
+    }
+
+    private suspend fun resolveCaptureTimeForBackfill(row: SyncMetadataEntity): Long? {
+        resolveCaptureTimeFromSources(
+            uri = localContentUri(row),
+            cachedFilePath = row.cachedFilePath,
+            oneDriveItemId = null,
+        )?.let { return it }
+        val localId = row.localMediaId ?: return null
+        val item = localMediaRepository.findById(localId) ?: return null
+        return mediaCaptureTimeResolver.resolveFromLocalItem(item)
+            ?: run {
+                val temp = localMediaRepository.materializeToTempFile(item) ?: return null
+                mediaCaptureTimeResolver.resolveFromFile(temp).also { temp.delete() }
+            }
+    }
+
+    private suspend fun backfillMissingCaptureTimes() {
+        val rows = syncMetadataDao.getAll().filter { row ->
+            row.capturedAtSeconds == null || row.capturedAtSeconds <= 0L
+        }
+        if (rows.isEmpty()) return
+        var cloudProbes = 0
+        val maxCloudProbesPerRun = 200
+        var indexed = 0
+        rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
+            .forEachIndexed { index, row ->
+                if (index % 16 == 0) {
+                    ensureNotCancelled()
+                    coroutineContext.ensureActive()
+                }
+                val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
+                val resolved = when {
+                    hasLocal -> resolveCaptureTimeForBackfill(row)
+                    row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
+                        cloudProbes++
+                        resolveCaptureTimeFromSources(
+                            uri = null,
+                            cachedFilePath = null,
+                            oneDriveItemId = row.oneDriveItemId,
+                        )
+                    }
+                    else -> null
+                } ?: return@forEachIndexed
+                syncMetadataDao.upsert(
+                    row.copy(capturedAtSeconds = resolved),
+                )
+                indexed++
+            }
+        if (indexed > 0) {
+            val suffix = if (cloudProbes >= maxCloudProbesPerRun) {
+                " (limite de nuvem nesta passagem; sincronize de novo para o restante)"
+            } else {
+                ""
+            }
+            _state.value = _state.value.copy(
+                lastMessage = "Data de captura: $indexed item(ns) indexado(s)$suffix",
             )
         }
     }

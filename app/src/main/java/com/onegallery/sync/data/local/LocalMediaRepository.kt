@@ -96,6 +96,7 @@ class LocalMediaRepository(private val context: Context) {
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
             MediaStore.MediaColumns.RELATIVE_PATH,
             MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_TAKEN,
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.MIME_TYPE,
@@ -108,6 +109,7 @@ class LocalMediaRepository(private val context: Context) {
             val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
             val pathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
             val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val dateTakenCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN)
             val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
@@ -122,6 +124,12 @@ class LocalMediaRepository(private val context: Context) {
                         bucketDisplayName = cursor.getString(bucketCol).orEmpty(),
                         relativePath = cursor.getString(pathCol),
                         dateAddedSeconds = cursor.getLong(dateAddedCol),
+                        dateTakenSeconds = if (dateTakenCol >= 0) {
+                            val takenMs = cursor.getLong(dateTakenCol)
+                            if (takenMs > 0L) takenMs / 1000L else null
+                        } else {
+                            null
+                        },
                         dateModifiedSeconds = cursor.getLong(dateModifiedCol),
                         sizeBytes = cursor.getLong(sizeCol),
                         kind = kind,

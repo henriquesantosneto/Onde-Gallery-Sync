@@ -16,6 +16,8 @@ data class SyncMetadataEntity(
     val localContentUri: String?,
     val oneDriveItemId: String?,
     val localModifiedAt: Long?,
+    /** Quando a foto/vídeo foi capturado (EXIF / DATE_TAKEN), em segundos UTC. */
+    val capturedAtSeconds: Long? = null,
     val remoteModifiedAt: Long?,
     val cloudState: CloudSyncState,
     val cachedFilePath: String?,

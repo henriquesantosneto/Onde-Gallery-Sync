@@ -211,8 +211,11 @@ private fun buildDetailSection(
         if (folderAlbum != null && folderAlbum != display.albumName) {
             add("Pasta na nuvem" to folderAlbum)
         }
-        add("Data no aparelho" to formatMediaDateTime(entity.localModifiedAt))
-        add("Data na nuvem" to formatMediaDateTime(entity.remoteModifiedAt))
+        entity.capturedAtSeconds?.takeIf { it > 0L }?.let {
+            add("Quando foi tirada" to formatMediaDateTime(it))
+        }
+        add("Alteração no aparelho" to formatMediaDateTime(entity.localModifiedAt))
+        add("Alteração na nuvem" to formatMediaDateTime(entity.remoteModifiedAt))
         display.locationLabel?.takeIf { it.isNotBlank() }?.let { add("Local" to it) }
         coords?.let { add("Coordenadas" to it) }
         add("Sincronização" to cloudSyncStateLabel(display.cloudState))

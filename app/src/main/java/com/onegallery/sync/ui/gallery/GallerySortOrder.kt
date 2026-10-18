@@ -1,8 +1,8 @@
 package com.onegallery.sync.ui.gallery
 
 enum class GallerySortOrder(val label: String) {
-    DATE_NEWEST("Data (recentes)"),
-    DATE_OLDEST("Data (antigas)"),
+    DATE_NEWEST("Captura (recentes)"),
+    DATE_OLDEST("Captura (antigas)"),
     NAME_A_Z("Nome A → Z"),
     NAME_Z_A("Nome Z → A"),
 }

@@ -18,6 +18,7 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
 import org.maplibre.android.MapLibre
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
@@ -93,6 +94,7 @@ class OneGalleryApplication : Application() {
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
         val mediaLocationResolver = MediaLocationResolver(this)
+        val mediaCaptureTimeResolver = MediaCaptureTimeResolver(this)
         graphFolderPreferences = GraphFolderPreferences(this)
         oneDriveRepository = OneDriveRepository(this, authManager, graphFolderPreferences)
         syncPreferences = SyncPreferences(this).also {
@@ -117,6 +119,7 @@ class OneGalleryApplication : Application() {
             userAlbumDao = database.userAlbumDao(),
             mediaCacheRepository = mediaCacheRepository,
             mediaLocationResolver = mediaLocationResolver,
+            mediaCaptureTimeResolver = mediaCaptureTimeResolver,
             networkMonitor = NetworkMonitor(this),
             syncPreferences = syncPreferences,
             mediaDeleteRequestRouter = mediaDeleteRequestRouter,
