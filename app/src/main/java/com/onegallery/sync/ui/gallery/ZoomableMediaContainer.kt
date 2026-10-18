@@ -1,5 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -77,26 +79,68 @@ fun ZoomableMediaContainer(
                                 }
                             }
                         }
-                        detectTransformGestures(
-                            panZoomLock = true,
-                        ) { centroid, pan, zoom, _ ->
-                            if (zoom != 1f || pan != Offset.Zero) {
-                                updateZoomActive(multiTouch = true)
+                        launch {
+                            awaitEachGesture {
+                                try {
+                                    var previousDistance = 0f
+                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val pressed = event.changes.filter { it.pressed }
+                                        if (pressed.size >= 2) {
+                                            updateZoomActive(multiTouch = true)
+                                            val p0 = pressed[0].position
+                                            val p1 = pressed[1].position
+                                            val distance = (p0 - p1).getDistance()
+                                            if (previousDistance > 0f) {
+                                                val zoom = distance / previousDistance
+                                                if (zoom.isFinite() && abs(zoom - 1f) > 0.001f) {
+                                                    val previousScale = scale
+                                                    val newScale = (previousScale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+                                                    val centroid = (p0 + p1) / 2f
+                                                    val scaleFactor =
+                                                        if (previousScale == 0f) 1f else newScale / previousScale
+                                                    offset = clampOffset(
+                                                        (offset + centroid) * scaleFactor - centroid,
+                                                        newScale,
+                                                    )
+                                                    scale = newScale
+                                                    if (scale <= MIN_SCALE + 0.001f) {
+                                                        scale = MIN_SCALE
+                                                        offset = Offset.Zero
+                                                    }
+                                                    updateZoomActive(multiTouch = true)
+                                                }
+                                            }
+                                            previousDistance = distance
+                                        } else {
+                                            previousDistance = 0f
+                                        }
+                                    } while (event.changes.any { it.pressed })
+                                } finally {
+                                    updateZoomActive(multiTouch = false)
+                                }
                             }
-                            val previousScale = scale
-                            val newScale = (previousScale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
-                            val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
-                            offset = clampOffset(
-                                (offset + centroid) * scaleFactor - centroid + pan,
-                                newScale,
-                            )
-                            scale = newScale
-                            if (scale <= MIN_SCALE + 0.001f) {
-                                scale = MIN_SCALE
-                                offset = Offset.Zero
-                            }
-                            updateZoomActive(multiTouch = true)
                         }
+                    }
+                }
+                .pointerInput(resetKey, scale) {
+                    if (scale <= ZOOM_ACTIVE_THRESHOLD) return@pointerInput
+                    detectTransformGestures(panZoomLock = true) { centroid, pan, zoom, _ ->
+                        updateZoomActive(multiTouch = true)
+                        val previousScale = scale
+                        val newScale = (previousScale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+                        val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
+                        offset = clampOffset(
+                            (offset + centroid) * scaleFactor - centroid + pan,
+                            newScale,
+                        )
+                        scale = newScale
+                        if (scale <= MIN_SCALE + 0.001f) {
+                            scale = MIN_SCALE
+                            offset = Offset.Zero
+                        }
+                        updateZoomActive(multiTouch = true)
                     }
                 }
                 .pointerInput(resetKey, interceptSingleTap, scale) {

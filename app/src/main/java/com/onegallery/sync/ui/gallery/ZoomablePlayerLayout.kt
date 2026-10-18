@@ -124,6 +124,10 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.pointerCount == 1 && scale <= 1.02f) {
+            parent?.requestDisallowInterceptTouchEvent(false)
+            return false
+        }
         if (handlingZoomGestures(event)) {
             scaleDetector.onTouchEvent(event)
             if (scale > 1.02f && event.pointerCount == 1) {

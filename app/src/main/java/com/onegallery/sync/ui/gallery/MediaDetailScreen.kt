@@ -187,13 +187,7 @@ fun MediaDetailScreen(
         ) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .observeMultiTouchPinch { multiTouch ->
-                        if (multiTouch) {
-                            pagerScrollEnabled = false
-                        }
-                    },
+                modifier = Modifier.fillMaxSize(),
                 userScrollEnabled = pagerScrollEnabled,
                 key = { page -> pagerPaths[page] },
             ) { page ->
@@ -229,7 +223,7 @@ fun MediaDetailScreen(
                     )
                 }
                 Text(
-                    "Dois dedos: pinça para ampliar ou reduzir · arraste quando ampliado",
+                    "Deslize para a esquerda ou direita · pinça com dois dedos para zoom",
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier
@@ -316,9 +310,7 @@ private fun MediaDetailPage(
             }
             else -> {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .notifyPagerWhenMultiTouch(onZoomActiveChanged),
+                    modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     val mediaModifier = Modifier
