@@ -48,6 +48,26 @@ class LocalMediaRepository(private val context: Context) {
         return loadAllMedia().firstOrNull { it.id == mediaId }
     }
 
+    fun contentUriForMediaId(mediaId: Long): Uri? {
+        val imageUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
+        if (uriExists(imageUri)) return imageUri
+        val videoUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId)
+        if (uriExists(videoUri)) return videoUri
+        return null
+    }
+
+    private fun uriExists(uri: Uri): Boolean {
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null,
+            )?.use { it.moveToFirst() } == true
+        }.getOrDefault(false)
+    }
+
     fun materializeToTempFile(item: LocalMediaItem): java.io.File? {
         return runCatching {
             val suffix = item.displayName.substringAfterLast('.', "bin")
