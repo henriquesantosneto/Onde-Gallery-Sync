@@ -66,6 +66,8 @@ import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +89,21 @@ fun PlacesMapScreen(
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val clusters = remember(state.geoItems) { buildPhotoMapClusters(state.geoItems) }
+    var clusterLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(clusters) {
+        if (clusters.isEmpty()) {
+            clusterLabels = emptyMap()
+            return@LaunchedEffect
+        }
+        clusterLabels = withContext(Dispatchers.IO) {
+            clusters.associate { cluster ->
+                cluster.id to syncCoordinator.mapLabelForCoordinates(
+                    cluster.latitude,
+                    cluster.longitude,
+                )
+            }
+        }
+    }
     var selectedCluster by remember { mutableStateOf<PhotoMapCluster?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -164,6 +181,7 @@ fun PlacesMapScreen(
                         .fillMaxSize()
                         .padding(padding),
                     clusters = clusters,
+                    clusterLabels = clusterLabels,
                     syncCoordinator = syncCoordinator,
                     onClusterSelected = { selectedCluster = it },
                 )
@@ -173,12 +191,21 @@ fun PlacesMapScreen(
 
     val cluster = selectedCluster
     if (cluster != null) {
+        val placeTitle = clusterLabels[cluster.id] ?: cluster.title
         ModalBottomSheet(
             onDismissRequest = { selectedCluster = null },
             sheetState = sheetState,
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(cluster.title, style = MaterialTheme.typography.titleLarge)
+                Text(placeTitle, style = MaterialTheme.typography.titleLarge)
+                if (placeTitle != cluster.title) {
+                    Text(
+                        cluster.title,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
                 Text(
                     "${cluster.items.size} ${if (cluster.items.size == 1) "foto" else "fotos"} neste ponto",
                     style = MaterialTheme.typography.bodyMedium,
@@ -231,6 +258,7 @@ fun PlacesMapScreen(
 @Composable
 private fun PlacesMapView(
     clusters: List<PhotoMapCluster>,
+    clusterLabels: Map<String, String>,
     syncCoordinator: SyncCoordinator,
     onClusterSelected: (PhotoMapCluster) -> Unit,
     modifier: Modifier = Modifier,
@@ -277,7 +305,7 @@ private fun PlacesMapView(
         }
     }
 
-    LaunchedEffect(clusters, mapRef, styleReady, syncCoordinator) {
+    LaunchedEffect(clusters, clusterLabels, mapRef, styleReady, syncCoordinator) {
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         map.setOnMarkerClickListener { marker ->
@@ -298,10 +326,14 @@ private fun PlacesMapView(
                 items = cluster.items,
                 syncCoordinator = syncCoordinator,
             )
+            val placeName = clusterLabels[cluster.id] ?: cluster.title
             map.addMarker(
                 org.maplibre.android.annotations.MarkerOptions()
                     .position(LatLng(cluster.latitude, cluster.longitude))
-                    .title(cluster.title)
+                    .title(placeName)
+                    .snippet(
+                        "${cluster.items.size} ${if (cluster.items.size == 1) "foto" else "fotos"}",
+                    )
                     .icon(iconFactory.fromBitmap(stackBitmap)),
             )?.let { markers.add(it) }
         }

@@ -97,6 +97,10 @@ class SyncCoordinator(
 
     fun graphSyncRootLabel(): String? = oneDriveRepository.syncRootLabel()
 
+    fun mapLabelForCoordinates(latitude: Double, longitude: Double): String {
+        return mediaLocationResolver.labelForCoordinates(latitude, longitude)
+    }
+
     fun useOneDriveLocalMirrorMode() {
         syncPreferences.syncMode = SyncMode.ONEDRIVE_LOCAL_MIRROR
         syncPreferences.hasCompletedSetup = true

@@ -102,6 +102,11 @@ class MediaLocationResolver(context: Context) {
         return lat to lon
     }
 
+    /** Nome legível (cidade, estado, país) para mapa e álbuns de locais. */
+    fun labelForCoordinates(latitude: Double, longitude: Double): String {
+        return resolveLabel(latitude, longitude)
+    }
+
     private fun resolveLabel(latitude: Double, longitude: Double): String {
         val cacheKey = "${roundCoord(latitude)},${roundCoord(longitude)}"
         geocodeCache.get(cacheKey)?.let { return it }
@@ -125,18 +130,23 @@ class MediaLocationResolver(context: Context) {
 
     private fun formatAddress(address: android.location.Address?): String? {
         if (address == null) return null
-        val locality = address.locality?.takeIf { it.isNotBlank() }
-        val admin = address.subAdminArea?.takeIf { it.isNotBlank() }
-        val country = address.countryName?.takeIf { it.isNotBlank() }
-        return when {
-            locality != null && country != null && locality != country ->
-                "$locality, $country"
-            locality != null -> locality
-            admin != null && country != null -> "$admin, $country"
-            admin != null -> admin
-            country != null -> country
-            else -> null
+        val parts = linkedSetOf<String>()
+        fun add(value: String?) {
+            val trimmed = value?.trim().orEmpty()
+            if (trimmed.isNotEmpty() && trimmed !in parts) {
+                parts.add(trimmed)
+            }
         }
+        add(address.subLocality)
+        add(address.locality)
+        add(address.subAdminArea)
+        add(address.adminArea)
+        add(address.countryName)
+        if (parts.isEmpty()) {
+            add(address.featureName)
+        }
+        if (parts.isEmpty()) return null
+        return parts.joinToString(", ")
     }
 
     private fun formatCoordinates(latitude: Double, longitude: Double): String {
