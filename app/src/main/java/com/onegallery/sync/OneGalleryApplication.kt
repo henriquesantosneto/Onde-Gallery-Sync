@@ -11,7 +11,9 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
+import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
@@ -37,6 +39,9 @@ class OneGalleryApplication : Application() {
     lateinit var syncPreferences: SyncPreferences
         private set
 
+    lateinit var oneDriveFolderPreferences: OneDriveFolderPreferences
+        private set
+
     override fun onCreate() {
         super.onCreate()
         authManager = MsalAuthManager(this, AuthPreferences(this))
@@ -44,10 +49,13 @@ class OneGalleryApplication : Application() {
         localMediaRepository = LocalMediaRepository(this)
         oneDriveRepository = OneDriveRepository(authManager)
         syncPreferences = SyncPreferences(this)
+        oneDriveFolderPreferences = OneDriveFolderPreferences(this)
         val mediaCacheRepository = MediaCacheRepository(this)
+        val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         syncCoordinator = SyncCoordinator(
             localMediaRepository = localMediaRepository,
             oneDriveRepository = oneDriveRepository,
+            saOneDriveRepository = saOneDriveRepository,
             syncMetadataDao = database.syncMetadataDao(),
             mediaCacheRepository = mediaCacheRepository,
             networkMonitor = NetworkMonitor(this),

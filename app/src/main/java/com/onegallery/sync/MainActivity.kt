@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
                     localMediaRepository = app.localMediaRepository,
                     syncCoordinator = app.syncCoordinator,
                     syncPreferences = app.syncPreferences,
+                    oneDriveFolderPreferences = app.oneDriveFolderPreferences,
                 )
             }
         }

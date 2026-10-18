@@ -35,7 +35,9 @@ import androidx.navigation.navArgument
 import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.albums.AlbumsScreen
 import com.onegallery.sync.ui.auth.SignInGate
@@ -45,6 +47,7 @@ import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
+import com.onegallery.sync.ui.welcome.WelcomeScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
@@ -61,21 +64,11 @@ fun OneGalleryApp(
     localMediaRepository: LocalMediaRepository,
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
+    oneDriveFolderPreferences: OneDriveFolderPreferences,
 ) {
-    var msalReady by remember { mutableStateOf(authManager.savedClientId().isNotBlank()) }
+    var showAdvancedLogin by remember { mutableStateOf(false) }
+    var setupDone by remember { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var msalError by remember { mutableStateOf<String?>(null) }
-    var localOnlyMode by remember { mutableStateOf(false) }
-
-    LaunchedEffect(authManager.savedClientId()) {
-        if (authManager.savedClientId().isNotBlank()) {
-            authManager.initialize()
-                .onSuccess {
-                    msalReady = true
-                    msalError = null
-                }
-                .onFailure { msalError = it.message }
-        }
-    }
 
     val authState by authManager.state.collectAsStateWithLifecycle()
 
@@ -95,21 +88,44 @@ fun OneGalleryApp(
         permissionLauncher.launch(permissions.toTypedArray())
     }
 
-    LaunchedEffect(authState.isSignedIn) {
-        if (authState.isSignedIn) {
-            syncCoordinator.runBidirectionalSync()
+    LaunchedEffect(setupDone, syncPreferences.syncMode, authState.isSignedIn) {
+        if (!setupDone) return@LaunchedEffect
+        when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_FOLDER -> if (oneDriveFolderPreferences.treeUri != null) {
+                syncCoordinator.runBidirectionalSync()
+            }
+            SyncMode.ONEDRIVE_GRAPH -> if (authState.isSignedIn) {
+                syncCoordinator.runBidirectionalSync()
+            }
+            SyncMode.LOCAL_ONLY -> Unit
         }
     }
 
-    if (!authState.isSignedIn && !localOnlyMode) {
+    if (!setupDone) {
+        WelcomeScreen(
+            syncCoordinator = syncCoordinator,
+            onFinished = { setupDone = true },
+            onAdvancedMicrosoftLogin = {
+                syncCoordinator.useGraphMode()
+                setupDone = true
+                showAdvancedLogin = true
+            },
+        )
+        return
+    }
+
+    if (showAdvancedLogin && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH && !authState.isSignedIn) {
         SignInGate(
             authManager = authManager,
             msalConfigurationError = msalError,
             onClientConfigured = {
-                msalReady = true
                 msalError = null
+                showAdvancedLogin = false
             },
-            onLocalOnly = { localOnlyMode = true },
+            onLocalOnly = {
+                syncCoordinator.useLocalOnlyMode()
+                showAdvancedLogin = false
+            },
         )
         return
     }
@@ -199,6 +215,7 @@ fun OneGalleryApp(
                     authManager = authManager,
                     syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
+                    oneDriveFolderPreferences = oneDriveFolderPreferences,
                 )
             }
             composable(
