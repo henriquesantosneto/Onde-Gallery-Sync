@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Sort
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -199,89 +198,15 @@ fun GalleryScreen(
     }
 
     if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Excluir ${state.selectedPaths.size} item(ns)?") },
-            text = {
-                Text(
-                    "Os arquivos serão removidos no aparelho e no OneDrive quando houver cópia na nuvem. " +
-                        "Esta ação não pode ser desfeita.",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        viewModel.deleteSelected()
-                    },
-                ) { Text("Excluir") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancelar") }
+        DeleteSelectionDialog(
+            count = state.selectedPaths.size,
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                showDeleteDialog = false
+                viewModel.deleteSelected()
             },
         )
     }
-}
-
-@Composable
-private fun MoveToAlbumDialog(
-    userAlbumTitles: List<String>,
-    onDismiss: () -> Unit,
-    onMove: (String?) -> Unit,
-    onCreateAlbum: (String) -> Unit,
-) {
-    var newAlbumName by remember { mutableStateOf("") }
-    var showCreateField by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Mover para álbum") },
-        text = {
-            androidx.compose.foundation.layout.Column {
-                Text(
-                    "Organização só no app — o caminho no OneDrive não muda.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                TextButton(onClick = { onMove(null) }) {
-                    Text("Sem álbum (pasta original)")
-                }
-                userAlbumTitles.forEach { title ->
-                    TextButton(onClick = { onMove(title) }) {
-                        Text(title)
-                    }
-                }
-                if (showCreateField) {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = newAlbumName,
-                        onValueChange = { newAlbumName = it },
-                        label = { Text("Nome do álbum") },
-                        singleLine = true,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                } else {
-                    TextButton(onClick = { showCreateField = true }) {
-                        Text("+ Criar álbum…")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (showCreateField) {
-                TextButton(
-                    onClick = {
-                        if (newAlbumName.isNotBlank()) {
-                            onCreateAlbum(newAlbumName.trim())
-                        }
-                    },
-                ) { Text("Criar e mover") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Fechar") }
-        },
-    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

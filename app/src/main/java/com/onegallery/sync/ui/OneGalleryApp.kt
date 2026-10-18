@@ -306,7 +306,8 @@ fun OneGalleryApp(
                 val encoded = entry.arguments?.getString("encodedPath").orEmpty()
                 val path = URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
                 MediaDetailScreen(
-                    canonicalPath = path,
+                    initialCanonicalPath = path,
+                    viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
                     onBack = { navController.popBackStack() },
                 )

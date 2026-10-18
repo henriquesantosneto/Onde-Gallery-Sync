@@ -1,15 +1,28 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -24,23 +37,166 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MediaDetailScreen(
-    canonicalPath: String,
+    initialCanonicalPath: String,
+    viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
     onBack: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
-    var item by remember { mutableStateOf<GalleryDisplayItem?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val items = state.items
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showMoveDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.actionMessage) {
+        state.actionMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearActionMessage()
+        }
+    }
+
+    if (items.isEmpty()) {
+        LaunchedEffect(Unit) { onBack() }
+        return
+    }
+
+    val initialIndex = items.indexOfFirst { it.canonicalPath == initialCanonicalPath }
+        .let { if (it < 0) 0 else it }
+    val pagerState = rememberPagerState(initialPage = initialIndex) { items.size }
+
+    LaunchedEffect(initialCanonicalPath, items) {
+        val idx = items.indexOfFirst { it.canonicalPath == initialCanonicalPath }
+        if (idx >= 0 && idx != pagerState.currentPage) {
+            pagerState.scrollToPage(idx)
+        }
+    }
+
+    val currentItem = items.getOrNull(pagerState.currentPage)
+    val currentPath = currentItem?.canonicalPath
+    val currentSelected = currentPath != null && currentPath in state.selectedPaths
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            when {
+                                state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+                                else -> currentItem?.displayName ?: "Foto"
+                            },
+                            maxLines = 1,
+                        )
+                        if (!state.selectionMode) {
+                            Text(
+                                "${pagerState.currentPage + 1} / ${items.size} · deslize para navegar",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                "Deslize e toque ○ para incluir mais fotos",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
+                    }
+                },
+                actions = {
+                    if (state.selectionMode) {
+                        IconButton(onClick = { showMoveDialog = true }) {
+                            Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
+                        }
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir")
+                        }
+                        TextButton(onClick = { viewModel.clearSelection() }) {
+                            Text("Cancelar")
+                        }
+                    } else if (currentPath != null) {
+                        IconButton(
+                            onClick = { viewModel.toggleSelection(currentPath) },
+                        ) {
+                            Icon(
+                                if (currentSelected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                                contentDescription = "Selecionar",
+                            )
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            key = { page -> items[page].canonicalPath },
+        ) { page ->
+            MediaDetailPage(
+                canonicalPath = items[page].canonicalPath,
+                syncCoordinator = syncCoordinator,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+
+    if (showMoveDialog) {
+        MoveToAlbumDialog(
+            userAlbumTitles = state.userAlbums.map { it.title },
+            onDismiss = { showMoveDialog = false },
+            onMove = { album ->
+                showMoveDialog = false
+                viewModel.moveSelectedToAlbum(album)
+            },
+            onCreateAlbum = { name ->
+                viewModel.createUserAlbum(name) { title ->
+                    showMoveDialog = false
+                    viewModel.moveSelectedToAlbum(title)
+                }
+            },
+        )
+    }
+
+    if (showDeleteDialog) {
+        DeleteSelectionDialog(
+            count = state.selectedPaths.size,
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                showDeleteDialog = false
+                viewModel.deleteSelected()
+            },
+        )
+    }
+}
+
+@Composable
+private fun MediaDetailPage(
+    canonicalPath: String,
+    syncCoordinator: SyncCoordinator,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    var item by remember(canonicalPath) { mutableStateOf<GalleryDisplayItem?>(null) }
+    var loading by remember(canonicalPath) { mutableStateOf(true) }
+    var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
+    var showSingleDelete by remember(canonicalPath) { mutableStateOf(false) }
 
     LaunchedEffect(canonicalPath) {
         loading = true
@@ -55,28 +211,20 @@ fun MediaDetailScreen(
         loading = false
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(item?.displayName ?: "Detalhe") },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text("Voltar") }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            when {
-                loading -> CircularProgressIndicator()
-                item == null -> Text("Item não encontrado.")
-                else -> {
-                    val display = item!!
+    Box(modifier = modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+        when {
+            loading -> {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            }
+            item == null -> {
+                Text("Item não encontrado.", modifier = Modifier.align(Alignment.Center))
+            }
+            else -> {
+                val display = item!!
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     val model = display.thumbnailModel
                     if (model != null) {
                         AsyncImage(
@@ -88,12 +236,19 @@ fun MediaDetailScreen(
                             contentScale = ContentScale.Fit,
                         )
                     } else {
-                        Text("Original na nuvem — use o botão abaixo para baixar.")
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("Original na nuvem — use o botão abaixo para baixar.")
+                        }
                     }
                     Text(
-                        "Estado: ${display.cloudState.name}",
+                        display.cloudState.name,
                         style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        modifier = Modifier.padding(vertical = 6.dp),
                     )
                     if (error != null) {
                         Text(error ?: "", color = MaterialTheme.colorScheme.error)
@@ -109,41 +264,26 @@ fun MediaDetailScreen(
                             },
                         ) { Text("Baixar original") }
                     }
-                    Button(
-                        onClick = { showDeleteDialog = true },
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) { Text("Excluir…") }
+                    TextButton(onClick = { showSingleDelete = true }) {
+                        Text("Excluir esta foto…")
+                    }
                 }
             }
         }
     }
 
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Confirmar exclusão") },
-            text = {
-                Text(
-                    "A exclusão só propaga para o OneDrive e o aparelho após confirmação. " +
-                        "Itens na lixeira do sistema não entram na sincronização.",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        scope.launch {
-                            syncCoordinator.requestDelete(canonicalPath, PendingDeleteTarget.BOTH)
-                                .getOrThrow()
-                            syncCoordinator.resolvePendingDelete(canonicalPath, confirmed = true)
-                                .getOrThrow()
-                            onBack()
-                        }
-                    },
-                ) { Text("Excluir nos dois") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancelar") }
+    if (showSingleDelete) {
+        DeleteSelectionDialog(
+            count = 1,
+            onDismiss = { showSingleDelete = false },
+            onConfirm = {
+                showSingleDelete = false
+                scope.launch {
+                    syncCoordinator.requestDelete(canonicalPath, PendingDeleteTarget.BOTH)
+                        .getOrThrow()
+                    syncCoordinator.resolvePendingDelete(canonicalPath, confirmed = true)
+                        .getOrThrow()
+                }
             },
         )
     }
