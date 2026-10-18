@@ -40,7 +40,7 @@ import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.sync.ActiveSyncItem
-import com.onegallery.sync.sync.queueDetailLabel
+import com.onegallery.sync.sync.SyncQueueDisplayRow
 import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +64,14 @@ fun SyncStatusScreen(
         metadata.filter { syncCoordinator.shouldShowAttentionItem(it) }.take(25)
     }
     var clearingErrors by remember { mutableStateOf(false) }
+    val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
+        when {
+            coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
+                coordinatorState.runQueue
+            coordinatorState.isRunning -> emptyList()
+            else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Sync") }) },
@@ -128,13 +136,17 @@ fun SyncStatusScreen(
                             }
                         }
                         val queueCap = if (coordinatorState.isRunning) 50 else 8
-                        val queueInStatus = syncQueue.take(queueCap)
-                        if (queueInStatus.isNotEmpty()) {
+                        val queueInStatus = queueForUi.take(queueCap)
+                        val activeItem = coordinatorState.activeItem
+                        val activeMissingFromList = coordinatorState.isRunning &&
+                            activeItem != null &&
+                            queueInStatus.none { it.canonicalPath == activeItem.canonicalPath }
+                        if (queueInStatus.isNotEmpty() || activeMissingFromList) {
                             Text(
-                                if (coordinatorState.isRunning && syncQueue.size > queueInStatus.size) {
-                                    "Arquivos na fila (mostrando ${queueInStatus.size} de ${syncQueue.size})"
-                                } else if (syncQueue.size > 1) {
-                                    "Arquivos na fila (${syncQueue.size})"
+                                if (coordinatorState.isRunning && queueForUi.size > queueInStatus.size) {
+                                    "Arquivos na fila (mostrando ${queueInStatus.size} de ${queueForUi.size})"
+                                } else if (queueForUi.size + (if (activeMissingFromList) 1 else 0) > 1) {
+                                    "Arquivos na fila (${queueForUi.size})"
                                 } else {
                                     "Arquivo na fila"
                                 },
@@ -143,17 +155,26 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
                             )
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (activeMissingFromList && activeItem != null) {
+                                    SyncQueueActiveOnlyRow(activeItem = activeItem)
+                                }
                                 queueInStatus.forEach { row ->
                                     SyncQueueItemRow(
                                         row = row,
-                                        activeItem = coordinatorState.activeItem,
+                                        activeItem = activeItem,
                                         isRunning = coordinatorState.isRunning,
                                     )
                                 }
                             }
                         } else if (coordinatorState.isRunning) {
                             Text(
-                                "Nenhum envio ou download pendente no índice — indexando ou concluindo…",
+                                when {
+                                    coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
+                                        "Indexando biblioteca local…"
+                                    coordinatorState.lastMessage.contains("Localização GPS", ignoreCase = true) ->
+                                        "Atualizando localização das fotos…"
+                                    else -> "Preparando fila de sincronismo…"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 12.dp),
@@ -292,8 +313,45 @@ private fun StatRow(label: String, value: String, emphasized: Boolean = false) {
 }
 
 @Composable
+private fun SyncQueueActiveOnlyRow(activeItem: ActiveSyncItem) {
+    Column(Modifier.fillMaxWidth().padding(8.dp)) {
+        Text(
+            activeItem.displayName,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+        )
+        Text(
+            activeItem.operationLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        SyncTransferProgressBar(activeItem = activeItem)
+    }
+}
+
+@Composable
+private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
+    val fraction = activeItem.progressFraction
+    if (fraction != null) {
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        )
+    } else {
+        LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
 private fun SyncQueueItemRow(
-    row: SyncMetadataEntity,
+    row: SyncQueueDisplayRow,
     activeItem: ActiveSyncItem?,
     isRunning: Boolean,
 ) {
@@ -318,9 +376,9 @@ private fun SyncQueueItemRow(
         )
         Text(
             if (isActive) {
-                activeItem?.operationLabel ?: row.queueDetailLabel()
+                activeItem?.operationLabel ?: row.statusLabel
             } else {
-                row.queueDetailLabel()
+                row.statusLabel
             },
             style = MaterialTheme.typography.labelMedium,
             color = if (isActive) {
@@ -329,22 +387,8 @@ private fun SyncQueueItemRow(
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
-        if (isActive) {
-            val fraction = activeItem?.progressFraction
-            if (fraction != null) {
-                LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                )
-            } else {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                )
-            }
+        if (isActive && activeItem != null) {
+            SyncTransferProgressBar(activeItem = activeItem)
         }
     }
 }

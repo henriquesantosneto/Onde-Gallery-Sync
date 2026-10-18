@@ -8,6 +8,23 @@ enum class SyncQueueOperation(val queueLabel: String) {
     DELETE_PENDING("Exclusão pendente"),
 }
 
+/** Item mostrado na fila durante ou após o sync (UI). */
+data class SyncQueueDisplayRow(
+    val canonicalPath: String,
+    val displayName: String,
+    val statusLabel: String,
+) {
+    companion object {
+        fun fromEntity(entity: SyncMetadataEntity): SyncQueueDisplayRow {
+            return SyncQueueDisplayRow(
+                canonicalPath = entity.canonicalPath,
+                displayName = entity.displayName,
+                statusLabel = entity.syncQueueStatusLabel(),
+            )
+        }
+    }
+}
+
 data class ActiveSyncItem(
     val canonicalPath: String,
     val displayName: String,
@@ -31,6 +48,17 @@ fun SyncMetadataEntity.queueOperation(): SyncQueueOperation? {
         CloudSyncState.PENDING_UPLOAD -> SyncQueueOperation.UPLOAD_PENDING
         CloudSyncState.PENDING_DOWNLOAD -> SyncQueueOperation.DOWNLOAD_PENDING
         else -> null
+    }
+}
+
+/** Rótulo na fila de sync (inclui LOCAL_ONLY = aguardando primeiro envio). */
+fun SyncMetadataEntity.syncQueueStatusLabel(): String {
+    queueOperation()?.let { return it.queueLabel }
+    return when (cloudState) {
+        CloudSyncState.LOCAL_ONLY -> SyncQueueOperation.UPLOAD_PENDING.queueLabel
+        CloudSyncState.SYNCED -> "Sincronizado"
+        CloudSyncState.CLOUD_ONLY -> SyncQueueOperation.DOWNLOAD_PENDING.queueLabel
+        else -> queueDetailLabel()
     }
 }
 

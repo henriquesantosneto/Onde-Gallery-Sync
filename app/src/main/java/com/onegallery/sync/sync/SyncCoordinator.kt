@@ -53,6 +53,8 @@ data class SyncUiState(
     val isOffline: Boolean = false,
     /** Arquivo em transferência agora (upload/download). */
     val activeItem: ActiveSyncItem? = null,
+    /** Fila prevista/em andamento nesta execução (uploads reais, não só PENDING_* no Room). */
+    val runQueue: List<SyncQueueDisplayRow> = emptyList(),
 )
 
 class SyncCoordinator(
@@ -154,6 +156,7 @@ class SyncCoordinator(
             _state.value = _state.value.copy(
                 isRunning = false,
                 activeItem = null,
+                runQueue = emptyList(),
                 lastMessage = completedMessageForCancelReason(reason),
             )
             resetSyncCancel()
@@ -186,7 +189,12 @@ class SyncCoordinator(
     private fun ensureAutoSyncAllowed(userInitiated: Boolean): Result<Unit>? {
         if (userInitiated || !syncPreferences.isAutoSyncPaused()) return null
         val msg = autoSyncPausedMessage("Sync automático em pausa após cancelamento.")
-        _state.value = _state.value.copy(isRunning = false, activeItem = null, lastMessage = msg)
+        _state.value = _state.value.copy(
+            isRunning = false,
+            activeItem = null,
+            runQueue = emptyList(),
+            lastMessage = msg,
+        )
         return Result.failure(IllegalStateException(msg))
     }
 
@@ -255,6 +263,57 @@ class SyncCoordinator(
 
     private fun setActiveSyncItem(item: ActiveSyncItem?) {
         _state.value = _state.value.copy(activeItem = item)
+    }
+
+    private fun setRunQueueFromEntities(entities: List<SyncMetadataEntity>) {
+        _state.value = _state.value.copy(
+            runQueue = entities.map { SyncQueueDisplayRow.fromEntity(it) },
+        )
+    }
+
+    private fun removeFromRunQueue(canonicalPath: String) {
+        val next = _state.value.runQueue.filter { it.canonicalPath != canonicalPath }
+        if (next.size != _state.value.runQueue.size) {
+            _state.value = _state.value.copy(runQueue = next)
+        }
+    }
+
+    private fun planUploadsForSync(
+        localRows: List<SyncMetadataEntity>,
+        remoteByPath: Map<String, RemoteDriveFile>,
+    ): List<SyncMetadataEntity> {
+        val planned = mutableListOf<SyncMetadataEntity>()
+        for (row in localRows) {
+            if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
+            val remote = remoteByPath[row.canonicalPath]
+            when {
+                remote == null && row.oneDriveItemId != null -> Unit
+                remote == null -> planned.add(row)
+                else -> {
+                    val merged = reconcileWithRemote(row, remote)
+                    if (merged.cloudState == CloudSyncState.PENDING_UPLOAD) {
+                        planned.add(merged)
+                    }
+                }
+            }
+        }
+        return planned
+    }
+
+    private fun buildSyncRunQueueEntities(
+        plannedUploads: List<SyncMetadataEntity>,
+        allRows: List<SyncMetadataEntity>,
+    ): List<SyncMetadataEntity> {
+        val uploadPaths = plannedUploads.map { it.canonicalPath }.toSet()
+        val rest = allRows.filter { row ->
+            row.canonicalPath !in uploadPaths &&
+                (
+                    row.pendingDeleteTarget != PendingDeleteTarget.NONE ||
+                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
+                        row.cloudState == CloudSyncState.PENDING_UPLOAD
+                    )
+        }
+        return plannedUploads + rest
     }
 
     suspend fun getMetadata(canonicalPath: String): SyncMetadataEntity? {
@@ -381,7 +440,12 @@ class SyncCoordinator(
             foregroundGuard.runWithForeground {
                 resetSyncCancel()
                 bindActiveLongTaskJob()
-                _state.value = _state.value.copy(isRunning = true, lastMessage = "Sincronizando com OneDrive…")
+                _state.value = _state.value.copy(
+                    isRunning = true,
+                    runQueue = emptyList(),
+                    activeItem = null,
+                    lastMessage = "Sincronizando com OneDrive…",
+                )
                 runCatching {
                     ensureNotCancelled()
                     flushLegacyPendingDeletes()
@@ -396,7 +460,11 @@ class SyncCoordinator(
                     var markedPendingDownload = 0
                     var cloudOnly = 0
 
-                    val rows = syncMetadataDao.getAll().filter { it.localMediaId != null }
+                    val allRows = syncMetadataDao.getAll()
+                    val rows = allRows.filter { it.localMediaId != null }
+                    val plannedUploads = planUploadsForSync(rows, remoteByPath)
+                    setRunQueueFromEntities(buildSyncRunQueueEntities(plannedUploads, allRows))
+
                     val knownPaths = mutableSetOf<String>()
 
                     for (row in rows) {
@@ -471,7 +539,8 @@ class SyncCoordinator(
                     }
                     _state.value = _state.value.copy(
                         isRunning = false,
-                activeItem = null,
+                        activeItem = null,
+                        runQueue = emptyList(),
                         isOffline = false,
                         pendingOperations = pendingCount,
                         lastMessage = buildString {
@@ -491,7 +560,8 @@ class SyncCoordinator(
                     val cancelled = error is CancellationException
                     _state.value = _state.value.copy(
                         isRunning = false,
-                activeItem = null,
+                        activeItem = null,
+                        runQueue = emptyList(),
                         lastMessage = when {
                             cancelled -> cancellationResultMessage()
                             else -> error.message ?: "Erro na sincronização."
@@ -906,6 +976,7 @@ class SyncCoordinator(
         }.also {
             temp.delete()
             setActiveSyncItem(null)
+            removeFromRunQueue(row.canonicalPath)
         }
     }
 
