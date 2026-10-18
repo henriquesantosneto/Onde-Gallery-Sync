@@ -30,7 +30,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +59,11 @@ import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.gridAdaptiveMinSize
 import com.onegallery.sync.ui.gallery.rememberGalleryGridZoom
 
+private enum class AlbumsBrowseTab {
+    ALBUMS,
+    PLACES,
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsScreen(
@@ -73,43 +81,63 @@ fun AlbumsScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var newAlbumName by remember { mutableStateOf("") }
+    var selectedTab by rememberSaveable { mutableStateOf(AlbumsBrowseTab.ALBUMS) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Álbuns") },
-                actions = {
-                    IconButton(onClick = onOpenMap) {
-                        Icon(Icons.Outlined.Map, contentDescription = "Mapa de fotos")
-                    }
-                    IconButton(onClick = { showSortMenu = true }) {
-                        Icon(Icons.Outlined.Sort, contentDescription = "Ordenar álbuns")
-                    }
-                    DropdownMenu(
-                        expanded = showSortMenu,
-                        onDismissRequest = { showSortMenu = false },
-                    ) {
-                        AlbumListSort.entries.forEach { sort ->
-                            DropdownMenuItem(
-                                text = { Text(sort.label) },
-                                onClick = {
-                                    viewModel.setAlbumListSort(sort)
-                                    showSortMenu = false
-                                },
-                            )
+            Column {
+                TopAppBar(
+                    title = { Text("Álbuns") },
+                    actions = {
+                        IconButton(onClick = onOpenMap) {
+                            Icon(Icons.Outlined.Map, contentDescription = "Mapa de fotos")
                         }
-                    }
-                },
-            )
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(Icons.Outlined.Sort, contentDescription = "Ordenar")
+                        }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false },
+                        ) {
+                            AlbumListSort.entries.forEach { sort ->
+                                DropdownMenuItem(
+                                    text = { Text(sort.label) },
+                                    onClick = {
+                                        viewModel.setAlbumListSort(sort)
+                                        showSortMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    },
+                )
+                PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
+                    Tab(
+                        selected = selectedTab == AlbumsBrowseTab.ALBUMS,
+                        onClick = { selectedTab = AlbumsBrowseTab.ALBUMS },
+                        text = { Text("Álbuns") },
+                    )
+                    Tab(
+                        selected = selectedTab == AlbumsBrowseTab.PLACES,
+                        onClick = { selectedTab = AlbumsBrowseTab.PLACES },
+                        text = { Text("Locais") },
+                    )
+                }
+            }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showCreateDialog = true }) {
-                Icon(Icons.Outlined.Add, contentDescription = "Novo álbum")
+            if (selectedTab == AlbumsBrowseTab.ALBUMS) {
+                FloatingActionButton(onClick = { showCreateDialog = true }) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Novo álbum")
+                }
             }
         },
     ) { padding ->
-        val gridEntries = remember(state.placeAlbums, state.albums) {
-            buildAlbumsGridEntries(state.placeAlbums, state.albums)
+        val gridEntries = remember(state.placeAlbums, state.albums, selectedTab) {
+            when (selectedTab) {
+                AlbumsBrowseTab.ALBUMS -> buildAlbumGridEntries(state.albums)
+                AlbumsBrowseTab.PLACES -> buildPlaceGridEntries(state.placeAlbums)
+            }
         }
         when {
             gridEntries.isEmpty() -> {
@@ -120,7 +148,13 @@ fun AlbumsScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "Nenhum álbum ainda. Sincronize ou crie um álbum.",
+                        when (selectedTab) {
+                            AlbumsBrowseTab.ALBUMS ->
+                                "Nenhum álbum ainda. Sincronize ou crie um álbum."
+                            AlbumsBrowseTab.PLACES ->
+                                "Nenhum local com GPS no índice. Sincronize e conceda " +
+                                    "“Localização das mídias” para ver locais aqui."
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -142,20 +176,9 @@ fun AlbumsScreen(
                     items(
                         items = gridEntries,
                         key = { it.key },
-                        span = { entry ->
-                            when (entry) {
-                                is AlbumsGridEntry.Header -> GridItemSpan(maxLineSpan)
-                                is AlbumsGridEntry.Album -> GridItemSpan(1)
-                            }
-                        },
+                        span = { GridItemSpan(1) },
                     ) { entry ->
                         when (entry) {
-                            is AlbumsGridEntry.Header -> {
-                                AlbumsSectionTitle(
-                                    title = entry.header.title,
-                                    kind = entry.header.kind,
-                                )
-                            }
                             is AlbumsGridEntry.Album -> {
                                 AlbumGridTile(
                                     album = entry.album,
@@ -172,6 +195,7 @@ fun AlbumsScreen(
                                     },
                                 )
                             }
+                            is AlbumsGridEntry.Header -> Unit
                         }
                     }
                 }

@@ -121,7 +121,7 @@ class GalleryViewModel(
             isLoading = controls.isLoading,
             items = items,
             albums = buildAlbums(allItems, userAlbums, controls.albumSort),
-            placeAlbums = buildPlaceAlbums(allItems),
+            placeAlbums = sortMediaAlbums(buildPlaceAlbums(allItems), controls.albumSort),
             userAlbums = userAlbums,
             albumFilter = albumFilter,
             locationFilter = locationFilter,
@@ -297,6 +297,10 @@ private fun buildAlbums(
             sortTimestamp = latest,
         )
     }
+    return sortMediaAlbums(albums, sort)
+}
+
+private fun sortMediaAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
     return when (sort) {
         AlbumListSort.NAME_A_Z -> albums.sortedBy { it.title.lowercase() }
         AlbumListSort.NAME_Z_A -> albums.sortedByDescending { it.title.lowercase() }
@@ -319,7 +323,6 @@ private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> 
                 sortTimestamp = latest,
             )
         }
-        .sortedByDescending { it.sortTimestamp }
 }
 
 class GalleryViewModelFactory(
