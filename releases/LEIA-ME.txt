@@ -1,14 +1,13 @@
-OneGallery Sync — APK 0.8.6 (versionCode 62)
+OneGallery Sync — APK 0.8.8 (versionCode 64)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.6-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.8-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Ao abrir um álbum, a barra inferior permanece em Álbuns (não muda para Fotos)
-- Pinça na grade Fotos/Álbuns (timeline): gesto manual com dois dedos; abrir dedos = miniaturas maiores
-
-Inclui também: pinça na visualização de mídia, vídeos mudos, sync e mapa GPS.
+- Timeline estilo Samsung: separadores por data na grade + barra fixa no topo ao rolar
+- Pinça mais suave; agrupamento por dia com miniaturas pequenas
+- Álbum aberto mantém aba Álbuns selecionada
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
