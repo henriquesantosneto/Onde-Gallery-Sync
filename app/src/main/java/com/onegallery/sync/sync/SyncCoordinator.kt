@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.ui.gallery.GalleryMapper
@@ -60,6 +61,7 @@ class SyncCoordinator(
     private val syncMetadataDao: SyncMetadataDao,
     private val userAlbumDao: UserAlbumDao,
     private val mediaCacheRepository: MediaCacheRepository,
+    private val mediaLocationResolver: MediaLocationResolver,
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
@@ -943,6 +945,7 @@ class SyncCoordinator(
         canonical: String,
         existing: SyncMetadataEntity?,
     ): SyncMetadataEntity {
+        val location = resolveLocationForItem(item, existing)
         return SyncMetadataEntity(
             canonicalPath = canonical,
             displayName = item.displayName,
@@ -962,7 +965,25 @@ class SyncCoordinator(
             cachedFilePath = existing?.cachedFilePath,
             pendingDeleteTarget = existing?.pendingDeleteTarget ?: PendingDeleteTarget.NONE,
             lastError = existing?.lastError?.takeUnless { isTransientNetworkMessage(it) },
+            locationLabel = location.first,
+            latitude = location.second,
+            longitude = location.third,
         )
+    }
+
+    private fun resolveLocationForItem(
+        item: LocalMediaItem,
+        existing: SyncMetadataEntity?,
+    ): Triple<String?, Double?, Double?> {
+        if (existing?.localMediaId == item.id &&
+            existing.locationLabel != null &&
+            existing.latitude != null &&
+            existing.longitude != null
+        ) {
+            return Triple(existing.locationLabel, existing.latitude, existing.longitude)
+        }
+        val resolved = mediaLocationResolver.resolveFromUri(item.uri) ?: return Triple(null, null, null)
+        return Triple(resolved.label, resolved.latitude, resolved.longitude)
     }
 
     private fun restoredCloudState(row: SyncMetadataEntity): CloudSyncState {

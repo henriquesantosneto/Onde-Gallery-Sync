@@ -18,6 +18,7 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.onedrive.GraphFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
@@ -89,6 +90,7 @@ class OneGalleryApplication : Application() {
         authManager = MsalAuthManager(this, AuthPreferences(this))
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
+        val mediaLocationResolver = MediaLocationResolver(this)
         graphFolderPreferences = GraphFolderPreferences(this)
         oneDriveRepository = OneDriveRepository(this, authManager, graphFolderPreferences)
         syncPreferences = SyncPreferences(this).also {
@@ -112,6 +114,7 @@ class OneGalleryApplication : Application() {
             syncMetadataDao = database.syncMetadataDao(),
             userAlbumDao = database.userAlbumDao(),
             mediaCacheRepository = mediaCacheRepository,
+            mediaLocationResolver = mediaLocationResolver,
             networkMonitor = NetworkMonitor(this),
             syncPreferences = syncPreferences,
             mediaDeleteRequestRouter = mediaDeleteRequestRouter,

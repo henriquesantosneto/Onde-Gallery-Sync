@@ -21,8 +21,10 @@ data class GalleryUiState(
     val isLoading: Boolean = true,
     val items: List<GalleryDisplayItem> = emptyList(),
     val albums: List<MediaAlbum> = emptyList(),
+    val placeAlbums: List<MediaAlbum> = emptyList(),
     val userAlbums: List<UserAlbumEntity> = emptyList(),
     val albumFilter: String? = null,
+    val locationFilter: String? = null,
     val sortOrder: GallerySortOrder = GallerySortOrder.DATE_NEWEST,
     val albumListSort: AlbumListSort = AlbumListSort.NAME_A_Z,
     val selectionMode: Boolean = false,
@@ -32,7 +34,7 @@ data class GalleryUiState(
 )
 
 private data class SelectionSlice(
-    val filter: String?,
+    val browseFilter: GalleryBrowseFilter,
     val isLoading: Boolean,
     val error: String?,
     val message: String?,
@@ -46,7 +48,7 @@ private data class SortSlice(
 )
 
 private data class UiControls(
-    val filter: String?,
+    val browseFilter: GalleryBrowseFilter,
     val isLoading: Boolean,
     val error: String?,
     val message: String?,
@@ -63,7 +65,7 @@ class GalleryViewModel(
     private val mediaCacheRepository: MediaCacheRepository,
 ) : ViewModel() {
 
-    private val albumFilter = MutableStateFlow<String?>(null)
+    private val browseFilter = MutableStateFlow<GalleryBrowseFilter>(GalleryBrowseFilter.All)
     private val loading = MutableStateFlow(true)
     private val errorState = MutableStateFlow<String?>(null)
     private val actionMessage = MutableStateFlow<String?>(null)
@@ -78,7 +80,7 @@ class GalleryViewModel(
     ) { metadata, userAlbums -> metadata to userAlbums }
 
     private val uiControls = combine(
-        combine(albumFilter, loading, errorState, actionMessage, selectionMode) {
+        combine(browseFilter, loading, errorState, actionMessage, selectionMode) {
                 filter, isLoading, error, message, selecting ->
             SelectionSlice(filter, isLoading, error, message, selecting)
         },
@@ -87,7 +89,7 @@ class GalleryViewModel(
         },
     ) { selection, sort ->
         UiControls(
-            filter = selection.filter,
+            browseFilter = selection.browseFilter,
             isLoading = selection.isLoading,
             error = selection.error,
             message = selection.message,
@@ -101,15 +103,26 @@ class GalleryViewModel(
     val state: StateFlow<GalleryUiState> = combine(libraryFlow, uiControls) { (metadata, userAlbums), controls ->
         val allItems = metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) }
         val items = allItems
-            .filter { controls.filter == null || it.albumName == controls.filter }
+            .filter { item ->
+                when (val filter = controls.browseFilter) {
+                    GalleryBrowseFilter.All -> true
+                    is GalleryBrowseFilter.AlbumFolder -> item.albumName == filter.name
+                    is GalleryBrowseFilter.Place -> item.locationLabel == filter.label
+                }
+            }
             .sortedBy(controls.order)
+
+        val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
+        val locationFilter = (controls.browseFilter as? GalleryBrowseFilter.Place)?.label
 
         GalleryUiState(
             isLoading = controls.isLoading,
             items = items,
             albums = buildAlbums(allItems, userAlbums, controls.albumSort),
+            placeAlbums = buildPlaceAlbums(allItems),
             userAlbums = userAlbums,
-            albumFilter = controls.filter,
+            albumFilter = albumFilter,
+            locationFilter = locationFilter,
             sortOrder = controls.order,
             albumListSort = controls.albumSort,
             selectionMode = controls.selecting,
@@ -123,8 +136,22 @@ class GalleryViewModel(
         refresh()
     }
 
+    fun clearBrowseFilters() {
+        browseFilter.value = GalleryBrowseFilter.All
+        clearSelection()
+    }
+
     fun setAlbumFilter(album: String?) {
-        albumFilter.value = album
+        browseFilter.value = if (album == null) GalleryBrowseFilter.All else GalleryBrowseFilter.AlbumFolder(album)
+        clearSelection()
+    }
+
+    fun setPlaceFilter(placeLabel: String?) {
+        browseFilter.value = if (placeLabel == null) {
+            GalleryBrowseFilter.All
+        } else {
+            GalleryBrowseFilter.Place(placeLabel)
+        }
         clearSelection()
     }
 
@@ -160,15 +187,8 @@ class GalleryViewModel(
     }
 
     fun toggleSelection(canonicalPath: String) {
-        if (!selectionMode.value) {
-            enterSelectionMode(canonicalPath)
-            return
-        }
         selectedPaths.update { current ->
             if (canonicalPath in current) current - canonicalPath else current + canonicalPath
-        }
-        if (selectedPaths.value.isEmpty()) {
-            selectionMode.value = false
         }
     }
 
@@ -197,9 +217,9 @@ class GalleryViewModel(
         if (paths.isEmpty()) return
         viewModelScope.launch {
             syncCoordinator.moveItemsToUserAlbum(paths, albumTitle)
-                .onSuccess { count ->
+                .onSuccess {
                     val label = albumTitle ?: "pasta original"
-                    actionMessage.value = "$count foto(s) movida(s) para \"$label\"."
+                    actionMessage.value = "${paths.size} item(ns) movidos para \"$label\"."
                     clearSelection()
                 }
                 .onFailure { actionMessage.value = it.message }
@@ -212,32 +232,22 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
                 .onSuccess { count ->
-                    actionMessage.value = "$count item(ns) removido(s) no aparelho e no OneDrive."
+                    actionMessage.value = "$count item(ns) excluído(s)."
                     clearSelection()
                 }
                 .onFailure { actionMessage.value = it.message }
         }
     }
 
-    fun deleteSingle(canonicalPath: String, onDone: () -> Unit = {}) {
+    fun deleteSingle(canonicalPath: String, onRemoved: () -> Unit = {}) {
         viewModelScope.launch {
-            syncCoordinator.deleteItemsImmediately(listOf(canonicalPath), PendingDeleteTarget.BOTH)
-                .onSuccess {
-                    actionMessage.value = "Removido no aparelho e no OneDrive."
-                    onDone()
-                }
-                .onFailure { actionMessage.value = it.message }
-        }
-    }
-
-    fun releaseSingle(canonicalPath: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
-            syncCoordinator.releaseLocalSpace(listOf(canonicalPath))
-                .onSuccess {
-                    actionMessage.value = "Cópia local removida; nuvem e miniatura mantidas."
-                    onDone()
-                }
-                .onFailure { actionMessage.value = it.message }
+            syncCoordinator.deleteItemsImmediately(
+                listOf(canonicalPath),
+                PendingDeleteTarget.BOTH,
+            ).onSuccess {
+                actionMessage.value = "Item excluído."
+                onRemoved()
+            }.onFailure { actionMessage.value = it.message }
         }
     }
 
@@ -254,6 +264,14 @@ class GalleryViewModel(
                 .onFailure { actionMessage.value = it.message }
         }
     }
+
+    fun releaseSingle(canonicalPath: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            syncCoordinator.releaseLocalSpace(listOf(canonicalPath))
+                .onSuccess { onDone() }
+                .onFailure { actionMessage.value = it.message }
+        }
+    }
 }
 
 private fun buildAlbums(
@@ -267,7 +285,7 @@ private fun buildAlbums(
         val items = grouped[title].orEmpty()
         val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
         MediaAlbum(
-            bucketId = title,
+            bucketId = "album:$title",
             title = title,
             itemCount = items.size,
             coverUri = items.firstOrNull()?.localUri ?: items.firstOrNull()?.cachedOriginal?.let {
@@ -281,6 +299,24 @@ private fun buildAlbums(
         AlbumListSort.NAME_Z_A -> albums.sortedByDescending { it.title.lowercase() }
         AlbumListSort.DATE_NEWEST -> albums.sortedByDescending { it.sortTimestamp }
     }
+}
+
+private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> {
+    return items
+        .mapNotNull { item -> item.locationLabel?.let { label -> label to item } }
+        .groupBy({ it.first }, { it.second })
+        .map { (label, group) ->
+            val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
+            MediaAlbum(
+                bucketId = "place:$label",
+                title = label,
+                itemCount = group.size,
+                coverUri = group.maxByOrNull { it.sortTimestamp }?.localUri
+                    ?: group.firstNotNullOfOrNull { it.cachedOriginal?.let(android.net.Uri::fromFile) },
+                sortTimestamp = latest,
+            )
+        }
+        .sortedByDescending { it.sortTimestamp }
 }
 
 class GalleryViewModelFactory(

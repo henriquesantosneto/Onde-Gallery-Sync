@@ -82,9 +82,11 @@ fun GalleryScreen(
 
     val title = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+        state.locationFilter != null -> state.locationFilter ?: "Local"
         state.albumFilter != null -> "Álbum: ${state.albumFilter}"
         else -> "Fotos"
     }
+    val filteredBrowse = state.locationFilter != null || state.albumFilter != null
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -92,10 +94,10 @@ fun GalleryScreen(
             TopAppBar(
                 title = { Text(title) },
                 navigationIcon = {
-                    if (!state.selectionMode && state.albumFilter != null) {
+                    if (!state.selectionMode && filteredBrowse) {
                         IconButton(
                             onClick = {
-                                viewModel.setAlbumFilter(null)
+                                viewModel.clearBrowseFilters()
                                 onExitAlbumFilter()
                             },
                         ) {

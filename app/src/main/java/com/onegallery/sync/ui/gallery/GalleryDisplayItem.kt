@@ -19,6 +19,9 @@ data class GalleryDisplayItem(
     val cachedOriginal: File?,
     val cachedPlaceholderThumb: File? = null,
     val sortTimestamp: Long,
+    val locationLabel: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 ) {
     val thumbnailModel: Any?
         get() = localUri ?: cachedOriginal ?: cachedPlaceholderThumb

@@ -37,6 +37,9 @@ object GalleryMapper {
             cachedOriginal = cached,
             cachedPlaceholderThumb = placeholderThumb,
             sortTimestamp = sort,
+            locationLabel = entity.locationLabel,
+            latitude = entity.latitude,
+            longitude = entity.longitude,
         )
     }
 }

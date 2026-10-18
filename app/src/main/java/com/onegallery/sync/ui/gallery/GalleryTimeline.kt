@@ -35,6 +35,18 @@ private fun capitalizeMonth(month: java.time.Month, year: Int): String {
     return raw.replaceFirstChar { if (it.isLowerCase()) it.titlecase(ptBr) else it.toString() }
 }
 
+fun formatMediaCaptureDate(epochSeconds: Long): String {
+    if (epochSeconds <= 0L) return ""
+    val date = timestampToDate(epochSeconds)
+    val today = LocalDate.now()
+    return when {
+        date == today -> "Hoje"
+        date == today.minusDays(1) -> "Ontem"
+        date.year == today.year -> capitalizeMonth(date.month, date.year)
+        else -> "${capitalizeMonth(date.month, date.year)} ${date.year}"
+    }
+}
+
 fun buildGalleryGridEntries(
     items: List<GalleryDisplayItem>,
     sortOrder: GallerySortOrder,

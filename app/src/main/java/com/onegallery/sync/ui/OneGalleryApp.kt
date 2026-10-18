@@ -208,8 +208,7 @@ fun OneGalleryApp(
                             selected = currentRoute == tab.route,
                             onClick = {
                                 when (tab) {
-                                    MainTab.Gallery -> galleryViewModel.setAlbumFilter(null)
-                                    MainTab.Albums -> galleryViewModel.setAlbumFilter(null)
+                                    MainTab.Gallery, MainTab.Albums -> galleryViewModel.clearBrowseFilters()
                                     else -> Unit
                                 }
                                 navController.navigate(tab.route) {

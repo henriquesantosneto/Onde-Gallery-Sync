@@ -126,10 +126,18 @@ fun MediaDetailScreen(
                                 maxLines = 1,
                             )
                             if (!state.selectionMode) {
+                                val dateLine = currentItem?.sortTimestamp?.let(::formatMediaCaptureDate).orEmpty()
+                                val locationLine = currentItem?.locationLabel
+                                val subtitle = listOfNotNull(locationLine, dateLine.takeIf { it.isNotBlank() })
+                                    .joinToString(" · ")
+                                    .ifBlank {
+                                        "${pagerState.currentPage + 1} / ${pagerPaths.size} · deslize para navegar"
+                                    }
                                 Text(
-                                    "${pagerState.currentPage + 1} / ${pagerPaths.size} · deslize para navegar",
+                                    subtitle,
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
                                 )
                             }
                         }

@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Collections
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -100,8 +103,11 @@ fun AlbumsScreen(
             }
         },
     ) { padding ->
+        val gridEntries = remember(state.placeAlbums, state.albums) {
+            buildAlbumsGridEntries(state.placeAlbums, state.albums)
+        }
         when {
-            state.albums.isEmpty() -> {
+            gridEntries.isEmpty() -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -128,15 +134,39 @@ fun AlbumsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    items(state.albums, key = { it.bucketId }) { album ->
-                        AlbumGridTile(
-                            album = album,
-                            compact = compactTiles,
-                            onClick = {
-                                viewModel.setAlbumFilter(album.title)
-                                onOpenAlbum(album.title)
-                            },
-                        )
+                    items(
+                        items = gridEntries,
+                        key = { it.key },
+                        span = { entry ->
+                            when (entry) {
+                                is AlbumsGridEntry.Header -> GridItemSpan(maxLineSpan)
+                                is AlbumsGridEntry.Album -> GridItemSpan(1)
+                            }
+                        },
+                    ) { entry ->
+                        when (entry) {
+                            is AlbumsGridEntry.Header -> {
+                                AlbumsSectionTitle(
+                                    title = entry.header.title,
+                                    kind = entry.header.kind,
+                                )
+                            }
+                            is AlbumsGridEntry.Album -> {
+                                AlbumGridTile(
+                                    album = entry.album,
+                                    compact = compactTiles,
+                                    isPlace = entry.isPlace,
+                                    onClick = {
+                                        if (entry.isPlace) {
+                                            viewModel.setPlaceFilter(entry.album.title)
+                                        } else {
+                                            viewModel.setAlbumFilter(entry.album.title)
+                                        }
+                                        onOpenAlbum(entry.album.title)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -183,9 +213,28 @@ fun AlbumsScreen(
 }
 
 @Composable
+private fun AlbumsSectionTitle(
+    title: String,
+    kind: AlbumsSectionKind,
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                top = if (kind == AlbumsSectionKind.PLACES) 4.dp else 12.dp,
+                bottom = 4.dp,
+            ),
+    )
+}
+
+@Composable
 private fun AlbumGridTile(
     album: MediaAlbum,
     compact: Boolean,
+    isPlace: Boolean,
     onClick: () -> Unit,
 ) {
     Column(
@@ -210,7 +259,7 @@ private fun AlbumGridTile(
                 )
             } else {
                 Icon(
-                    Icons.Outlined.Collections,
+                    if (isPlace) Icons.Outlined.Place else Icons.Outlined.Collections,
                     contentDescription = null,
                     modifier = Modifier.padding(32.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,

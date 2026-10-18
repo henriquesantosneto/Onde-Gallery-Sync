@@ -21,4 +21,7 @@ data class SyncMetadataEntity(
     val cachedFilePath: String?,
     val pendingDeleteTarget: PendingDeleteTarget,
     val lastError: String?,
+    val locationLabel: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )
