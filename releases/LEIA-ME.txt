@@ -1,17 +1,42 @@
-OneGallery Sync — APK de debug
-================================
+OneGallery Sync — APK 0.5.4 (versionCode 17)
+============================================
 
 Arquivo: OneGallerySync-debug.apk (~24 MB)
 
-Clone só desta branch:
+--- Hash Azure (tile Android → campo Assinatura) ---
 
-  git clone --branch cursor/apk-download-0dd7 --single-branch \
-    https://origin.cursor.com/henriquekako/tmp-a53cc6c3697b04a5.git onegallery-apk
+Pacote: com.onegallery.sync
 
-  cd onegallery-apk/releases
-  # instale OneGallerySync-debug.apk no Samsung
+Hash SHA-1 em Base64 (cole só isto, sem aspas, sem msauth://):
 
-Hash MSAL (deste build debug):
   pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
 
-Pacote Android: com.onegallery.sync
+(20 bytes SHA-1; termina com =. Não use hex a47f:77:84… nem URI com %2F neste campo.)
+
+URI Mobile/desktop (se não houver tile Android):
+
+  msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D
+
+--- Download via Git ---
+
+Branch: cursor/apk-download-0dd7
+Caminho do APK no repo: releases/OneGallerySync-debug.apk
+
+Clone (Origin / Cursor — login na conta Cursor):
+
+  git clone --branch cursor/apk-download-0dd7 --single-branch \
+    https://origin.cursor.com/git/henriquekako/tmp-a53cc6c3697b04a5.git onegallery-apk
+  cd onegallery-apk/releases
+
+GitHub (henriquesantosneto/Onde-Gallery-Sync) — após publicar esta branch no GitHub:
+
+  git clone --branch cursor/apk-download-0dd7 --single-branch \
+    https://github.com/henriquesantosneto/Onde-Gallery-Sync.git onegallery-apk
+
+Download direto (raw), quando a branch existir no GitHub:
+
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/raw/cursor/apk-download-0dd7/releases/OneGallerySync-debug.apk
+
+  https://raw.githubusercontent.com/henriquesantosneto/Onde-Gallery-Sync/cursor/apk-download-0dd7/releases/OneGallerySync-debug.apk
+
+(Hoje o GitHub só tem main; use Origin ou crie o repo a partir desta run no Cursor.)
