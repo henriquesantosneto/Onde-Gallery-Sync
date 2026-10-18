@@ -1,6 +1,9 @@
 package com.onegallery.sync
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
@@ -115,7 +118,31 @@ class OneGalleryApplication : Application() {
             appForegroundState = appForegroundState,
         )
         syncTaskLauncher = SyncTaskLauncher(applicationScope, syncCoordinator)
+        registerWifiSyncNetworkGuard()
         rescheduleBackgroundSync()
+    }
+
+    private fun registerWifiSyncNetworkGuard() {
+        val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        connectivityManager.registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    enforceWifiOnlyDuringSync()
+                }
+
+                override fun onLost(network: Network) {
+                    enforceWifiOnlyDuringSync()
+                }
+            },
+        )
+    }
+
+    private fun enforceWifiOnlyDuringSync() {
+        if (!syncPreferences.wifiOnly) return
+        if (!syncCoordinator.state.value.isRunning) return
+        if (syncCoordinator.violatesWifiOnlyPolicy()) {
+            syncCoordinator.cancelSyncForWifiPolicy()
+        }
     }
 
     fun rescheduleBackgroundSync() {

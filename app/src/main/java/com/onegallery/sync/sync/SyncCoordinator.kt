@@ -31,8 +31,17 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
+private enum class SyncCancelReason {
+    NONE,
+    USER,
+    WIFI_POLICY,
+}
+
 /** Margem para diferença de relógio entre aparelho, MediaStore e Graph. */
 private const val SYNC_TIMESTAMP_TOLERANCE_SEC = 2L
+
+private const val WIFI_POLICY_MESSAGE =
+    "Sync pausado: apenas Wi‑Fi. Conecte-se ao Wi‑Fi ou desative essa opção nos Ajustes."
 
 data class SyncUiState(
     val lastIndexedLocalCount: Int = 0,
@@ -90,23 +99,74 @@ class SyncCoordinator(
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
 
     private val syncCancelRequested = AtomicBoolean(false)
+    private val syncCancelReason = AtomicReference(SyncCancelReason.NONE)
     private val activeLongTaskJob = AtomicReference<Job?>(null)
     private val longTaskMutex = Mutex()
     private val foregroundGuard = SyncForegroundGuard(appContext)
 
     fun requestCancelSync() {
+        cancelActiveSync(SyncCancelReason.USER, applyUserCooldown = true, inProgressMessage = "Cancelando…")
+    }
+
+    /** Interrompe sync em andamento quando a política “apenas Wi‑Fi” não permite a rede atual. */
+    fun cancelSyncForWifiPolicy() {
+        cancelActiveSync(
+            SyncCancelReason.WIFI_POLICY,
+            applyUserCooldown = false,
+            inProgressMessage = WIFI_POLICY_MESSAGE,
+        )
+    }
+
+    /**
+     * Chamado ao alterar o toggle “Sync apenas em Wi‑Fi” nos Ajustes.
+     * Se ligar sem Wi‑Fi, para sync ativo; se desligar, o caller deve disparar sync.
+     */
+    fun onWifiOnlyPreferenceChanged(enabled: Boolean) {
+        if (enabled && syncPreferences.wifiOnly && violatesWifiOnlyPolicy()) {
+            cancelSyncForWifiPolicy()
+        }
+    }
+
+    fun violatesWifiOnlyPolicy(): Boolean {
+        return syncPreferences.wifiOnly && networkMonitor.isOnline() && !networkMonitor.isUnmetered()
+    }
+
+    private fun cancelActiveSync(
+        reason: SyncCancelReason,
+        applyUserCooldown: Boolean,
+        inProgressMessage: String,
+    ) {
+        syncCancelReason.set(reason)
         syncCancelRequested.set(true)
-        syncPreferences.pauseAutoSyncAfterUserCancel()
-        _state.value = _state.value.copy(lastMessage = "Cancelando…")
+        if (applyUserCooldown) {
+            syncPreferences.pauseAutoSyncAfterUserCancel()
+        }
+        _state.value = _state.value.copy(lastMessage = inProgressMessage)
         val job = activeLongTaskJob.get()
         if (job != null) {
-            job.cancel(CancellationException("Sincronismo cancelado."))
+            job.cancel(CancellationException(inProgressMessage))
         } else if (_state.value.isRunning) {
             _state.value = _state.value.copy(
                 isRunning = false,
-                lastMessage = autoSyncPausedMessage("Operação interrompida."),
+                lastMessage = completedMessageForCancelReason(reason),
             )
             resetSyncCancel()
+        }
+    }
+
+    private fun completedMessageForCancelReason(reason: SyncCancelReason): String {
+        return when (reason) {
+            SyncCancelReason.WIFI_POLICY -> WIFI_POLICY_MESSAGE
+            SyncCancelReason.USER -> autoSyncPausedMessage("Operação interrompida.")
+            SyncCancelReason.NONE -> "Operação interrompida."
+        }
+    }
+
+    private fun cancellationResultMessage(): String {
+        return when (syncCancelReason.getAndSet(SyncCancelReason.NONE)) {
+            SyncCancelReason.WIFI_POLICY -> WIFI_POLICY_MESSAGE
+            SyncCancelReason.USER -> autoSyncPausedMessage("Sincronismo cancelado.")
+            SyncCancelReason.NONE -> autoSyncPausedMessage("Sincronismo cancelado.")
         }
     }
 
@@ -163,11 +223,21 @@ class SyncCoordinator(
 
     private fun resetSyncCancel() {
         syncCancelRequested.set(false)
+        syncCancelReason.set(SyncCancelReason.NONE)
     }
 
     private fun ensureNotCancelled() {
         if (syncCancelRequested.get()) {
             throw CancellationException("Sincronismo cancelado.")
+        }
+    }
+
+    private fun ensureSyncMayContinue() {
+        ensureNotCancelled()
+        if (violatesWifiOnlyPolicy()) {
+            syncCancelReason.compareAndSet(SyncCancelReason.NONE, SyncCancelReason.WIFI_POLICY)
+            syncCancelRequested.set(true)
+            throw CancellationException(WIFI_POLICY_MESSAGE)
         }
     }
 
@@ -288,11 +358,9 @@ class SyncCoordinator(
             )
             return Result.failure(IllegalStateException("Offline"))
         }
-        if (syncPreferences.wifiOnly && !networkMonitor.isUnmetered()) {
-            _state.value = _state.value.copy(
-                lastMessage = "Sync pausado: ative dados móveis nas configurações ou use Wi‑Fi.",
-            )
-            return Result.failure(IllegalStateException("Wi‑Fi necessário"))
+        if (violatesWifiOnlyPolicy()) {
+            _state.value = _state.value.copy(lastMessage = WIFI_POLICY_MESSAGE)
+            return Result.failure(IllegalStateException(WIFI_POLICY_MESSAGE))
         }
 
         return longTaskMutex.withLock {
@@ -306,7 +374,7 @@ class SyncCoordinator(
                     _state.value = _state.value.copy(lastMessage = "Indexando mídia local…")
                     indexLocalLibrary(manageRunningState = false).getOrThrow()
                     _state.value = _state.value.copy(lastMessage = "Sincronizando com OneDrive…")
-                    ensureNotCancelled()
+                    ensureSyncMayContinue()
                     val remoteFiles = listRemoteFiles().getOrThrow()
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
 
@@ -318,7 +386,7 @@ class SyncCoordinator(
                     val knownPaths = mutableSetOf<String>()
 
                     for (row in rows) {
-                        ensureNotCancelled()
+                        ensureSyncMayContinue()
                         knownPaths.add(row.canonicalPath)
                         if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
                         val remote = remoteByPath[row.canonicalPath]
@@ -347,7 +415,7 @@ class SyncCoordinator(
                     }
 
                     remoteByPath.forEach { (path, remote) ->
-                        ensureNotCancelled()
+                        ensureSyncMayContinue()
                         if (path in knownPaths) return@forEach
                         val existing = syncMetadataDao.getByCanonicalPath(path)
                         if (existing == null) {
@@ -397,10 +465,13 @@ class SyncCoordinator(
                     _state.value = _state.value.copy(
                         isRunning = false,
                         lastMessage = when {
-                            cancelled -> autoSyncPausedMessage("Sincronismo cancelado.")
+                            cancelled -> cancellationResultMessage()
                             else -> error.message ?: "Erro na sincronização."
                         },
                     )
+                    if (cancelled) {
+                        resetSyncCancel()
+                    }
                 }
             }
         }
@@ -738,7 +809,7 @@ class SyncCoordinator(
     }
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
-        ensureNotCancelled()
+        ensureSyncMayContinue()
         val localId = row.localMediaId ?: return 0
         val item = localMediaRepository.findById(localId) ?: return 0
         val temp = localMediaRepository.materializeToTempFile(item) ?: run {
@@ -839,7 +910,7 @@ class SyncCoordinator(
         val pending = syncMetadataDao.getAll().filter { it.pendingDeleteTarget != PendingDeleteTarget.NONE }
         if (pending.isEmpty()) return
         pending.forEach { row ->
-            ensureNotCancelled()
+            ensureSyncMayContinue()
             runCatching {
                 deleteItemsImmediately(listOf(row.canonicalPath), row.pendingDeleteTarget)
             }

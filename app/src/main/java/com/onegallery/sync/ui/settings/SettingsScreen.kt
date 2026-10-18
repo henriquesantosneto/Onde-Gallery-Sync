@@ -165,10 +165,14 @@ fun SettingsScreen(
                     trailingContent = {
                         Switch(
                             checked = wifiOnly,
-                            onCheckedChange = {
-                                wifiOnly = it
-                                syncPreferences.wifiOnly = it
+                            onCheckedChange = { enabled ->
+                                wifiOnly = enabled
+                                syncPreferences.wifiOnly = enabled
                                 app.rescheduleBackgroundSync()
+                                syncCoordinator.onWifiOnlyPreferenceChanged(enabled)
+                                if (!enabled) {
+                                    app.syncTaskLauncher.runBidirectionalSync(userInitiated = true)
+                                }
                             },
                         )
                     },
