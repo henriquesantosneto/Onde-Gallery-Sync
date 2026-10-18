@@ -1,18 +1,14 @@
-OneGallery Sync — APK 0.7.16 (versionCode 52)
+OneGallery Sync — APK 0.7.19 (versionCode 55)
 ============================================
 
-Arquivo: OneGallerySync-debug.apk (~27 MB)
+Novidades: renovação de token Microsoft Graph (corrige 401 após sessão expirada).
 
-Novidades nesta build:
-- Lista de álbuns não “some” depois de abrir foto/vídeo e voltar.
-- Seta voltar na galeria (modo álbum) retorna à lista de álbuns.
+Download:
 
-Download direto:
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.19-debug/OneGallerySync-debug.apk
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.16-debug/OneGallerySync-debug.apk
+Página:
 
-Página da release:
-
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.16-debug
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.19-debug
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
