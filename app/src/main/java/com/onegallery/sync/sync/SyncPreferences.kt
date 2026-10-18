@@ -33,11 +33,19 @@ class SyncPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_DELETE_REMOTE, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_DELETE_REMOTE, value).apply()
 
+    /**
+     * Após backup no OneDrive, remove a cópia local e mantém miniatura + placeholder na nuvem.
+     */
+    var autoFreeLocalSpaceWhenSynced: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_FREE_LOCAL, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_FREE_LOCAL, value).apply()
+
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_SETUP_DONE = "setup_done"
         private const val KEY_SYNC_MODE = "sync_mode"
         private const val KEY_LAST_VERSION = "last_version_code"
         private const val KEY_AUTO_DELETE_REMOTE = "auto_delete_remote"
+        private const val KEY_AUTO_FREE_LOCAL = "auto_free_local"
     }
 }

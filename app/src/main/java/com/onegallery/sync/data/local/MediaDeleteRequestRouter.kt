@@ -11,7 +11,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 /**
- * Pedido de exclusão no MediaStore: um diálogo do sistema (Android 11+) e depois [ContentResolver.delete].
+ * Exclusão no MediaStore: tentativa silenciosa primeiro; diálogo do sistema só quando necessário.
  */
 class MediaDeleteRequestRouter {
     private var launchIntentSender: ((IntentSenderRequest) -> Unit)? = null
@@ -26,6 +26,11 @@ class MediaDeleteRequestRouter {
         pendingResult = null
     }
 
+    /** Apaga o que o sistema permitir sem abrir diálogo. */
+    fun deleteSilent(context: Context, uris: List<Uri>): Set<Uri> {
+        return uris.filter { uri -> deleteUriSilent(context, uri) }.toSet()
+    }
+
     /**
      * Pede consentimento quando necessário e exclui os URIs. Retorna false se cancelado ou falha ao apagar.
      */
@@ -33,23 +38,31 @@ class MediaDeleteRequestRouter {
         val targets = uris.distinct()
         if (targets.isEmpty()) return true
 
+        val silent = deleteSilent(context, targets)
+        val remaining = targets.filter { it !in silent }
+        if (remaining.isEmpty()) return true
+
         return when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                deleteBatchApi30Plus(context, targets)
+                deleteBatchApi30Plus(context, remaining)
             }
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
-                targets.all { uri -> deleteOneApi29(context, uri) }
+                remaining.all { uri -> deleteOneApi29(context, uri) }
             }
             else -> {
-                deleteUrisDirect(context, targets)
+                deleteUrisDirect(context, remaining)
             }
         }
     }
 
-    private suspend fun deleteBatchApi30Plus(context: Context, uris: List<Uri>): Boolean {
-        if (deleteUrisDirect(context, uris)) return true
+    private fun deleteUriSilent(context: Context, uri: Uri): Boolean {
+        return runCatching { context.contentResolver.delete(uri, null, null) > 0 }
+            .getOrDefault(false)
+    }
 
-        val launch = launchIntentSender ?: return false
+    private suspend fun deleteBatchApi30Plus(context: Context, uris: List<Uri>): Boolean {
+        val launch = launchIntentSender ?: return deleteUrisDirect(context, uris)
+
         val approved = suspendCancellableCoroutine { cont ->
             pendingResult = { cont.resume(it) }
             cont.invokeOnCancellation {
@@ -65,14 +78,14 @@ class MediaDeleteRequestRouter {
     }
 
     private suspend fun deleteOneApi29(context: Context, uri: Uri): Boolean {
-        try {
-            if (context.contentResolver.delete(uri, null, null) > 0) return true
+        if (deleteUriSilent(context, uri)) return true
+        return try {
+            context.contentResolver.delete(uri, null, null) > 0
         } catch (security: SecurityException) {
             val recoverable = security as? RecoverableSecurityException ?: return false
             if (!requestRecoverable(recoverable)) return false
-            return context.contentResolver.delete(uri, null, null) > 0
+            context.contentResolver.delete(uri, null, null) > 0
         }
-        return false
     }
 
     private suspend fun requestRecoverable(exception: RecoverableSecurityException): Boolean {
@@ -91,10 +104,7 @@ class MediaDeleteRequestRouter {
     }
 
     private fun deleteUrisDirect(context: Context, uris: List<Uri>): Boolean {
-        return uris.all { uri ->
-            runCatching { context.contentResolver.delete(uri, null, null) > 0 }
-                .getOrDefault(false)
-        }
+        return uris.all { deleteUriSilent(context, it) }
     }
 
     fun mapActivityResult(resultCode: Int): Boolean = resultCode == Activity.RESULT_OK

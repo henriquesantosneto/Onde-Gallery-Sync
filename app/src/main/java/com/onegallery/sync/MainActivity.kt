@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.onegallery.sync.ui.OneGalleryApp
 import com.onegallery.sync.ui.theme.OneGalleryTheme
 
@@ -22,10 +24,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        (application as OneGalleryApplication).mediaDeleteRequestRouter.attachIntentSenderLauncher {
+        val app = application as OneGalleryApplication
+        app.mediaDeleteRequestRouter.attachIntentSenderLauncher {
             mediaDeleteLauncher.launch(it)
         }
         bindUi()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val app = application as OneGalleryApplication
+        app.appForegroundState.setForeground(true)
+        lifecycleScope.launch {
+            app.syncCoordinator.runAutoReleaseIfNeeded()
+        }
+    }
+
+    override fun onStop() {
+        (application as OneGalleryApplication).appForegroundState.setForeground(false)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {

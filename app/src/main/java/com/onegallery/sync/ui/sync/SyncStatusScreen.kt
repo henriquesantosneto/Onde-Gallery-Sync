@@ -154,8 +154,8 @@ fun SyncStatusScreen(
             item {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                 Text(
-                    "Exclusões na galeria propagam para o OneDrive automaticamente. " +
-                        "Use Liberar espaço (ícone nuvem riscada) para manter só miniatura + nuvem.",
+                    "Com “Liberar espaço após backup” ligado, fotos sincronizadas viram placeholder " +
+                        "automaticamente. Ícone nuvem riscada libera manualmente.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 24.dp),

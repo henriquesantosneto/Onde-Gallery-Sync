@@ -40,6 +40,7 @@ class SyncCoordinator(
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
+    private val appForegroundState: AppForegroundState,
 ) {
     fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
         return saOneDriveRepository.connectFolder(treeUri).onSuccess {
@@ -228,11 +229,19 @@ class SyncCoordinator(
                     it.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
                     it.pendingDeleteTarget != PendingDeleteTarget.NONE
             }
+            var freedLocal = 0
+            if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
+                freedLocal = autoReleaseSyncedLocalCopies(
+                    allowSystemDialog = appForegroundState.isInForeground(),
+                )
+            }
+            val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
             _state.value = _state.value.copy(
                 isRunning = false,
                 isOffline = false,
                 pendingOperations = pendingCount,
-                lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, $cloudOnly só na nuvem.",
+                lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
+                    "$cloudOnly só na nuvem$freeMsg.",
             )
             SyncSummary(uploaded, markedPendingDownload, cloudOnly)
         }.onFailure {
@@ -383,39 +392,80 @@ class SyncCoordinator(
         if (canonicalPaths.isEmpty()) return Result.success(0)
         return runCatching {
             val rows = canonicalPaths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
-            rows.forEach { cachePlaceholderThumbnail(it) }
-            val uris = rows.mapNotNull { localContentUri(it) }
-            if (uris.isNotEmpty()) {
-                val removed = mediaDeleteRequestRouter.requestDelete(appContext, uris)
-                if (!removed) {
-                    error(
-                        "Não foi possível remover a cópia local. " +
-                            "Confirme no diálogo do Android se aparecer.",
-                    )
-                }
-            }
-            var freed = 0
-            for (row in rows) {
-                val path = row.canonicalPath
-                mediaCacheRepository.deleteOriginalOnly(path)
-                if (row.oneDriveItemId != null) {
-                    syncMetadataDao.upsert(
-                        row.copy(
-                            localMediaId = null,
-                            localContentUri = null,
-                            cachedFilePath = null,
-                            pendingDeleteTarget = PendingDeleteTarget.NONE,
-                            cloudState = CloudSyncState.CLOUD_ONLY,
-                            lastError = null,
-                        ),
-                    )
-                } else {
-                    mediaCacheRepository.deleteCached(path)
-                    syncMetadataDao.deleteByCanonicalPath(path)
-                }
-                freed++
+            val freed = releaseLocalSpaceForRows(rows, allowSystemDialog = true)
+            if (rows.isNotEmpty() && freed == 0) {
+                error(
+                    "Não foi possível remover a cópia local. " +
+                        "Abra o app e confirme no diálogo do Android, se aparecer.",
+                )
             }
             freed
+        }
+    }
+
+    suspend fun runAutoReleaseIfNeeded() {
+        if (!syncPreferences.autoFreeLocalSpaceWhenSynced) return
+        if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return
+        autoReleaseSyncedLocalCopies(allowSystemDialog = appForegroundState.isInForeground())
+    }
+
+    private suspend fun autoReleaseSyncedLocalCopies(allowSystemDialog: Boolean): Int {
+        if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
+        val rows = syncMetadataDao.getAll().filter { row ->
+            row.localMediaId != null &&
+                row.oneDriveItemId != null &&
+                row.cloudState == CloudSyncState.SYNCED &&
+                row.pendingDeleteTarget == PendingDeleteTarget.NONE
+        }
+        if (rows.isEmpty()) return 0
+        return releaseLocalSpaceForRows(rows, allowSystemDialog = allowSystemDialog)
+    }
+
+    private suspend fun releaseLocalSpaceForRows(
+        rows: List<SyncMetadataEntity>,
+        allowSystemDialog: Boolean,
+    ): Int {
+        if (rows.isEmpty()) return 0
+        rows.forEach { cachePlaceholderThumbnail(it) }
+
+        val pairs = rows.mapNotNull { row -> localContentUri(row)?.let { uri -> uri to row } }
+        val uriToRow = pairs.associate { it.first to it.second }
+        val uris = uriToRow.keys.toList()
+
+        var deleted = mediaDeleteRequestRouter.deleteSilent(appContext, uris)
+        var pending = uris.filter { it !in deleted }
+        if (pending.isNotEmpty() && allowSystemDialog) {
+            if (mediaDeleteRequestRouter.requestDelete(appContext, pending)) {
+                deleted = deleted + mediaDeleteRequestRouter.deleteSilent(appContext, pending)
+            }
+        }
+
+        var freed = 0
+        for ((uri, row) in uriToRow) {
+            if (uri !in deleted) continue
+            applyLocalReleasedPlaceholder(row)
+            freed++
+        }
+        return freed
+    }
+
+    private suspend fun applyLocalReleasedPlaceholder(row: SyncMetadataEntity) {
+        val path = row.canonicalPath
+        mediaCacheRepository.deleteOriginalOnly(path)
+        if (row.oneDriveItemId != null) {
+            syncMetadataDao.upsert(
+                row.copy(
+                    localMediaId = null,
+                    localContentUri = null,
+                    cachedFilePath = null,
+                    pendingDeleteTarget = PendingDeleteTarget.NONE,
+                    cloudState = CloudSyncState.CLOUD_ONLY,
+                    lastError = null,
+                ),
+            )
+        } else {
+            mediaCacheRepository.deleteCached(path)
+            syncMetadataDao.deleteByCanonicalPath(path)
         }
     }
 
@@ -489,14 +539,19 @@ class SyncCoordinator(
                 sourceFile = temp,
                 mimeType = item.mimeType,
             ).getOrThrow()
-            syncMetadataDao.upsert(
-                row.copy(
-                    oneDriveItemId = remoteId,
-                    remoteModifiedAt = System.currentTimeMillis() / 1000,
-                    cloudState = CloudSyncState.SYNCED,
-                    lastError = null,
-                ),
+            val synced = row.copy(
+                oneDriveItemId = remoteId,
+                remoteModifiedAt = System.currentTimeMillis() / 1000,
+                cloudState = CloudSyncState.SYNCED,
+                lastError = null,
             )
+            syncMetadataDao.upsert(synced)
+            if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
+                releaseLocalSpaceForRows(
+                    listOf(synced),
+                    allowSystemDialog = appForegroundState.isInForeground(),
+                )
+            }
             1
         }.getOrElse {
             syncMetadataDao.upsert(row.copy(cloudState = CloudSyncState.ERROR, lastError = it.message))

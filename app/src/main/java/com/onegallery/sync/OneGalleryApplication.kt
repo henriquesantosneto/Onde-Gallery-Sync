@@ -18,6 +18,7 @@ import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
+import com.onegallery.sync.sync.AppForegroundState
 import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
@@ -55,6 +56,8 @@ class OneGalleryApplication : Application() {
 
     val mediaDeleteRequestRouter = MediaDeleteRequestRouter()
 
+    val appForegroundState = AppForegroundState()
+
     lateinit var mediaCacheRepository: MediaCacheRepository
         private set
 
@@ -85,6 +88,7 @@ class OneGalleryApplication : Application() {
             networkMonitor = NetworkMonitor(this),
             syncPreferences = syncPreferences,
             mediaDeleteRequestRouter = mediaDeleteRequestRouter,
+            appForegroundState = appForegroundState,
         )
         scheduleBackgroundSync()
     }

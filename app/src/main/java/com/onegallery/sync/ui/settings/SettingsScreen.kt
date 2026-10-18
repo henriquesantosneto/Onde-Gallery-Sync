@@ -64,6 +64,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
+    var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
     var localAdvancedExpanded by remember { mutableStateOf(false) }
     val launchFolderPicker = rememberConnectFolderLauncher(syncCoordinator) {
         scope.launch { syncCoordinator.runBidirectionalSync() }
@@ -223,6 +224,27 @@ fun SettingsScreen(
 
             item {
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Liberar espaço após backup na nuvem") },
+                    supportingContent = {
+                        Text(
+                            "Remove a cópia local automaticamente e mantém miniatura + OneDrive " +
+                                "(como galeria na nuvem). Com o app aberto, o Android pode pedir " +
+                                "confirmação em lote uma vez.",
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = autoFreeLocal,
+                            onCheckedChange = {
+                                autoFreeLocal = it
+                                syncPreferences.autoFreeLocalSpaceWhenSynced = it
+                            },
+                        )
+                    },
+                )
             }
             item {
                 ListItem(
