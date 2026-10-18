@@ -1,13 +1,14 @@
-OneGallery Sync — APK 0.8.31 (versionCode 87)
+OneGallery Sync — APK 0.8.32 (versionCode 88)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.31-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.32-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Mapa: pin na posição GPS (EXIF) de cada foto — como antes do agrupamento ~3 km
-- Galeria: ordenar por data de captura (EXIF / quando foi tirada), não só arquivo alterado
-- Detalhes: campo "Quando foi tirada"; sync indexa datas de captura
+- Manutenção do índice: troca de pasta OneDrive recria índice + cache no próximo sync
+- Cada sync remove entradas órfãs (fora do aparelho e da pasta na nuvem)
+- Ajustes → "Verificar e limpar índice" (manual)
+- Mapa pin GPS exato, ordenação por data de captura (v0.8.31)
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
