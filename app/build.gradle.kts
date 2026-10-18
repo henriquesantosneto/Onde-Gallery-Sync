@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
 }
+
+fun readMsalClientId(): String {
+    System.getenv("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    val props = Properties()
+    rootProject.file("msal.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+    props.getProperty("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+    props.getProperty("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    return "00000000-0000-0000-0000-000000000000"
+}
+
+val embeddedMsalClientId: String = readMsalClientId()
 
 android {
     namespace = "com.onegallery.sync"
@@ -12,13 +26,12 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.4.0"
+        versionCode = 13
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Substitua pelos valores do registro Microsoft (ver docs/MICROSOFT_APP_REGISTRATION.md)
-        buildConfigField("String", "MSAL_CLIENT_ID", "\"00000000-0000-0000-0000-000000000000\"")
+        buildConfigField("String", "MSAL_CLIENT_ID", "\"$embeddedMsalClientId\"")
         buildConfigField(
             "String",
             "MSAL_REDIRECT_URI",

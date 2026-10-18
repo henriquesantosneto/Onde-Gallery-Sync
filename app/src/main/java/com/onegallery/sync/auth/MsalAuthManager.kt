@@ -65,7 +65,11 @@ class MsalAuthManager(
         val clientId = effectiveClientId()
         if (clientId.isBlank() || clientId.startsWith("00000000")) {
             return Result.failure(
-                IllegalStateException("Informe o Application (client) ID do Azure em Ajustes ou abaixo."),
+                IllegalStateException(
+                    "Este APK não tem Client ID embutido. Quem compila precisa configurar msal.properties " +
+                        "(ver docs/BUILTIN_MSAL.md). Você não precisa criar Azure — só entrar com Microsoft " +
+                        "quando o APK estiver configurado.",
+                ),
             )
         }
         configFile = MsalConfigFactory.writeConfigFile(appContext, clientId)

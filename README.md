@@ -13,11 +13,17 @@ Galeria Android nativa (Kotlin + Jetpack Compose) que substitui a integração d
 - **Exclusões** só propagam após **confirmação** (diálogo ou aba Sync).
 - **APK privado** para instalação no seu Samsung.
 
+## OneDrive (estilo ES File Explorer)
+
+Quem **usa** o APK só faz **login Microsoft** e escolhe a pasta na nuvem. Quem **compila** configura o Client ID uma vez em `msal.properties` — [docs/BUILTIN_MSAL.md](docs/BUILTIN_MSAL.md).
+
+Alternativa sem login: **Pictures/OneGallerySync** + backup de fotos no app OneDrive.
+
 ## Antes de compilar
 
-1. Registre o app no Microsoft Entra — [docs/MICROSOFT_APP_REGISTRATION.md](docs/MICROSOFT_APP_REGISTRATION.md).
-2. Atualize `auth_config.json`, `build.gradle.kts` (`MSAL_*`) e `AndroidManifest.xml` (redirect MSAL).
-3. Abra no **Android Studio**, sync Gradle, execute no aparelho.
+1. Copie `msal.properties.example` → `msal.properties` e preencha `MSAL_CLIENT_ID` (registro gratuito — [docs/BUILTIN_MSAL.md](docs/BUILTIN_MSAL.md)).
+2. Detalhes MSAL/redirect: [docs/MICROSOFT_APP_REGISTRATION.md](docs/MICROSOFT_APP_REGISTRATION.md).
+3. `./gradlew :app:assembleDebug`
 
 ## Comandos
 

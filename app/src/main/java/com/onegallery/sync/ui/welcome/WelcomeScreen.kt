@@ -1,6 +1,5 @@
 package com.onegallery.sync.ui.welcome
 
-import android.app.Activity
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.BuildConfig
+import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
 import com.onegallery.sync.data.onedrive.SyncSetupDiagnosticsFactory
 import com.onegallery.sync.sync.SyncCoordinator
@@ -33,25 +33,22 @@ import com.onegallery.sync.sync.SyncPolicy
 fun WelcomeScreen(
     syncCoordinator: SyncCoordinator,
     onFinished: () -> Unit,
-    onBrowseOneDriveLikeFileManager: () -> Unit,
+    onConnectOneDriveCloud: () -> Unit,
 ) {
     val context = LocalContext.current
     val diagnostics = remember { SyncSetupDiagnosticsFactory.create(context) }
+    val msalReady = MsalBuiltInConfig.isEmbeddedClientConfigured()
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
             val uri: Uri? = result.data?.data
             if (uri != null) {
                 syncCoordinator.connectOneDriveFolder(uri)
                     .onSuccess { onFinished() }
                     .onFailure {
-                        Toast.makeText(
-                            context,
-                            it.message ?: "Não foi possível usar essa pasta. Use Pictures/OneGallerySync.",
-                            Toast.LENGTH_LONG,
-                        ).show()
+                        Toast.makeText(context, it.message ?: "Pasta inválida", Toast.LENGTH_LONG).show()
                     }
             }
         }
@@ -73,88 +70,81 @@ fun WelcomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "OneDrive no seletor de pastas",
+                    "Como ES File Explorer / Meus Arquivos",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "No seu Samsung, o OneDrive aparece no Meus Arquivos, mas a Microsoft não libera " +
-                        "escolher essa pasta para outros apps (como a Galeria Samsung antiga fazia). " +
-                        "Por isso não aparece pasta do OneDrive aqui — não é bug do OneGallery.",
+                    "Login Microsoft → navegar pastas do OneDrive na nuvem → escolher onde sincronizar. " +
+                        "Você não cria conta Azure; isso é igual aos gerenciadores de arquivos.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                Text(
-                    "Caminho que funciona sem Azure: gravar em Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} " +
-                        "e deixar o app OneDrive fazer o backup para a nuvem.",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                diagnostics.summaryLines().forEach { line ->
+                if (!msalReady) {
                     Text(
-                        line,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(top = 4.dp),
+                        "Este APK ainda não tem Client ID embutido (quem compila configura msal.properties). " +
+                            "Até lá, use o modo Pictures abaixo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             }
         }
         Button(
-            onClick = {
-                syncCoordinator.useOneDriveLocalMirrorMode()
-                onFinished()
-            },
+            onClick = onConnectOneDriveCloud,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Ativar sync (Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT})")
+            Text("Conectar OneDrive (login Microsoft)")
         }
         Text(
-            "1. Toque acima.\n" +
-                "2. Abra o app OneDrive → Configurações → backup/sincronização de fotos.\n" +
-                "3. Ative backup (Pictures/Câmera). Suas fotos sobem para a conta OneDrive.",
+            "Depois do login, escolha a pasta na nuvem (WhatsApp, álbuns, etc.).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
         )
         OutlinedButton(
             onClick = {
-                if (!OneDrivePickerHelper.openOneDriveApp(context)) {
-                    Toast.makeText(context, "Instale o app OneDrive", Toast.LENGTH_SHORT).show()
-                }
+                syncCoordinator.useOneDriveLocalMirrorMode()
+                onFinished()
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = diagnostics.oneDriveInstalled,
         ) {
-            Text("Abrir app OneDrive (ativar backup)")
+            Text("Alternativa: Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} + backup OneDrive")
         }
+        Text(
+            "Se o seletor do Samsung não mostra OneDrive, use o botão principal acima ou este modo local.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+        )
         OutlinedButton(
             onClick = {
                 if (!diagnostics.documentTreeAvailable) {
-                    Toast.makeText(context, "Seletor de pastas indisponível", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Seletor indisponível", Toast.LENGTH_SHORT).show()
                     return@OutlinedButton
                 }
                 folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context))
             },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("Tentar escolher pasta (experimental)")
-        }
-        Text(
-            "Pode mostrar só armazenamento interno. Se não houver OneDrive, ignore e use o botão principal.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-        )
-        OutlinedButton(
-            onClick = onBrowseOneDriveLikeFileManager,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Navegar provedor OneDrive no app (experimental)")
+            Text("Tentar pasta local (experimental)")
+        }
+        OutlinedButton(
+            onClick = {
+                if (!OneDrivePickerHelper.openOneDriveApp(context)) {
+                    Toast.makeText(context, "Instale o OneDrive", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            enabled = diagnostics.oneDriveInstalled,
+        ) {
+            Text("Abrir app OneDrive")
         }
         OutlinedButton(
             onClick = {

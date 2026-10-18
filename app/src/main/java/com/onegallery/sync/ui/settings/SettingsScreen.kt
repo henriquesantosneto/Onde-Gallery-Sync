@@ -1,6 +1,5 @@
 package com.onegallery.sync.ui.settings
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -26,11 +25,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
+import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
-import com.onegallery.sync.sync.SyncPolicy
 import com.onegallery.sync.sync.SyncPreferences
 import kotlinx.coroutines.launch
 
@@ -41,9 +40,7 @@ fun SettingsScreen(
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
-    onOpenOptionalMicrosoftLogin: () -> Unit,
-    onBrowseOneDriveCloud: () -> Unit,
-    onBrowseOneDriveSaf: () -> Unit,
+    onOpenCloudFolderPicker: () -> Unit,
 ) {
     val context = LocalContext.current
     val authState by authManager.state.collectAsStateWithLifecycle()
@@ -70,82 +67,69 @@ fun SettingsScreen(
                 .padding(padding)
                 .padding(16.dp),
         ) {
-            Text("Modo de sync", style = MaterialTheme.typography.titleMedium)
+            Text("OneDrive (nuvem)", style = MaterialTheme.typography.titleMedium)
             Text(
-                when (syncPreferences.syncMode) {
-                    SyncMode.ONEDRIVE_LOCAL_MIRROR -> "Pictures/OneGallerySync + backup OneDrive"
-                    SyncMode.ONEDRIVE_FOLDER -> "Pasta local (app OneDrive sincroniza)"
-                    SyncMode.ONEDRIVE_GRAPH -> "API Microsoft (Azure)"
-                    SyncMode.LOCAL_ONLY -> "Só galeria local"
-                },
-                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-            )
-            Text("Pasta no celular", style = MaterialTheme.typography.titleMedium)
-            Text(
-                when (syncPreferences.syncMode) {
-                    SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Nuvem (não escolhida)"
-                    else -> oneDriveFolderPreferences.displayName ?: "Não conectada"
-                },
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-            )
-            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_LOCAL_MIRROR) {
-                Text(
-                    syncCoordinator.localMirrorPathLabel(),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-            Button(onClick = {
-                folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context))
-            }) {
-                Text("Tentar escolher pasta (experimental)")
-            }
-            Button(onClick = onBrowseOneDriveSaf, modifier = Modifier.padding(top = 8.dp)) {
-                Text("Navegar OneDrive dentro do app")
-            }
-            Text(
-                if (OneDrivePickerHelper.isSamsungDevice()) {
-                    OneDrivePickerHelper.SAMSUNG_ONEDRIVE_HINT
+                if (MsalBuiltInConfig.isEmbeddedClientConfigured()) {
+                    "Login Microsoft — como gerenciadores de arquivos. Você não cria Azure."
                 } else {
-                    OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON
+                    "APK sem Client ID embutido: use msal.properties ao compilar (docs/BUILTIN_MSAL.md)."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             )
+            Text(
+                authState.displayName ?: "Não conectado",
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Text(
+                when (syncPreferences.syncMode) {
+                    SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Pasta na nuvem não escolhida"
+                    else -> "Modo nuvem inativo"
+                },
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Button(onClick = onOpenCloudFolderPicker) {
+                Text("Escolher pasta OneDrive na nuvem")
+            }
+            Button(
+                onClick = { scope.launch { authManager.signOut() } },
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text(stringResource(R.string.auth_sign_out))
+            }
+            Text("Alternativa local (Samsung)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
+            Text(
+                "Modo: ${
+                    when (syncPreferences.syncMode) {
+                        SyncMode.ONEDRIVE_LOCAL_MIRROR -> "Pictures + backup OneDrive"
+                        SyncMode.ONEDRIVE_FOLDER -> "Pasta local escolhida"
+                        SyncMode.ONEDRIVE_GRAPH -> "Nuvem (Graph)"
+                        SyncMode.LOCAL_ONLY -> "Só local"
+                    }
+                }",
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
+            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_LOCAL_MIRROR) {
+                Text(syncCoordinator.localMirrorPathLabel(), modifier = Modifier.padding(bottom = 8.dp))
+            } else if (syncPreferences.syncMode == SyncMode.ONEDRIVE_FOLDER) {
+                Text(oneDriveFolderPreferences.displayName ?: "—", modifier = Modifier.padding(bottom = 8.dp))
+            }
             Button(
                 onClick = {
                     syncCoordinator.useOneDriveLocalMirrorMode()
                     scope.launch { syncCoordinator.runBidirectionalSync() }
                 },
+            ) {
+                Text("Usar Pictures/OneGallerySync")
+            }
+            Button(
+                onClick = { folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context)) },
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                Text("Modo automático Pictures/OneGallerySync")
+                Text("Tentar pasta local (experimental)")
             }
-            Text(
-                "Sem Azure: escolha a pasta do telefone que o app OneDrive já sincroniza. " +
-                    "Os arquivos da galeria ficam diretamente nessa pasta.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
-            )
-            Text("Modo avançado (Azure)", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Opcional — acesso direto à nuvem sem passar pelo app OneDrive no celular.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-            )
-            Button(onClick = onBrowseOneDriveCloud) {
-                Text("Explorar nuvem (requer Azure)")
-            }
-            Button(onClick = onOpenOptionalMicrosoftLogin, modifier = Modifier.padding(top = 8.dp)) {
-                Text("Client ID / login Microsoft…")
-            }
-            Text(
-                authState.displayName ?: "Não conectado",
-                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-            )
-            Text("Sync apenas em Wi‑Fi", style = MaterialTheme.typography.titleMedium)
+            Text("Sync apenas em Wi‑Fi", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
             Switch(
                 checked = wifiOnly,
                 onCheckedChange = {
@@ -157,12 +141,6 @@ fun SettingsScreen(
                 onClick = { scope.launch { syncCoordinator.runBidirectionalSync() } },
                 modifier = Modifier.padding(top = 16.dp),
             ) { Text("Forçar sincronização") }
-            Button(
-                onClick = { scope.launch { authManager.signOut() } },
-                modifier = Modifier.padding(top = 12.dp),
-            ) {
-                Text(stringResource(R.string.auth_sign_out))
-            }
         }
     }
 }
