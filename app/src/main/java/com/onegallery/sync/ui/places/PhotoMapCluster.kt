@@ -1,39 +1,20 @@
 package com.onegallery.sync.ui.places
 
 import com.onegallery.sync.ui.gallery.GalleryDisplayItem
-import kotlin.math.roundToInt
 
-data class PhotoMapCluster(
-    val id: String,
+/** Um pin no mapa por foto/vídeo, na coordenada EXIF exata. */
+data class PhotoMapPin(
+    val item: GalleryDisplayItem,
     val latitude: Double,
     val longitude: Double,
-    val title: String,
-    val items: List<GalleryDisplayItem>,
 )
 
-fun buildPhotoMapClusters(items: List<GalleryDisplayItem>): List<PhotoMapCluster> {
-    return items
-        .filter { it.latitude != null && it.longitude != null }
-        .groupBy { item ->
-            item.locationLabel?.takeIf { it.isNotBlank() }
-                ?: "${roundCoord(item.latitude!!)}|${roundCoord(item.longitude!!)}"
-        }
-        .map { (key, group) ->
-            val lat = group.mapNotNull { it.latitude }.average()
-            val lon = group.mapNotNull { it.longitude }.average()
-            val title = group.firstNotNullOfOrNull { it.locationLabel?.takeIf { l -> l.isNotBlank() } }
-                ?: "${roundCoord(lat)}°, ${roundCoord(lon)}°"
-            PhotoMapCluster(
-                id = key,
-                latitude = lat,
-                longitude = lon,
-                title = title,
-                items = group.sortedByDescending { it.sortTimestamp },
-            )
-        }
-        .sortedByDescending { it.items.size }
-}
-
-private fun roundCoord(value: Double): String {
-    return ((value * 1000.0).roundToInt() / 1000.0).toString()
+fun buildPhotoMapPins(items: List<GalleryDisplayItem>): List<PhotoMapPin> {
+    return items.mapNotNull { item ->
+        val lat = item.latitude ?: return@mapNotNull null
+        val lon = item.longitude ?: return@mapNotNull null
+        if (!lat.isFinite() || !lon.isFinite()) return@mapNotNull null
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+        PhotoMapPin(item = item, latitude = lat, longitude = lon)
+    }
 }
