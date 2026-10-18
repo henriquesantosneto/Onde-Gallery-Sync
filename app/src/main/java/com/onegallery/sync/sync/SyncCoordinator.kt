@@ -611,6 +611,7 @@ class SyncCoordinator(
                     ensureNotCancelled()
                     indexLocalLibrary(manageRunningState = false, userInitiated = userInitiated).getOrThrow()
                     backfillMissingGpsLocations()
+                    backfillMissingCaptureTimes()
                     syncMetadataDao.getAll().count { it.latitude != null && it.longitude != null }
                 }
                 result.onSuccess { withGps ->
