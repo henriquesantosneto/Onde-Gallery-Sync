@@ -85,7 +85,10 @@ fun SyncStatusScreen(syncCoordinator: SyncCoordinator) {
                             TextButton(
                                 onClick = {
                                     scope.launch {
-                                        syncCoordinator.resolvePendingDelete(row.canonicalPath, confirmed = true)
+                                        syncCoordinator.deleteItemsImmediately(
+                                            listOf(row.canonicalPath),
+                                            row.pendingDeleteTarget,
+                                        )
                                     }
                                 },
                             ) { Text("Confirmar") }

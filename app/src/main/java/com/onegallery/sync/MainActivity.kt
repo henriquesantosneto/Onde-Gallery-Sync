@@ -5,13 +5,26 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import com.onegallery.sync.ui.OneGalleryApp
 import com.onegallery.sync.ui.theme.OneGalleryTheme
 
 class MainActivity : ComponentActivity() {
+    private val mediaDeleteLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        val app = application as OneGalleryApplication
+        app.mediaDeleteRequestRouter.onIntentSenderResult(
+            app.mediaDeleteRequestRouter.mapActivityResult(result.resultCode),
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        (application as OneGalleryApplication).mediaDeleteRequestRouter.attachIntentSenderLauncher {
+            mediaDeleteLauncher.launch(it)
+        }
         bindUi()
     }
 

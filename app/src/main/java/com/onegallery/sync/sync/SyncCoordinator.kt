@@ -1,9 +1,11 @@
 package com.onegallery.sync.sync
 
+import android.content.Context
 import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumDao
@@ -27,6 +29,7 @@ data class SyncUiState(
 )
 
 class SyncCoordinator(
+    private val appContext: Context,
     private val localMediaRepository: LocalMediaRepository,
     private val oneDriveRepository: OneDriveRepository,
     private val saOneDriveRepository: SaOneDriveRepository,
@@ -36,6 +39,7 @@ class SyncCoordinator(
     private val mediaCacheRepository: MediaCacheRepository,
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
+    private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
 ) {
     fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
         return saOneDriveRepository.connectFolder(treeUri).onSuccess {
@@ -267,7 +271,11 @@ class SyncCoordinator(
         }
     }
 
-    suspend fun resolvePendingDelete(canonicalPath: String, confirmed: Boolean): Result<Unit> {
+    suspend fun resolvePendingDelete(
+        canonicalPath: String,
+        confirmed: Boolean,
+        skipLocalMediaStoreDelete: Boolean = false,
+    ): Result<Unit> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
         if (row.pendingDeleteTarget == PendingDeleteTarget.NONE) return Result.success(Unit)
@@ -286,7 +294,9 @@ class SyncCoordinator(
         return runCatching {
             when (row.pendingDeleteTarget) {
                 PendingDeleteTarget.LOCAL -> {
-                    row.localMediaId?.let { localMediaRepository.deleteMediaItem(it) }
+                    if (!skipLocalMediaStoreDelete) {
+                        deleteLocalMediaStoreCopy(row).getOrThrow()
+                    }
                     mediaCacheRepository.deleteCached(canonicalPath)
                     if (row.oneDriveItemId != null) {
                         syncMetadataDao.upsert(
@@ -317,7 +327,9 @@ class SyncCoordinator(
                 }
                 PendingDeleteTarget.BOTH -> {
                     row.oneDriveItemId?.let { deleteRemoteFile(it).getOrThrow() }
-                    row.localMediaId?.let { localMediaRepository.deleteMediaItem(it) }
+                    if (!skipLocalMediaStoreDelete) {
+                        deleteLocalMediaStoreCopy(row).getOrThrow()
+                    }
                     mediaCacheRepository.deleteCached(canonicalPath)
                     syncMetadataDao.deleteByCanonicalPath(canonicalPath)
                 }
@@ -362,14 +374,53 @@ class SyncCoordinator(
     ): Result<Int> {
         if (canonicalPaths.isEmpty()) return Result.success(0)
         return runCatching {
+            val rows = canonicalPaths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
+            val needsLocalDelete = target == PendingDeleteTarget.LOCAL || target == PendingDeleteTarget.BOTH
+            if (needsLocalDelete) {
+                val uris = rows.mapNotNull { row -> localContentUri(row) }
+                if (uris.isNotEmpty()) {
+                    val approved = mediaDeleteRequestRouter.requestDelete(appContext, uris)
+                    if (!approved) {
+                        error(
+                            "Exclusão no aparelho cancelada ou negada. " +
+                                "Confirme no diálogo do Android.",
+                        )
+                    }
+                }
+            }
             var deleted = 0
             for (path in canonicalPaths) {
                 requestDelete(path, target).getOrThrow()
-                resolvePendingDelete(path, confirmed = true).getOrThrow()
+                resolvePendingDelete(
+                    path,
+                    confirmed = true,
+                    skipLocalMediaStoreDelete = needsLocalDelete,
+                ).getOrThrow()
                 deleted++
             }
             deleted
         }
+    }
+
+    private suspend fun deleteLocalMediaStoreCopy(row: SyncMetadataEntity): Result<Unit> {
+        val uri = localContentUri(row) ?: return Result.success(Unit)
+        val ok = mediaDeleteRequestRouter.requestDelete(appContext, listOf(uri))
+        return if (ok) {
+            Result.success(Unit)
+        } else {
+            Result.failure(
+                SecurityException(
+                    "Sem permissão para excluir esta mídia. Confirme no diálogo do sistema.",
+                ),
+            )
+        }
+    }
+
+    private fun localContentUri(row: SyncMetadataEntity): Uri? {
+        row.localContentUri?.let { return Uri.parse(it) }
+        val id = row.localMediaId ?: return null
+        val item = localMediaRepository.findById(id) ?: return null
+        return item.uri
     }
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {

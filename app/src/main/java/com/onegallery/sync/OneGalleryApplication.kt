@@ -12,6 +12,7 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.onedrive.GraphFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
@@ -52,6 +53,8 @@ class OneGalleryApplication : Application() {
     lateinit var galleryPreferences: GalleryPreferences
         private set
 
+    val mediaDeleteRequestRouter = MediaDeleteRequestRouter()
+
     override fun onCreate() {
         super.onCreate()
         authManager = MsalAuthManager(this, AuthPreferences(this))
@@ -68,6 +71,7 @@ class OneGalleryApplication : Application() {
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
         syncCoordinator = SyncCoordinator(
+            appContext = applicationContext,
             localMediaRepository = localMediaRepository,
             oneDriveRepository = oneDriveRepository,
             saOneDriveRepository = saOneDriveRepository,
@@ -77,6 +81,7 @@ class OneGalleryApplication : Application() {
             mediaCacheRepository = mediaCacheRepository,
             networkMonitor = NetworkMonitor(this),
             syncPreferences = syncPreferences,
+            mediaDeleteRequestRouter = mediaDeleteRequestRouter,
         )
         scheduleBackgroundSync()
     }

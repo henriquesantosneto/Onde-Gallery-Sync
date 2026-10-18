@@ -279,10 +279,8 @@ private fun MediaDetailPage(
             onConfirm = {
                 showSingleDelete = false
                 scope.launch {
-                    syncCoordinator.requestDelete(canonicalPath, PendingDeleteTarget.BOTH)
-                        .getOrThrow()
-                    syncCoordinator.resolvePendingDelete(canonicalPath, confirmed = true)
-                        .getOrThrow()
+                    syncCoordinator.deleteItemsImmediately(listOf(canonicalPath), PendingDeleteTarget.BOTH)
+                        .onFailure { error = it.message }
                 }
             },
         )
