@@ -207,8 +207,10 @@ fun OneGalleryApp(
                         NavigationBarItem(
                             selected = currentRoute == tab.route,
                             onClick = {
-                                if (tab == MainTab.Gallery) {
-                                    galleryViewModel.setAlbumFilter(null)
+                                when (tab) {
+                                    MainTab.Gallery -> galleryViewModel.setAlbumFilter(null)
+                                    MainTab.Albums -> galleryViewModel.setAlbumFilter(null)
+                                    else -> Unit
                                 }
                                 navController.navigate(tab.route) {
                                     popUpTo(MainTab.Gallery.route) { saveState = true }
@@ -254,6 +256,13 @@ fun OneGalleryApp(
                     syncCoordinator = syncCoordinator,
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
+                    },
+                    onExitAlbumFilter = {
+                        navController.navigate(MainTab.Albums.route) {
+                            popUpTo(MainTab.Gallery.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                 )
             }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
@@ -58,6 +59,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
     onOpenItem: (String) -> Unit,
+    onExitAlbumFilter: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -81,6 +83,21 @@ fun GalleryScreen(
         topBar = {
             TopAppBar(
                 title = { Text(title) },
+                navigationIcon = {
+                    if (!state.selectionMode && state.albumFilter != null) {
+                        IconButton(
+                            onClick = {
+                                viewModel.setAlbumFilter(null)
+                                onExitAlbumFilter()
+                            },
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Voltar aos álbuns",
+                            )
+                        }
+                    }
+                },
                 actions = {
                     if (state.selectionMode) {
                         IconButton(onClick = { showMoveDialog = true }) {

@@ -1,49 +1,18 @@
-OneGallery Sync — APK 0.7.15 (versionCode 51)
+OneGallery Sync — APK 0.7.16 (versionCode 52)
 ============================================
 
 Arquivo: OneGallerySync-debug.apk (~27 MB)
 
 Novidades nesta build:
-- Corrige contagem falsa de "Aguardando download" (compara mudança real na nuvem).
+- Lista de álbuns não “some” depois de abrir foto/vídeo e voltar.
+- Seta voltar na galeria (modo álbum) retorna à lista de álbuns.
 
---- Hash Azure (tile Android → campo Assinatura) ---
+Download direto:
 
-Pacote: com.onegallery.sync
-
-Hash SHA-1 em Base64 (cole só isto, sem aspas, sem msauth://):
-
-  pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
-
-(20 bytes SHA-1; termina com =. Não use hex a47f:77:84… nem URI com %2F neste campo.)
-
-URI Mobile/desktop (se não houver tile Android):
-
-  msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D
-
---- Download via Git ---
-
-Branch: cursor/apk-download-0dd7
-Caminho do APK no repo: releases/OneGallerySync-debug.apk
-
-Clone (Origin / Cursor — login na conta Cursor):
-
-  git clone --branch cursor/apk-download-0dd7 --single-branch \
-    https://origin.cursor.com/git/henriquekako/tmp-a53cc6c3697b04a5.git onegallery-apk
-  cd onegallery-apk/releases
-
-GitHub (henriquesantosneto/Onde-Gallery-Sync):
-
-  git clone --branch cursor/apk-download-0dd7 --single-branch \
-    https://github.com/henriquesantosneto/Onde-Gallery-Sync.git onegallery-apk
-
-Download direto no navegador (Release GitHub — recomendado):
-
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.15-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.16-debug/OneGallerySync-debug.apk
 
 Página da release:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.15-debug
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.16-debug
 
-Ver APK no GitHub (botão Download na página):
-
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/blob/cursor/apk-download-0dd7/releases/OneGallerySync-debug.apk
+Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=

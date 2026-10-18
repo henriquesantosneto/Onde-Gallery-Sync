@@ -99,15 +99,15 @@ class GalleryViewModel(
     }
 
     val state: StateFlow<GalleryUiState> = combine(libraryFlow, uiControls) { (metadata, userAlbums), controls ->
-        val items = metadata
-            .map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) }
+        val allItems = metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) }
+        val items = allItems
             .filter { controls.filter == null || it.albumName == controls.filter }
             .sortedBy(controls.order)
 
         GalleryUiState(
             isLoading = controls.isLoading,
             items = items,
-            albums = buildAlbums(items, userAlbums, controls.albumSort),
+            albums = buildAlbums(allItems, userAlbums, controls.albumSort),
             userAlbums = userAlbums,
             albumFilter = controls.filter,
             sortOrder = controls.order,
