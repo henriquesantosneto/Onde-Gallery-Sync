@@ -40,4 +40,7 @@ interface SyncMetadataDao {
 
     @Query("UPDATE sync_metadata SET pendingDeleteTarget = :target WHERE canonicalPath = :canonicalPath")
     suspend fun updatePendingDelete(canonicalPath: String, target: PendingDeleteTarget)
+
+    @Query("UPDATE sync_metadata SET userAlbumName = :album WHERE canonicalPath = :canonicalPath")
+    suspend fun updateUserAlbum(canonicalPath: String, album: String?)
 }

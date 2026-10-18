@@ -24,4 +24,5 @@ data class MediaAlbum(
     val title: String,
     val itemCount: Int,
     val coverUri: Uri?,
+    val sortTimestamp: Long = 0L,
 )

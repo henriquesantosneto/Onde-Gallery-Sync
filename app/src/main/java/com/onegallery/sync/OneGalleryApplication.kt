@@ -20,6 +20,7 @@ import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.worker.SyncWorker
 import java.util.concurrent.TimeUnit
 
@@ -48,6 +49,9 @@ class OneGalleryApplication : Application() {
     lateinit var graphFolderPreferences: GraphFolderPreferences
         private set
 
+    lateinit var galleryPreferences: GalleryPreferences
+        private set
+
     override fun onCreate() {
         super.onCreate()
         authManager = MsalAuthManager(this, AuthPreferences(this))
@@ -59,6 +63,7 @@ class OneGalleryApplication : Application() {
             it.migrateForAppVersion(BuildConfig.VERSION_CODE)
         }
         oneDriveFolderPreferences = OneDriveFolderPreferences(this)
+        galleryPreferences = GalleryPreferences(this)
         val mediaCacheRepository = MediaCacheRepository(this)
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
@@ -68,6 +73,7 @@ class OneGalleryApplication : Application() {
             saOneDriveRepository = saOneDriveRepository,
             localMirrorRepository = localMirrorRepository,
             syncMetadataDao = database.syncMetadataDao(),
+            userAlbumDao = database.userAlbumDao(),
             mediaCacheRepository = mediaCacheRepository,
             networkMonitor = NetworkMonitor(this),
             syncPreferences = syncPreferences,

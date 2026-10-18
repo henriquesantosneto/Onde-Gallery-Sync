@@ -46,6 +46,7 @@ import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.albums.AlbumsScreen
 import com.onegallery.sync.ui.auth.SignInGate
 import com.onegallery.sync.ui.gallery.GalleryScreen
+import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
@@ -82,6 +83,7 @@ fun OneGalleryApp(
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
     oneDriveRepository: OneDriveRepository,
+    galleryPreferences: GalleryPreferences,
 ) {
     var setupDone by rememberSaveable { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var cloudSetupStepOrdinal by rememberSaveable { mutableStateOf(CloudSetupStep.Hidden.ordinal) }
@@ -209,7 +211,7 @@ fun OneGalleryApp(
 
     val navController = rememberNavController()
     val galleryViewModel: GalleryViewModel = viewModel(
-        factory = GalleryViewModelFactory(localMediaRepository, syncCoordinator),
+        factory = GalleryViewModelFactory(localMediaRepository, syncCoordinator, galleryPreferences),
     )
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route

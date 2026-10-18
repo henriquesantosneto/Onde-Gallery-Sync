@@ -18,7 +18,7 @@ object GalleryMapper {
         return GalleryDisplayItem(
             canonicalPath = entity.canonicalPath,
             displayName = entity.displayName,
-            albumName = entity.albumName,
+            albumName = entity.userAlbumName?.takeIf { it.isNotBlank() } ?: entity.albumName,
             kind = kind,
             cloudState = entity.cloudState,
             localMediaId = entity.localMediaId,

@@ -6,6 +6,8 @@ import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
+import com.onegallery.sync.data.local.db.UserAlbumDao
+import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
@@ -30,6 +32,7 @@ class SyncCoordinator(
     private val saOneDriveRepository: SaOneDriveRepository,
     private val localMirrorRepository: LocalMirrorRepository,
     private val syncMetadataDao: SyncMetadataDao,
+    private val userAlbumDao: UserAlbumDao,
     private val mediaCacheRepository: MediaCacheRepository,
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
@@ -68,6 +71,7 @@ class SyncCoordinator(
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
 
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAll()
+    val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
     val pendingOperationCount: Flow<Int> = syncMetadataDao.observePendingCount()
 
@@ -329,6 +333,45 @@ class SyncCoordinator(
         return Result.success(Unit)
     }
 
+    suspend fun createUserAlbum(title: String): Result<UserAlbumEntity> {
+        val trimmed = title.trim()
+        if (trimmed.isBlank()) {
+            return Result.failure(IllegalArgumentException("Informe um nome para o álbum."))
+        }
+        val entity = UserAlbumEntity(
+            id = java.util.UUID.randomUUID().toString(),
+            title = trimmed,
+            createdAtEpoch = System.currentTimeMillis() / 1000,
+        )
+        userAlbumDao.upsert(entity)
+        return Result.success(entity)
+    }
+
+    suspend fun moveItemsToUserAlbum(canonicalPaths: List<String>, albumTitle: String?): Result<Int> {
+        if (canonicalPaths.isEmpty()) return Result.success(0)
+        val normalized = albumTitle?.trim()?.takeIf { it.isNotBlank() }
+        canonicalPaths.forEach { path ->
+            syncMetadataDao.updateUserAlbum(path, normalized)
+        }
+        return Result.success(canonicalPaths.size)
+    }
+
+    suspend fun deleteItemsImmediately(
+        canonicalPaths: List<String>,
+        target: PendingDeleteTarget = PendingDeleteTarget.BOTH,
+    ): Result<Int> {
+        if (canonicalPaths.isEmpty()) return Result.success(0)
+        return runCatching {
+            var deleted = 0
+            for (path in canonicalPaths) {
+                requestDelete(path, target).getOrThrow()
+                resolvePendingDelete(path, confirmed = true).getOrThrow()
+                deleted++
+            }
+            deleted
+        }
+    }
+
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
         val localId = row.localMediaId ?: return 0
         val item = localMediaRepository.findById(localId) ?: return 0
@@ -406,6 +449,7 @@ class SyncCoordinator(
             canonicalPath = canonical,
             displayName = item.displayName,
             albumName = item.bucketDisplayName.ifBlank { SyncPaths.albumFromCanonical(canonical) },
+            userAlbumName = existing?.userAlbumName,
             localMediaId = item.id,
             localContentUri = item.uri.toString(),
             oneDriveItemId = existing?.oneDriveItemId,

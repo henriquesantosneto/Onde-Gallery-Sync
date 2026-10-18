@@ -10,6 +10,8 @@ data class SyncMetadataEntity(
     @PrimaryKey val canonicalPath: String,
     val displayName: String,
     val albumName: String,
+    /** Álbum escolhido pelo usuário (organização na galeria; caminho na nuvem não muda). */
+    val userAlbumName: String? = null,
     val localMediaId: Long?,
     val localContentUri: String?,
     val oneDriveItemId: String?,

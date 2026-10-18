@@ -8,7 +8,8 @@ Galeria Android nativa (Kotlin + Jetpack Compose) que substitui a integração d
 - **Todas as pastas de mídia** indexadas via MediaStore (incl. **WhatsApp**, DCIM, etc., conforme visibilidade no sistema).
 - **Galeria espelhada**: mesma grade para itens locais e só na nuvem.
 - **Originais sob demanda**: download ao abrir o item ou pelo botão “Baixar original”.
-- **Álbuns**, indicadores **nuvem / sync / offline**, aba de **status**.
+- **Álbuns** (pastas do aparelho + álbuns personalizados), **ordenar** por data ou nome, **mover** fotos entre álbuns (organização local — caminho no OneDrive não muda), **excluir** em lote (toque longo na grade).
+- Indicadores **nuvem / sync / offline**, aba de **status**.
 - **Lixeira** ignorada na indexação.
 - **Exclusões** só propagam após **confirmação** (diálogo ou aba Sync).
 - **APK privado** para instalação no seu Samsung.

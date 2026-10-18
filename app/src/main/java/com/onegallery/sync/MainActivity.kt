@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
                     syncPreferences = app.syncPreferences,
                     oneDriveFolderPreferences = app.oneDriveFolderPreferences,
                     oneDriveRepository = app.oneDriveRepository,
+                    galleryPreferences = app.galleryPreferences,
                 )
             }
         }
