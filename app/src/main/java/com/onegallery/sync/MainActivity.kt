@@ -1,6 +1,8 @@
 package com.onegallery.sync
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +14,10 @@ import com.onegallery.sync.ui.OneGalleryApp
 import com.onegallery.sync.ui.theme.OneGalleryTheme
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
     private val mediaDeleteLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -27,6 +33,9 @@ class MainActivity : ComponentActivity() {
         val app = application as OneGalleryApplication
         app.mediaDeleteRequestRouter.attachIntentSenderLauncher {
             mediaDeleteLauncher.launch(it)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         bindUi()
     }

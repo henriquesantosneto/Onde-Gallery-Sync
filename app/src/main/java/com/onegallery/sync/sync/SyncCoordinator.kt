@@ -16,6 +16,8 @@ import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,6 +81,8 @@ class SyncCoordinator(
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
 
     private val syncCancelRequested = AtomicBoolean(false)
+    private val longTaskMutex = Mutex()
+    private val foregroundGuard = SyncForegroundGuard(appContext)
 
     fun requestCancelSync() {
         syncCancelRequested.set(true)
@@ -104,6 +108,17 @@ class SyncCoordinator(
     }
 
     suspend fun indexLocalLibrary(manageRunningState: Boolean = true): Result<Int> {
+        if (manageRunningState) {
+            return longTaskMutex.withLock {
+                foregroundGuard.runWithForeground {
+                    indexLocalLibraryBody(manageRunningState)
+                }
+            }
+        }
+        return indexLocalLibraryBody(manageRunningState)
+    }
+
+    private suspend fun indexLocalLibraryBody(manageRunningState: Boolean): Result<Int> {
         if (manageRunningState) {
             resetSyncCancel()
             _state.value = _state.value.copy(isRunning = true, lastMessage = "Indexando mídia local…")
@@ -194,105 +209,109 @@ class SyncCoordinator(
             return Result.failure(IllegalStateException("Wi‑Fi necessário"))
         }
 
-        resetSyncCancel()
-        _state.value = _state.value.copy(isRunning = true, lastMessage = "Sincronizando com OneDrive…")
-        return runCatching {
-            flushLegacyPendingDeletes()
-            indexLocalLibrary(manageRunningState = false).getOrThrow()
-            ensureNotCancelled()
-            val remoteFiles = listRemoteFiles().getOrThrow()
-            val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
+        return longTaskMutex.withLock {
+            foregroundGuard.runWithForeground {
+                resetSyncCancel()
+                _state.value = _state.value.copy(isRunning = true, lastMessage = "Sincronizando com OneDrive…")
+                runCatching {
+                    flushLegacyPendingDeletes()
+                    indexLocalLibrary(manageRunningState = false).getOrThrow()
+                    ensureNotCancelled()
+                    val remoteFiles = listRemoteFiles().getOrThrow()
+                    val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
 
-            var uploaded = 0
-            var markedPendingDownload = 0
-            var cloudOnly = 0
+                    var uploaded = 0
+                    var markedPendingDownload = 0
+                    var cloudOnly = 0
 
-            val rows = syncMetadataDao.getAll().filter { it.localMediaId != null }
-            val knownPaths = mutableSetOf<String>()
+                    val rows = syncMetadataDao.getAll().filter { it.localMediaId != null }
+                    val knownPaths = mutableSetOf<String>()
 
-            for (row in rows) {
-                ensureNotCancelled()
-                knownPaths.add(row.canonicalPath)
-                if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
-                val remote = remoteByPath[row.canonicalPath]
-                when {
-                    remote == null && row.oneDriveItemId != null -> {
-                        syncMetadataDao.upsert(
-                            row.copy(
-                                oneDriveItemId = null,
-                                pendingDeleteTarget = PendingDeleteTarget.NONE,
-                                cloudState = CloudSyncState.LOCAL_ONLY,
-                                lastError = null,
-                            ),
-                        )
-                    }
-                    remote == null -> uploaded += uploadLocalRow(row)
-                    else -> {
-                        val merged = reconcileWithRemote(row, remote)
-                        syncMetadataDao.upsert(merged)
-                        when (merged.cloudState) {
-                            CloudSyncState.PENDING_UPLOAD -> uploaded += uploadLocalRow(merged)
-                            CloudSyncState.PENDING_DOWNLOAD -> markedPendingDownload++
-                            else -> Unit
+                    for (row in rows) {
+                        ensureNotCancelled()
+                        knownPaths.add(row.canonicalPath)
+                        if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
+                        val remote = remoteByPath[row.canonicalPath]
+                        when {
+                            remote == null && row.oneDriveItemId != null -> {
+                                syncMetadataDao.upsert(
+                                    row.copy(
+                                        oneDriveItemId = null,
+                                        pendingDeleteTarget = PendingDeleteTarget.NONE,
+                                        cloudState = CloudSyncState.LOCAL_ONLY,
+                                        lastError = null,
+                                    ),
+                                )
+                            }
+                            remote == null -> uploaded += uploadLocalRow(row)
+                            else -> {
+                                val merged = reconcileWithRemote(row, remote)
+                                syncMetadataDao.upsert(merged)
+                                when (merged.cloudState) {
+                                    CloudSyncState.PENDING_UPLOAD -> uploaded += uploadLocalRow(merged)
+                                    CloudSyncState.PENDING_DOWNLOAD -> markedPendingDownload++
+                                    else -> Unit
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            remoteByPath.forEach { (path, remote) ->
-                ensureNotCancelled()
-                if (path in knownPaths) return@forEach
-                val existing = syncMetadataDao.getByCanonicalPath(path)
-                if (existing == null) {
-                    syncMetadataDao.upsert(
-                        SyncMetadataEntity(
-                            canonicalPath = path,
-                            displayName = remote.name,
-                            albumName = SyncPaths.albumFromCanonical(path),
-                            localMediaId = null,
-                            localContentUri = null,
-                            oneDriveItemId = remote.itemId,
-                            localModifiedAt = null,
-                            remoteModifiedAt = remote.modifiedAtEpoch,
-                            cloudState = CloudSyncState.CLOUD_ONLY,
-                            cachedFilePath = null,
-                            pendingDeleteTarget = PendingDeleteTarget.NONE,
-                            lastError = null,
-                        ),
+                    remoteByPath.forEach { (path, remote) ->
+                        ensureNotCancelled()
+                        if (path in knownPaths) return@forEach
+                        val existing = syncMetadataDao.getByCanonicalPath(path)
+                        if (existing == null) {
+                            syncMetadataDao.upsert(
+                                SyncMetadataEntity(
+                                    canonicalPath = path,
+                                    displayName = remote.name,
+                                    albumName = SyncPaths.albumFromCanonical(path),
+                                    localMediaId = null,
+                                    localContentUri = null,
+                                    oneDriveItemId = remote.itemId,
+                                    localModifiedAt = null,
+                                    remoteModifiedAt = remote.modifiedAtEpoch,
+                                    cloudState = CloudSyncState.CLOUD_ONLY,
+                                    cachedFilePath = null,
+                                    pendingDeleteTarget = PendingDeleteTarget.NONE,
+                                    lastError = null,
+                                ),
+                            )
+                            cloudOnly++
+                        }
+                    }
+
+                    val pendingCount = syncMetadataDao.getAll().count {
+                        it.cloudState == CloudSyncState.PENDING_UPLOAD ||
+                            it.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
+                            it.pendingDeleteTarget != PendingDeleteTarget.NONE
+                    }
+                    var freedLocal = 0
+                    if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
+                        freedLocal = autoReleaseSyncedLocalCopies(
+                            allowSystemDialog = appForegroundState.isInForeground(),
+                        )
+                    }
+                    val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        isOffline = false,
+                        pendingOperations = pendingCount,
+                        lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
+                            "$cloudOnly só na nuvem$freeMsg.",
                     )
-                    cloudOnly++
+                    SyncSummary(uploaded, markedPendingDownload, cloudOnly)
+                }.onFailure { error ->
+                    val cancelled = error is CancellationException
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        lastMessage = when {
+                            cancelled -> "Sincronismo cancelado."
+                            else -> error.message ?: "Erro na sincronização."
+                        },
+                    )
                 }
             }
-
-            val pendingCount = syncMetadataDao.getAll().count {
-                it.cloudState == CloudSyncState.PENDING_UPLOAD ||
-                    it.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
-                    it.pendingDeleteTarget != PendingDeleteTarget.NONE
-            }
-            var freedLocal = 0
-            if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-                freedLocal = autoReleaseSyncedLocalCopies(
-                    allowSystemDialog = appForegroundState.isInForeground(),
-                )
-            }
-            val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
-            _state.value = _state.value.copy(
-                isRunning = false,
-                isOffline = false,
-                pendingOperations = pendingCount,
-                lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
-                    "$cloudOnly só na nuvem$freeMsg.",
-            )
-            SyncSummary(uploaded, markedPendingDownload, cloudOnly)
-        }.onFailure { error ->
-            val cancelled = error is CancellationException
-            _state.value = _state.value.copy(
-                isRunning = false,
-                lastMessage = when {
-                    cancelled -> "Sincronismo cancelado."
-                    else -> error.message ?: "Erro na sincronização."
-                },
-            )
         }
     }
 

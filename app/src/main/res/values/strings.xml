@@ -12,4 +12,8 @@
     <string name="cloud_badge">Nuvem</string>
     <string name="offline_badge">Offline</string>
     <string name="pending_badge">Pendente</string>
+    <string name="sync_notification_channel">Sincronização</string>
+    <string name="sync_notification_channel_desc">Sync com OneDrive enquanto o app está minimizado</string>
+    <string name="sync_notification_title">OneGallery Sync</string>
+    <string name="sync_notification_message">Sincronizando com OneDrive…</string>
 </resources>

@@ -27,10 +27,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.R
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.sync.SyncCoordinator
@@ -46,6 +48,7 @@ fun SettingsScreen(
     syncPreferences: SyncPreferences,
     onOpenCloudFolderPicker: () -> Unit,
 ) {
+    val app = LocalContext.current.applicationContext as OneGalleryApplication
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
@@ -165,6 +168,7 @@ fun SettingsScreen(
                             onCheckedChange = {
                                 wifiOnly = it
                                 syncPreferences.wifiOnly = it
+                                app.rescheduleBackgroundSync()
                             },
                         )
                     },

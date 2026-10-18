@@ -25,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -34,10 +33,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
-import kotlinx.coroutines.launch
+import com.onegallery.sync.sync.SyncTaskLauncher
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,7 +49,8 @@ fun SyncStatusScreen(
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
     val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
-    val scope = rememberCoroutineScope()
+    val app = LocalContext.current.applicationContext as OneGalleryApplication
+    val syncTasks = remember { SyncTaskLauncher.from(app) }
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
     val problemItems = remember(metadata) {
@@ -60,7 +62,7 @@ fun SyncStatusScreen(
     }
 
     LaunchedEffect(Unit) {
-        syncCoordinator.indexLocalLibrary()
+        syncTasks.indexLocalLibrary()
     }
 
     Scaffold(
@@ -117,7 +119,7 @@ fun SyncStatusScreen(
                             )
                         }
                         Button(
-                            onClick = { scope.launch { syncCoordinator.runBidirectionalSync() } },
+                            onClick = { syncTasks.runBidirectionalSync() },
                             enabled = !coordinatorState.isRunning,
                             modifier = Modifier
                                 .fillMaxWidth()

@@ -25,6 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -39,9 +40,11 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.ui.albums.AlbumsScreen
 import com.onegallery.sync.ui.auth.SignInGate
 import com.onegallery.sync.ui.gallery.GalleryScreen
@@ -90,6 +93,8 @@ fun OneGalleryApp(
         cloudSetupStepOrdinal = step.ordinal
     }
     val scope = rememberCoroutineScope()
+    val app = LocalContext.current.applicationContext as OneGalleryApplication
+    val syncTasks = remember { SyncTaskLauncher.from(app) }
 
     val authState by authManager.state.collectAsStateWithLifecycle()
 
@@ -118,11 +123,11 @@ fun OneGalleryApp(
         if (!setupDone) return@LaunchedEffect
         when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_FOLDER -> if (oneDriveFolderPreferences.treeUri != null) {
-                syncCoordinator.runBidirectionalSync()
+                syncTasks.runBidirectionalSync()
             }
-            SyncMode.ONEDRIVE_LOCAL_MIRROR -> syncCoordinator.runBidirectionalSync()
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> syncTasks.runBidirectionalSync()
             SyncMode.ONEDRIVE_GRAPH -> if (authState.isSignedIn) {
-                syncCoordinator.runBidirectionalSync()
+                syncTasks.runBidirectionalSync()
             }
             SyncMode.LOCAL_ONLY -> Unit
         }
@@ -145,7 +150,7 @@ fun OneGalleryApp(
                 syncCoordinator.connectGraphSyncFolder(itemId, path, label)
                 setCloudSetupStep(CloudSetupStep.Hidden)
                 setupDone = true
-                scope.launch { syncCoordinator.runBidirectionalSync() }
+                syncTasks.runBidirectionalSync()
             },
             onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
         )

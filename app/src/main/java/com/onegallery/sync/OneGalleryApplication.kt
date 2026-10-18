@@ -23,8 +23,12 @@ import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.gallery.GalleryPreferences
+import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.worker.SyncWorker
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class OneGalleryApplication : Application() {
     lateinit var authManager: MsalAuthManager
@@ -57,6 +61,11 @@ class OneGalleryApplication : Application() {
     val mediaDeleteRequestRouter = MediaDeleteRequestRouter()
 
     val appForegroundState = AppForegroundState()
+
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    lateinit var syncTaskLauncher: SyncTaskLauncher
+        private set
 
     lateinit var mediaCacheRepository: MediaCacheRepository
         private set
@@ -94,19 +103,25 @@ class OneGalleryApplication : Application() {
             mediaDeleteRequestRouter = mediaDeleteRequestRouter,
             appForegroundState = appForegroundState,
         )
-        scheduleBackgroundSync()
+        syncTaskLauncher = SyncTaskLauncher(applicationScope, syncCoordinator)
+        rescheduleBackgroundSync()
     }
 
-    private fun scheduleBackgroundSync() {
+    fun rescheduleBackgroundSync() {
+        val networkType = if (syncPreferences.wifiOnly) {
+            NetworkType.UNMETERED
+        } else {
+            NetworkType.CONNECTED
+        }
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .setRequiredNetworkType(networkType)
             .build()
         val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             SyncWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
