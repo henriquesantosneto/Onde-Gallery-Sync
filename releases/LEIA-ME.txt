@@ -1,7 +1,10 @@
-OneGallery Sync — APK 0.7.12 (versionCode 48)
+OneGallery Sync — APK 0.7.15 (versionCode 51)
 ============================================
 
-Arquivo: OneGallerySync-debug.apk (~24 MB)
+Arquivo: OneGallerySync-debug.apk (~27 MB)
+
+Novidades nesta build:
+- Corrige contagem falsa de "Aguardando download" (compara mudança real na nuvem).
 
 --- Hash Azure (tile Android → campo Assinatura) ---
 
@@ -28,18 +31,18 @@ Clone (Origin / Cursor — login na conta Cursor):
     https://origin.cursor.com/git/henriquekako/tmp-a53cc6c3697b04a5.git onegallery-apk
   cd onegallery-apk/releases
 
-GitHub (henriquesantosneto/Onde-Gallery-Sync) — após publicar esta branch no GitHub:
+GitHub (henriquesantosneto/Onde-Gallery-Sync):
 
   git clone --branch cursor/apk-download-0dd7 --single-branch \
     https://github.com/henriquesantosneto/Onde-Gallery-Sync.git onegallery-apk
 
 Download direto no navegador (Release GitHub — recomendado):
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.11-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.15-debug/OneGallerySync-debug.apk
 
 Página da release:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.11-debug
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.15-debug
 
 Ver APK no GitHub (botão Download na página):
 
