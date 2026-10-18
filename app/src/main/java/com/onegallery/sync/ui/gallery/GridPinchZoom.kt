@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 object GridPinchZoom {
     const val MIN_SCALE = 0.55f
     const val MAX_SCALE = 1.75f
+    /** Quanto menor, mais lenta a pinça (0.25 ≈ 25% do gesto bruto). */
+    const val PINCH_SENSITIVITY = 0.25f
 }
 
 data class GalleryGridPinchZoom(
@@ -48,7 +50,8 @@ fun rememberGalleryGridZoom(initial: Float, onPersist: (Float) -> Unit): Gallery
         .gridPinchZoomDetector(
             onMultiTouchActive = { active -> multiTouch = active },
             onPinchZoom = { zoom ->
-                val next = (scale * zoom).coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
+                val damped = 1f + (zoom - 1f) * GridPinchZoom.PINCH_SENSITIVITY
+                val next = (scale * damped).coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
                 if (next != scale) {
                     scale = next
                     onPersist(next)

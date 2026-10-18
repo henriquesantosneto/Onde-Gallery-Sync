@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -176,62 +177,92 @@ fun GalleryScreen(
                 ) { Text("Nenhuma mídia indexada. Conceda permissão e sincronize.") }
             }
             else -> {
-                val gridEntries = remember(state.items, state.sortOrder) {
-                    buildGalleryGridEntries(state.items, state.sortOrder)
+                val dateTimeline = isDateTimelineSort(state.sortOrder)
+                val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
+                val gridState = rememberLazyGridState()
+                val timelinePhotos = remember(state.items, state.sortOrder) {
+                    sortedTimelinePhotos(state.items, state.sortOrder)
                 }
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = mediaCellMin),
+                val gridEntries = remember(state.items, state.sortOrder, timelineGrouping) {
+                    buildGalleryGridEntries(state.items, state.sortOrder, timelineGrouping)
+                }
+                val stickyLabel = rememberStickyTimelineLabel(
+                    gridState = gridState,
+                    photos = if (dateTimeline) timelinePhotos else emptyList(),
+                    gridScale = gridPinch.scale,
+                    enabled = dateTimeline,
+                )
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
-                        .then(gridPinch.gridModifier),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                        .padding(padding),
                 ) {
-                    items(
-                        items = gridEntries,
-                        key = { it.key },
-                        span = { entry ->
-                            when (entry) {
-                                is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
-                                is GalleryGridEntry.Photo -> GridItemSpan(1)
-                            }
-                        },
-                    ) { entry ->
-                        when (entry) {
-                            is GalleryGridEntry.Header -> {
-                                TimelineSectionHeader(
-                                    title = entry.header.title,
-                                    kind = entry.header.kind,
-                                )
-                            }
-                            is GalleryGridEntry.Photo -> {
-                                val item = entry.item
-                                val selected = item.canonicalPath in state.selectedPaths
-                                MediaThumbnail(
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = mediaCellMin),
+                        state = gridState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(gridPinch.gridModifier),
+                        contentPadding = PaddingValues(
+                            start = 8.dp,
+                            end = 8.dp,
+                            top = if (dateTimeline) 52.dp else 4.dp,
+                            bottom = 4.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (dateTimeline) {
+                            items(
+                                items = timelinePhotos,
+                                key = { it.canonicalPath },
+                            ) { item ->
+                                TimelinePhotoCell(
                                     item = item,
+                                    state = state,
                                     syncCoordinator = syncCoordinator,
-                                    selectionMode = state.selectionMode,
-                                    selected = selected,
-                                    gesturesEnabled = !gridPinch.blockItemGestures,
-                                    onClick = {
-                                        if (state.selectionMode) {
-                                            viewModel.toggleSelection(item.canonicalPath)
-                                        } else {
-                                            val encoded = URLEncoder.encode(
-                                                item.canonicalPath,
-                                                StandardCharsets.UTF_8.name(),
-                                            )
-                                            onOpenItem(encoded)
-                                        }
-                                    },
-                                    onLongClick = {
-                                        viewModel.enterSelectionMode(item.canonicalPath)
-                                    },
+                                    gridPinch = gridPinch,
+                                    viewModel = viewModel,
+                                    onOpenItem = onOpenItem,
                                 )
+                            }
+                        } else {
+                            items(
+                                items = gridEntries,
+                                key = { it.key },
+                                span = { entry ->
+                                    when (entry) {
+                                        is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
+                                        is GalleryGridEntry.Photo -> GridItemSpan(1)
+                                    }
+                                },
+                            ) { entry ->
+                                when (entry) {
+                                    is GalleryGridEntry.Header -> {
+                                        TimelineSectionHeader(
+                                            title = entry.header.title,
+                                            kind = entry.header.kind,
+                                        )
+                                    }
+                                    is GalleryGridEntry.Photo -> {
+                                        TimelinePhotoCell(
+                                            item = entry.item,
+                                            state = state,
+                                            syncCoordinator = syncCoordinator,
+                                            gridPinch = gridPinch,
+                                            viewModel = viewModel,
+                                            onOpenItem = onOpenItem,
+                                        )
+                                    }
+                                }
                             }
                         }
+                    }
+                    if (dateTimeline) {
+                        GalleryStickyTimelineBar(
+                            title = stickyLabel,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
                     }
                 }
             }
@@ -258,6 +289,39 @@ fun GalleryScreen(
 }
 
 @Composable
+private fun TimelinePhotoCell(
+    item: GalleryDisplayItem,
+    state: GalleryUiState,
+    syncCoordinator: SyncCoordinator,
+    gridPinch: GalleryGridPinchZoom,
+    viewModel: GalleryViewModel,
+    onOpenItem: (String) -> Unit,
+) {
+    val selected = item.canonicalPath in state.selectedPaths
+    MediaThumbnail(
+        item = item,
+        syncCoordinator = syncCoordinator,
+        selectionMode = state.selectionMode,
+        selected = selected,
+        gesturesEnabled = !gridPinch.blockItemGestures,
+        onClick = {
+            if (state.selectionMode) {
+                viewModel.toggleSelection(item.canonicalPath)
+            } else {
+                val encoded = URLEncoder.encode(
+                    item.canonicalPath,
+                    StandardCharsets.UTF_8.name(),
+                )
+                onOpenItem(encoded)
+            }
+        },
+        onLongClick = {
+            viewModel.enterSelectionMode(item.canonicalPath)
+        },
+    )
+}
+
+@Composable
 private fun TimelineSectionHeader(
     title: String,
     kind: TimelineHeaderKind,
@@ -266,7 +330,7 @@ private fun TimelineSectionHeader(
         text = title,
         style = when (kind) {
             TimelineHeaderKind.YEAR -> MaterialTheme.typography.headlineSmall
-            TimelineHeaderKind.MONTH -> MaterialTheme.typography.titleMedium
+            TimelineHeaderKind.MONTH, TimelineHeaderKind.DAY -> MaterialTheme.typography.titleMedium
         },
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier

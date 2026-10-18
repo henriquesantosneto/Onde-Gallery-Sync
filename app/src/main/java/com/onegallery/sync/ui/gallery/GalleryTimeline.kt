@@ -9,6 +9,15 @@ import java.util.Locale
 enum class TimelineHeaderKind {
     YEAR,
     MONTH,
+    DAY,
+}
+
+/** Granularidade das seções ao rolar / no rótulo fixo. */
+enum class TimelineGrouping {
+    /** Hoje, Ontem, mês, ano. */
+    RELAXED,
+    /** Uma seção por dia (melhor com miniaturas pequenas). */
+    BY_DAY,
 }
 
 data class GalleryTimelineHeader(
@@ -25,6 +34,13 @@ sealed class GalleryGridEntry(open val key: String) {
 private val ptBr = Locale("pt", "BR")
 private val monthFormatter = DateTimeFormatter.ofPattern("MMMM", ptBr)
 
+fun isDateTimelineSort(sortOrder: GallerySortOrder): Boolean =
+    sortOrder == GallerySortOrder.DATE_NEWEST || sortOrder == GallerySortOrder.DATE_OLDEST
+
+/** Miniaturas menores (escala ≤ ~1) → agrupar por dia. */
+fun timelineGroupingForGridScale(gridScale: Float): TimelineGrouping =
+    if (gridScale <= 1.05f) TimelineGrouping.BY_DAY else TimelineGrouping.RELAXED
+
 private fun timestampToDate(epochSeconds: Long): LocalDate {
     if (epochSeconds <= 0L) return LocalDate.EPOCH
     return Instant.ofEpochSecond(epochSeconds).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -38,27 +54,56 @@ private fun capitalizeMonth(month: java.time.Month, year: Int): String {
 fun formatMediaCaptureDate(epochSeconds: Long): String {
     if (epochSeconds <= 0L) return ""
     val date = timestampToDate(epochSeconds)
-    val today = LocalDate.now()
+    return timelineSectionTitle(date, TimelineGrouping.RELAXED)
+}
+
+fun formatTimelineDayLabel(date: LocalDate, today: LocalDate = LocalDate.now()): String {
     return when {
         date == today -> "Hoje"
         date == today.minusDays(1) -> "Ontem"
-        date.year == today.year -> capitalizeMonth(date.month, date.year)
-        else -> "${capitalizeMonth(date.month, date.year)} ${date.year}"
+        date.year == today.year -> "${date.dayOfMonth} de ${capitalizeMonth(date.month, date.year)}"
+        else -> "${date.dayOfMonth} de ${capitalizeMonth(date.month, date.year)} de ${date.year}"
+    }
+}
+
+fun timelineSectionTitle(date: LocalDate, grouping: TimelineGrouping, today: LocalDate = LocalDate.now()): String {
+    return when (grouping) {
+        TimelineGrouping.BY_DAY -> formatTimelineDayLabel(date, today)
+        TimelineGrouping.RELAXED -> when {
+            date == today -> "Hoje"
+            date == today.minusDays(1) -> "Ontem"
+            date.year == today.year -> capitalizeMonth(date.month, date.year)
+            else -> "${capitalizeMonth(date.month, date.year)} ${date.year}"
+        }
+    }
+}
+
+fun timelineStickyLabel(epochSeconds: Long, gridScale: Float): String {
+    val date = timestampToDate(epochSeconds)
+    return timelineSectionTitle(date, timelineGroupingForGridScale(gridScale))
+}
+
+fun sortedTimelinePhotos(
+    items: List<GalleryDisplayItem>,
+    sortOrder: GallerySortOrder,
+): List<GalleryDisplayItem> {
+    if (!isDateTimelineSort(sortOrder)) return items
+    return if (sortOrder == GallerySortOrder.DATE_NEWEST) {
+        items.sortedByDescending { it.sortTimestamp }
+    } else {
+        items.sortedBy { it.sortTimestamp }
     }
 }
 
 fun buildGalleryGridEntries(
     items: List<GalleryDisplayItem>,
     sortOrder: GallerySortOrder,
+    grouping: TimelineGrouping = TimelineGrouping.RELAXED,
 ): List<GalleryGridEntry> {
-    if (sortOrder != GallerySortOrder.DATE_NEWEST && sortOrder != GallerySortOrder.DATE_OLDEST) {
+    if (!isDateTimelineSort(sortOrder)) {
         return items.map { GalleryGridEntry.Photo(it) }
     }
-    val sorted = if (sortOrder == GallerySortOrder.DATE_NEWEST) {
-        items.sortedByDescending { it.sortTimestamp }
-    } else {
-        items.sortedBy { it.sortTimestamp }
-    }
+    val sorted = sortedTimelinePhotos(items, sortOrder)
     val today = LocalDate.now()
     val entries = mutableListOf<GalleryGridEntry>()
     var lastYear: Int? = null
@@ -68,7 +113,7 @@ fun buildGalleryGridEntries(
         val date = timestampToDate(item.sortTimestamp)
         val year = date.year
 
-        if (year != lastYear) {
+        if (grouping == TimelineGrouping.RELAXED && year != lastYear) {
             if (year != today.year) {
                 entries.add(
                     GalleryGridEntry.Header(
@@ -84,17 +129,19 @@ fun buildGalleryGridEntries(
             lastSectionKey = null
         }
 
-        val sectionKey = when {
-            date == today -> "day-today"
-            date == today.minusDays(1) -> "day-yesterday"
-            date.year == today.year -> "month-${date.year}-${date.monthValue}"
-            else -> "month-${date.year}-${date.monthValue}"
+        val sectionKey = when (grouping) {
+            TimelineGrouping.BY_DAY -> "day-${date}"
+            TimelineGrouping.RELAXED -> when {
+                date == today -> "day-today"
+                date == today.minusDays(1) -> "day-yesterday"
+                else -> "month-${date.year}-${date.monthValue}"
+            }
         }
-        val sectionTitle = when {
-            date == today -> "Hoje"
-            date == today.minusDays(1) -> "Ontem"
-            date.year == today.year -> capitalizeMonth(date.month, year)
-            else -> "${capitalizeMonth(date.month, year)} $year"
+        val sectionTitle = timelineSectionTitle(date, grouping, today)
+        val headerKind = if (grouping == TimelineGrouping.BY_DAY) {
+            TimelineHeaderKind.DAY
+        } else {
+            TimelineHeaderKind.MONTH
         }
 
         if (sectionKey != lastSectionKey) {
@@ -103,7 +150,7 @@ fun buildGalleryGridEntries(
                     GalleryTimelineHeader(
                         id = sectionKey,
                         title = sectionTitle,
-                        kind = TimelineHeaderKind.MONTH,
+                        kind = headerKind,
                     ),
                 ),
             )
