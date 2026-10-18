@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:ns1="http://schemas.android.com/tools">
+    <string name="app_name">OneGallery Sync</string>
+    <string name="auth_sign_in">Entrar com Microsoft</string>
+    <string name="auth_sign_out">Sair</string>
+    <string name="cloud_badge">Nuvem</string>
+    <string name="offline_badge">Offline</string>
+    <string name="pending_badge">Pendente</string>
+    <string name="permission_rationale">Precisamos acessar fotos e vídeos no dispositivo para espelhar a galeria local.</string>
+    <string name="sync_not_implemented_body">Espelha pastas locais no OneDrive, baixa originais sob demanda e pede confirmação antes de propagar exclusões. Valide no dispositivo após configurar o app Microsoft.</string>
+    <string name="sync_not_implemented_title">Sincronização bidirecional</string>
+    <string name="tab_albums">Álbuns</string>
+    <string name="tab_gallery">Galeria</string>
+    <string name="tab_settings">Ajustes</string>
+    <string name="tab_sync">Sync</string>
+    <style name="Theme.OneGallerySync" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" ns1:targetApi="m">true</item>
+    </style>
+</resources>

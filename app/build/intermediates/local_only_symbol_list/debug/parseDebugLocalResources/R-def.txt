@@ -1,0 +1,22 @@
+R_DEF: Internal format may change without notice
+local
+drawable ic_launcher_background
+drawable ic_launcher_foreground
+mipmap ic_launcher
+mipmap ic_launcher_round
+raw auth_config
+string app_name
+string auth_sign_in
+string auth_sign_out
+string cloud_badge
+string offline_badge
+string pending_badge
+string permission_rationale
+string sync_not_implemented_body
+string sync_not_implemented_title
+string tab_albums
+string tab_gallery
+string tab_settings
+string tab_sync
+style Theme.OneGallerySync
+xml file_paths

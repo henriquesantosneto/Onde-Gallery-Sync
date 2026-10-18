@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import java.io.File
 
 data class AuthState(
     val isSignedIn: Boolean = false,
@@ -25,67 +26,90 @@ data class AuthState(
     val lastError: String? = null,
 )
 
-class MsalAuthManager(context: Context) {
+class MsalAuthManager(
+    context: Context,
+    private val authPreferences: AuthPreferences,
+) {
     private val appContext = context.applicationContext
 
     private val _state = MutableStateFlow(AuthState())
     val state: StateFlow<AuthState> = _state.asStateFlow()
 
     private var client: ISingleAccountPublicClientApplication? = null
+    private var configFile: File? = null
+
+    val redirectUriForAzure: String
+        get() = MsalConfigFactory.computeRedirectUri(appContext)
 
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES
         .split(' ')
         .filter { it.isNotBlank() }
         .toTypedArray()
 
-    suspend fun initialize(): Result<Unit> = suspendCancellableCoroutine { cont ->
-        PublicClientApplication.createSingleAccountPublicClientApplication(
-            appContext,
-            com.onegallery.sync.R.raw.auth_config,
-            object : IPublicClientApplication.ISingleAccountApplicationCreatedListener {
-                override fun onCreated(application: ISingleAccountPublicClientApplication) {
-                    client = application
-                    application.getCurrentAccountAsync(object :
-                        ISingleAccountPublicClientApplication.CurrentAccountCallback {
-                        override fun onAccountLoaded(activeAccount: com.microsoft.identity.client.IAccount?) {
-                            if (activeAccount != null) {
-                                _state.value = AuthState(
-                                    isSignedIn = true,
-                                    displayName = activeAccount.username,
-                                    accountId = activeAccount.id,
-                                )
-                            }
-                            if (cont.isActive) cont.resume(Result.success(Unit))
-                        }
+    fun savedClientId(): String = authPreferences.azureClientId
 
-                        override fun onAccountChanged(
-                            priorAccount: com.microsoft.identity.client.IAccount?,
-                            currentAccount: com.microsoft.identity.client.IAccount?,
-                        ) {
-                            _state.value = if (currentAccount != null) {
-                                AuthState(
-                                    isSignedIn = true,
-                                    displayName = currentAccount.username,
-                                    accountId = currentAccount.id,
-                                )
-                            } else {
-                                AuthState()
-                            }
-                        }
+    fun saveClientId(clientId: String) {
+        authPreferences.azureClientId = clientId
+    }
 
-                        override fun onError(exception: MsalException) {
-                            if (cont.isActive) {
-                                cont.resume(Result.failure(exception))
+    suspend fun initialize(): Result<Unit> {
+        val clientId = authPreferences.azureClientId
+        if (clientId.isBlank() || clientId.startsWith("00000000")) {
+            return Result.failure(
+                IllegalStateException("Informe o Application (client) ID do Azure em Ajustes ou abaixo."),
+            )
+        }
+        configFile = MsalConfigFactory.writeConfigFile(appContext, clientId)
+        client = null
+        return suspendCancellableCoroutine { cont ->
+            PublicClientApplication.createSingleAccountPublicClientApplication(
+                appContext,
+                configFile!!,
+                object : IPublicClientApplication.ISingleAccountApplicationCreatedListener {
+                    override fun onCreated(application: ISingleAccountPublicClientApplication) {
+                        client = application
+                        application.getCurrentAccountAsync(object :
+                            ISingleAccountPublicClientApplication.CurrentAccountCallback {
+                            override fun onAccountLoaded(activeAccount: com.microsoft.identity.client.IAccount?) {
+                                if (activeAccount != null) {
+                                    _state.value = AuthState(
+                                        isSignedIn = true,
+                                        displayName = activeAccount.username,
+                                        accountId = activeAccount.id,
+                                    )
+                                }
+                                if (cont.isActive) cont.resume(Result.success(Unit))
                             }
-                        }
-                    })
-                }
 
-                override fun onError(exception: MsalException) {
-                    if (cont.isActive) cont.resume(Result.failure(exception))
-                }
-            },
-        )
+                            override fun onAccountChanged(
+                                priorAccount: com.microsoft.identity.client.IAccount?,
+                                currentAccount: com.microsoft.identity.client.IAccount?,
+                            ) {
+                                _state.value = if (currentAccount != null) {
+                                    AuthState(
+                                        isSignedIn = true,
+                                        displayName = currentAccount.username,
+                                        accountId = currentAccount.id,
+                                    )
+                                } else {
+                                    AuthState()
+                                }
+                            }
+
+                            override fun onError(exception: MsalException) {
+                                if (cont.isActive) {
+                                    cont.resume(Result.failure(exception))
+                                }
+                            }
+                        })
+                    }
+
+                    override fun onError(exception: MsalException) {
+                        if (cont.isActive) cont.resume(Result.failure(exception))
+                    }
+                },
+            )
+        }
     }
 
     suspend fun signInInteractive(activity: Activity): Result<Unit> {

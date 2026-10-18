@@ -62,13 +62,19 @@ fun OneGalleryApp(
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
 ) {
-    var msalReady by remember { mutableStateOf(false) }
+    var msalReady by remember { mutableStateOf(authManager.savedClientId().isNotBlank()) }
     var msalError by remember { mutableStateOf<String?>(null) }
+    var localOnlyMode by remember { mutableStateOf(false) }
 
-    LaunchedEffect(authManager) {
-        authManager.initialize()
-            .onSuccess { msalReady = true }
-            .onFailure { msalError = it.message }
+    LaunchedEffect(authManager.savedClientId()) {
+        if (authManager.savedClientId().isNotBlank()) {
+            authManager.initialize()
+                .onSuccess {
+                    msalReady = true
+                    msalError = null
+                }
+                .onFailure { msalError = it.message }
+        }
     }
 
     val authState by authManager.state.collectAsStateWithLifecycle()
@@ -95,15 +101,15 @@ fun OneGalleryApp(
         }
     }
 
-    if (!msalReady && msalError == null) {
-        Text("Inicializando…")
-        return
-    }
-
-    if (!authState.isSignedIn) {
+    if (!authState.isSignedIn && !localOnlyMode) {
         SignInGate(
             authManager = authManager,
             msalConfigurationError = msalError,
+            onClientConfigured = {
+                msalReady = true
+                msalError = null
+            },
+            onLocalOnly = { localOnlyMode = true },
         )
         return
     }

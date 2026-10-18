@@ -6,6 +6,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.onegallery.sync.auth.AuthPreferences
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
@@ -38,7 +39,7 @@ class OneGalleryApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        authManager = MsalAuthManager(this)
+        authManager = MsalAuthManager(this, AuthPreferences(this))
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
         oneDriveRepository = OneDriveRepository(authManager)
