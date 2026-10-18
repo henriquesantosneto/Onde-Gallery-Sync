@@ -62,6 +62,14 @@ import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.launch
 
 private const val PLACES_MAP_ROUTE = "places_map"
+/** Conteúdo filtrado de um álbum/local; mantém a aba Álbuns selecionada na barra inferior. */
+private const val ALBUMS_BROWSE_ROUTE = "albums/browse"
+
+private fun albumsTabSelected(route: String?): Boolean =
+    route == MainTab.Albums.route || route == ALBUMS_BROWSE_ROUTE
+
+private fun showsMainBottomBar(route: String?): Boolean =
+    route in MainTab.entries.map { it.route } || route == ALBUMS_BROWSE_ROUTE
 
 private enum class MainTab(val route: String) {
     Gallery("gallery"),
@@ -199,7 +207,7 @@ fun OneGalleryApp(
     )
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
-    val showBottomBar = currentRoute in MainTab.entries.map { it.route }
+    val showBottomBar = showsMainBottomBar(currentRoute)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -208,16 +216,30 @@ fun OneGalleryApp(
                 NavigationBar {
                     MainTab.entries.forEach { tab ->
                         NavigationBarItem(
-                            selected = currentRoute == tab.route,
+                            selected = when (tab) {
+                                MainTab.Albums -> albumsTabSelected(currentRoute)
+                                else -> currentRoute == tab.route
+                            },
                             onClick = {
                                 when (tab) {
                                     MainTab.Gallery, MainTab.Albums -> galleryViewModel.clearBrowseFilters()
                                     else -> Unit
                                 }
-                                navController.navigate(tab.route) {
-                                    popUpTo(MainTab.Gallery.route) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                when (tab) {
+                                    MainTab.Albums -> {
+                                        navController.navigate(MainTab.Albums.route) {
+                                            popUpTo(MainTab.Albums.route) { inclusive = false }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                    else -> {
+                                        navController.navigate(tab.route) {
+                                            popUpTo(MainTab.Gallery.route) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
                                 }
                             },
                             icon = {
@@ -274,8 +296,7 @@ fun OneGalleryApp(
                     viewModel = galleryViewModel,
                     galleryPreferences = galleryPreferences,
                     onOpenAlbum = {
-                        navController.navigate(MainTab.Gallery.route) {
-                            popUpTo(MainTab.Gallery.route) { inclusive = true }
+                        navController.navigate(ALBUMS_BROWSE_ROUTE) {
                             launchSingleTop = true
                         }
                     },
@@ -294,10 +315,23 @@ fun OneGalleryApp(
                     },
                     onShowAllAtPlace = { placeLabel ->
                         galleryViewModel.setPlaceFilter(placeLabel)
-                        navController.navigate(MainTab.Gallery.route) {
-                            popUpTo(MainTab.Gallery.route) { inclusive = true }
+                        navController.navigate(ALBUMS_BROWSE_ROUTE) {
                             launchSingleTop = true
                         }
+                    },
+                )
+            }
+            composable(ALBUMS_BROWSE_ROUTE) {
+                GalleryScreen(
+                    viewModel = galleryViewModel,
+                    syncCoordinator = syncCoordinator,
+                    galleryPreferences = galleryPreferences,
+                    onOpenItem = { encoded ->
+                        navController.navigate("media/$encoded")
+                    },
+                    onExitAlbumFilter = {
+                        galleryViewModel.clearBrowseFilters()
+                        navController.popBackStack()
                     },
                 )
             }
