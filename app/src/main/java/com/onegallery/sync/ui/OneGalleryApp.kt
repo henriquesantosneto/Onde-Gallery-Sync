@@ -218,10 +218,9 @@ fun OneGalleryApp(
         OneDriveCloudBrowserScreen(
             oneDriveRepository = oneDriveRepository,
             onFolderSelected = { itemId, path, label ->
-                syncCoordinator.connectGraphSyncFolder(itemId, path, label)
                 setCloudSetupStep(CloudSetupStep.Hidden)
                 setupDone = true
-                syncTasks.runBidirectionalSync()
+                syncTasks.connectGraphSyncFolderAndSync(itemId, path, label, userInitiated = true)
             },
             onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
         )

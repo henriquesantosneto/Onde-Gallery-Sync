@@ -13,6 +13,18 @@ class SyncTaskLauncher(
         scope.launch { coordinator.runBidirectionalSync(userInitiated = userInitiated) }
     }
 
+    fun connectGraphSyncFolderAndSync(
+        itemId: String,
+        driveRelativePath: String,
+        label: String,
+        userInitiated: Boolean = true,
+    ) {
+        scope.launch {
+            coordinator.connectGraphSyncFolder(itemId, driveRelativePath, label)
+            coordinator.runBidirectionalSync(userInitiated = userInitiated)
+        }
+    }
+
     fun indexLocalLibrary(userInitiated: Boolean = false) {
         scope.launch { coordinator.indexLocalLibrary(userInitiated = userInitiated) }
     }

@@ -75,12 +75,13 @@ class SyncCoordinator(
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
     private val appForegroundState: AppForegroundState,
 ) {
-    fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
+    suspend fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
         val previousTree = saOneDriveRepository.persistedTreeUriString()
         return saOneDriveRepository.connectFolder(treeUri).onSuccess {
             val currentTree = saOneDriveRepository.persistedTreeUriString()
-            if (previousTree != null && currentTree != null && previousTree != currentTree) {
+            if (currentTree != null && previousTree != currentTree) {
                 scheduleIndexRebuild()
+                applyPendingIndexRebuildIfNeeded()
             }
             syncPreferences.syncMode = SyncMode.ONEDRIVE_FOLDER
             syncPreferences.hasCompletedSetup = true
@@ -97,9 +98,10 @@ class SyncCoordinator(
         syncPreferences.hasCompletedSetup = true
     }
 
-    fun connectGraphSyncFolder(itemId: String, driveRelativePath: String, label: String) {
-        if (oneDriveRepository.willChangeSyncRoot(itemId, driveRelativePath)) {
+    suspend fun connectGraphSyncFolder(itemId: String, driveRelativePath: String, label: String) {
+        if (oneDriveRepository.isDifferentSyncRoot(itemId, driveRelativePath)) {
             scheduleIndexRebuild()
+            applyPendingIndexRebuildIfNeeded()
         }
         oneDriveRepository.setSyncRoot(itemId, driveRelativePath, label)
         useGraphMode()

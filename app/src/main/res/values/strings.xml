@@ -12,6 +12,7 @@
     <string name="permission_media_location_rationale">A permissão “Localização das mídias” permite ler GPS das fotos para o mapa de locais.</string>
     <string name="permission_device_location_rationale">A localização do aparelho mostra onde você está no mapa em relação às fotos (como no botão de localização do Mapas).</string>
     <string name="map_my_location">Minha localização</string>
+    <string name="settings_cloud_folder_reindex_hint">Trocar a pasta na nuvem recria o índice e sincroniza de novo.</string>
     <string name="map_photo_locations_hint">pinça para zoom · toque no pin (estilo mapa do Fotos)</string>
     <string name="cloud_badge">Nuvem</string>
     <string name="offline_badge">Offline</string>

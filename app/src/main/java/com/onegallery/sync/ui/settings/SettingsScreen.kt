@@ -115,6 +115,12 @@ fun SettingsScreen(
                     ) {
                         Text("Escolher pasta na nuvem")
                     }
+                    Text(
+                        stringResource(R.string.settings_cloud_folder_reindex_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                     TextButton(
                         onClick = { scope.launch { authManager.signOut() } },
                         modifier = Modifier.fillMaxWidth(),

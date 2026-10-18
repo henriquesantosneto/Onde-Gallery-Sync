@@ -6,7 +6,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 import com.onegallery.sync.data.onedrive.FolderPickerResults
 import com.onegallery.sync.sync.SyncCoordinator
 
@@ -17,6 +19,7 @@ fun rememberConnectFolderLauncher(
     onUriGranted: ((Uri) -> Unit)? = null,
 ): (Intent) -> Unit {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -40,15 +43,17 @@ fun rememberConnectFolderLauncher(
                         Toast.makeText(context, "Erro interno ao conectar pasta", Toast.LENGTH_SHORT).show()
                         return@rememberLauncherForActivityResult
                     }
-                coordinator.connectOneDriveFolder(uri)
-                    .onSuccess { onConnected() }
-                    .onFailure {
-                        Toast.makeText(
-                            context,
-                            it.message ?: "Não foi possível usar esta pasta",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
+                scope.launch {
+                    coordinator.connectOneDriveFolder(uri)
+                        .onSuccess { onConnected() }
+                        .onFailure {
+                            Toast.makeText(
+                                context,
+                                it.message ?: "Não foi possível usar esta pasta",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                }
             }
             android.app.Activity.RESULT_CANCELED -> {
                 Toast.makeText(context, "Seleção cancelada", Toast.LENGTH_SHORT).show()
