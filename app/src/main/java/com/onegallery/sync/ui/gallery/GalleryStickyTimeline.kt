@@ -12,7 +12,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/** Altura reservada no topo da grade + overlay da barra de data. */
+val GalleryStickyTimelineBarHeight: Dp = 48.dp
 
 fun stickyLabelForGridIndex(
     entries: List<GalleryGridEntry>,

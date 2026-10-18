@@ -190,8 +190,9 @@ fun GalleryScreen(
                 }
                 val density = LocalDensity.current
                 val stickyBarHeightPx = remember(density) {
-                    with(density) { 44.dp.roundToPx() }
+                    with(density) { GalleryStickyTimelineBarHeight.roundToPx() }
                 }
+                val gridTopPadding = if (dateTimeline) GalleryStickyTimelineBarHeight else 4.dp
                 val timelineSticky = rememberTimelineStickyUiState(
                     gridState = gridState,
                     entries = if (dateTimeline) gridEntries else emptyList(),
@@ -213,7 +214,7 @@ fun GalleryScreen(
                         contentPadding = PaddingValues(
                             start = 8.dp,
                             end = 8.dp,
-                            top = 4.dp,
+                            top = gridTopPadding,
                             bottom = 4.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
