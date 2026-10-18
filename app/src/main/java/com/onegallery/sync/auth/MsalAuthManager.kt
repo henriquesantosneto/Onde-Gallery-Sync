@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class AuthState(
     val isSignedIn: Boolean = false,
@@ -179,37 +181,47 @@ class MsalAuthManager(
 
     suspend fun signInInteractive(activity: Activity): Result<Unit> {
         val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
-        return suspendCancellableCoroutine { cont ->
-            val params = AcquireTokenParameters.Builder()
-                .startAuthorizationFromActivity(activity)
-                .withScopes(scopes.toList())
-                .withCallback(object : AuthenticationCallback {
-                    override fun onSuccess(authenticationResult: IAuthenticationResult) {
-                        _state.value = AuthState(
-                            isSignedIn = true,
-                            displayName = authenticationResult.account.username,
-                            accountId = authenticationResult.account.id,
-                            accessToken = authenticationResult.accessToken,
-                        )
-                        if (cont.isActive) cont.resume(Result.success(Unit))
-                    }
-
-                    override fun onError(exception: MsalException) {
-                        val msg = enrichMsalError(exception.message)
-                        _state.value = _state.value.copy(lastError = msg)
-                        if (cont.isActive) {
-                            cont.resume(Result.failure(IllegalStateException(msg, exception)))
+        if (activity.isFinishing || activity.isDestroyed) {
+            return Result.failure(IllegalStateException("Tela indisponível — abra o login de novo."))
+        }
+        return withContext(Dispatchers.Main.immediate) {
+            suspendCancellableCoroutine { cont ->
+                val params = AcquireTokenParameters.Builder()
+                    .startAuthorizationFromActivity(activity)
+                    .withScopes(scopes.toList())
+                    .withCallback(object : AuthenticationCallback {
+                        override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                            _state.value = AuthState(
+                                isSignedIn = true,
+                                displayName = authenticationResult.account.username,
+                                accountId = authenticationResult.account.id,
+                                accessToken = authenticationResult.accessToken,
+                            )
+                            if (cont.isActive) cont.resume(Result.success(Unit))
                         }
-                    }
 
-                    override fun onCancel() {
-                        if (cont.isActive) {
-                            cont.resume(Result.failure(IllegalStateException("Login cancelado")))
+                        override fun onError(exception: MsalException) {
+                            val msg = enrichMsalError(exception.message)
+                            _state.value = _state.value.copy(lastError = msg)
+                            if (cont.isActive) {
+                                cont.resume(Result.failure(IllegalStateException(msg, exception)))
+                            }
                         }
-                    }
-                })
-                .build()
-            msal.acquireToken(params)
+
+                        override fun onCancel() {
+                            if (cont.isActive) {
+                                cont.resume(Result.failure(IllegalStateException("Login cancelado")))
+                            }
+                        }
+                    })
+                    .build()
+                try {
+                    msal.acquireToken(params)
+                } catch (t: Throwable) {
+                    val msg = enrichMsalError(t.message ?: t.javaClass.simpleName)
+                    if (cont.isActive) cont.resume(Result.failure(IllegalStateException(msg, t)))
+                }
+            }
         }
     }
 

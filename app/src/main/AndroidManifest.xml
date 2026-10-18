@@ -23,6 +23,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.OneGallerySync">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -31,9 +32,25 @@
         </activity>
 
         <!-- MSAL: path = hash Base64 do keystore de build (placeholder Gradle). Azure = URI codificada no app. -->
+        <!-- MSAL 5.x: redirect msauth nos dois activities (sem filtro no CurrentTask = crash ao voltar do login). -->
         <activity
             android:name="com.microsoft.identity.client.BrowserTabActivity"
-            android:exported="true">
+            android:exported="true"
+            tools:node="merge">
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="msauth"
+                    android:host="com.onegallery.sync"
+                    android:path="${msalSignaturePath}" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.microsoft.identity.client.CurrentTaskBrowserTabActivity"
+            android:exported="true"
+            tools:node="merge">
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

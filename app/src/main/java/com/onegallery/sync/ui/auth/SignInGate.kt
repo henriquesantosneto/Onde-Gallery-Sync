@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.BuildConfig
 import com.onegallery.sync.R
+import com.onegallery.sync.auth.AzureClientIdValidator
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.auth.MsalConfigFactory
@@ -202,8 +203,18 @@ fun SignInGate(
                 busy = true
                 localError = null
                 scope.launch {
-                    if (authManager.needsUserClientId() && clientId.isNotBlank()) {
-                        authManager.saveClientId(clientId)
+                    val idToUse = when {
+                        clientId.isNotBlank() -> clientId
+                        else -> authManager.savedClientId()
+                    }
+                    if (authManager.needsUserClientId() || clientId.isNotBlank()) {
+                        if (!AzureClientIdValidator.isValid(idToUse)) {
+                            localError =
+                                "Client ID inválido. Cole o GUID completo do Azure (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)."
+                            busy = false
+                            return@launch
+                        }
+                        authManager.saveClientId(idToUse)
                     }
                     authManager.initialize()
                         .onFailure {

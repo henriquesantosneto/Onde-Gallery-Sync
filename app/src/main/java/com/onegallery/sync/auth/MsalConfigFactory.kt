@@ -28,11 +28,11 @@ object MsalConfigFactory {
     }
 
     fun writeConfigFile(context: Context, clientId: String): File {
-        val redirectUri = computeRedirectUri(context)
+        val redirectUri = redirectUriForInstalledApk(context)
         val json = """
             {
               "client_id": "$clientId",
-              "authorization_user_agent": "DEFAULT",
+              "authorization_user_agent": "BROWSER",
               "redirect_uri": "$redirectUri",
               "broker_redirect_uri_registered": false,
               "account_mode": "SINGLE",
@@ -50,6 +50,16 @@ object MsalConfigFactory {
         val file = File(context.filesDir, "msal_auth_config.json")
         file.writeText(json)
         return file
+    }
+
+    /** Redirect alinhado ao APK instalado (evita JSON ≠ assinatura do aparelho). */
+    private fun redirectUriForInstalledApk(context: Context): String {
+        val runtimeHash = sha1SignatureHash(context, context.packageName)
+        val baked = MsalRedirectUri.bakedSignatureHash()
+        if (runtimeHash != null && baked.isNotBlank() && baked != "UNCONFIGURED" && runtimeHash != baked) {
+            return MsalRedirectUri.format(context.packageName, runtimeHash)
+        }
+        return computeRedirectUri(context)
     }
 
     private fun sha1SignatureHash(context: Context, packageName: String): String? {
