@@ -18,13 +18,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +52,10 @@ fun SyncStatusScreen(
     val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
     val scope = rememberCoroutineScope()
+    var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
+    SideEffect {
+        autoFreeLocal = syncPreferences.autoFreeLocalSpaceWhenSynced
+    }
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
     val problemItems = remember(metadata) {
@@ -137,6 +145,37 @@ fun SyncStatusScreen(
             }
             item {
                 StatsCard(stats, pendingOps)
+            }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                "Liberação automática de espaço",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                "Ligue ou desligue. Placeholder na nuvem após sync.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = autoFreeLocal,
+                            onCheckedChange = {
+                                autoFreeLocal = it
+                                syncPreferences.autoFreeLocalSpaceWhenSynced = it
+                            },
+                        )
+                    }
+                }
             }
 
             if (problemItems.isNotEmpty()) {

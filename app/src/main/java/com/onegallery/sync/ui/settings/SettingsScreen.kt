@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +66,9 @@ fun SettingsScreen(
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
+    SideEffect {
+        autoFreeLocal = syncPreferences.autoFreeLocalSpaceWhenSynced
+    }
     var localAdvancedExpanded by remember { mutableStateOf(false) }
     val launchFolderPicker = rememberConnectFolderLauncher(syncCoordinator) {
         scope.launch { syncCoordinator.runBidirectionalSync() }
@@ -227,12 +231,12 @@ fun SettingsScreen(
             }
             item {
                 ListItem(
-                    headlineContent = { Text("Liberar espaço após backup na nuvem") },
+                    headlineContent = { Text("Liberação automática de espaço") },
                     supportingContent = {
                         Text(
-                            "Remove a cópia local automaticamente e mantém miniatura + OneDrive " +
-                                "(como galeria na nuvem). Com o app aberto, o Android pode pedir " +
-                                "confirmação em lote uma vez.",
+                            "Ligue ou desligue quando quiser. Ligado: após backup no OneDrive, " +
+                                "remove a cópia local e mantém miniatura (placeholder). Desligado: " +
+                                "mantém o arquivo no aparelho.",
                         )
                     },
                     trailingContent = {
