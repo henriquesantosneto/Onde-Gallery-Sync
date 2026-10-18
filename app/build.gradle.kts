@@ -73,8 +73,8 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.5.10"
+        versionCode = 24
+        versionName = "0.5.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -86,7 +86,7 @@ android {
         buildConfigField(
             "String",
             "GRAPH_SCOPES",
-            "\"User.Read Files.ReadWrite offline_access\"",
+            "\"User.Read Files.ReadWrite\"",
         )
     }
 

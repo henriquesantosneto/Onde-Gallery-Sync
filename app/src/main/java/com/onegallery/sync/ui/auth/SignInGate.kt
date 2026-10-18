@@ -141,10 +141,16 @@ fun SignInGate(
                     )
                 }
                 Text(
-                    "Azure → Permissões de APIs: User.Read + Files.ReadWrite (delegadas). " +
-                        "AADSTS90023 = URI/hash; “scopes declined” = faltam permissões Graph.",
-                    style = MaterialTheme.typography.labelSmall,
+                    "Escopos pedidos: ${authManager.requestedScopesLabel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(top = 6.dp),
+                )
+                Text(
+                    "Azure: Graph delegadas User.Read + Files.ReadWrite; cliente público = Sim. " +
+                        "Files.ReadWrite ≠ Files.ReadWrite.All.",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
         }

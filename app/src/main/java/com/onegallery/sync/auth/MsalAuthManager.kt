@@ -62,9 +62,10 @@ class MsalAuthManager(
             }
         }
 
-    private fun enrichMsalError(message: String?): String {
+    private fun enrichMsalError(message: String?, scopesAttempt: String? = null): String {
         val base = message?.trim().orEmpty()
         val lower = base.lowercase()
+        val scopeLine = scopesAttempt?.let { "\nEscopos tentados: $it" }.orEmpty()
         val duplicateRedirectHint = if (lower.contains("more than one app") && lower.contains("browsertab")) {
             "\n\n— Conflito msauth —\n" +
                 "Desinstale versões antigas do OneGallery Sync e instale só o APK mais recente. " +
@@ -78,12 +79,14 @@ class MsalAuthManager(
             lower.contains("650053") ||
             lower.contains("650057")
         ) {
-            "\n\n— Permissões Graph no Azure —\n" +
-                "Registro do app → Permissões de APIs → Microsoft Graph → Delegadas:\n" +
-                "• User.Read\n" +
-                "• Files.ReadWrite\n" +
-                "• offline_access (marque “Conceder consentimento de admin” só se for conta corporativa)\n" +
-                "Salve e tente Entrar de novo. Conta pessoal @outlook/@hotmail precisa aceitar na tela da Microsoft."
+            "\n\n— Permissões Graph no Azure —$scopeLine\n" +
+                "1. Registro → **Autenticação** → **Permitir fluxos de cliente público** = Sim.\n" +
+                "2. Contas suportadas = **contas pessoais Microsoft** + trabalho.\n" +
+                "3. **Permissões de APIs** → Microsoft Graph → **Delegadas** (não “Aplicativo”):\n" +
+                "   • User.Read\n" +
+                "   • Files.ReadWrite (**não** é o mesmo que Files.ReadWrite.All — adicione o que faltar)\n" +
+                "4. Salvar. @outlook: aceite tudo na tela da Microsoft (não só no portal).\n" +
+                "5. Se só tiver .All no portal, o app tenta de novo com Files.ReadWrite.All automaticamente."
         } else {
             ""
         }
@@ -99,13 +102,24 @@ class MsalAuthManager(
         } else {
             ""
         }
-        return base + duplicateRedirectHint + scopeHint + redirectHint
+        return base + scopeLine + duplicateRedirectHint + scopeHint + redirectHint
     }
 
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES
         .split(' ')
         .filter { it.isNotBlank() }
         .toTypedArray()
+
+    val requestedScopesLabel: String
+        get() = scopes.joinToString(", ")
+
+    /** Tentativas se o portal só tiver .All ou só Files.ReadWrite configurado. */
+    private val signInScopeAttempts: List<List<String>> by lazy {
+        listOf(
+            scopes.toList(),
+            listOf("User.Read", "Files.ReadWrite.All"),
+        ).distinctBy { it.joinToString(" ") }
+    }
 
     fun savedClientId(): String = effectiveClientId()
 
@@ -191,43 +205,61 @@ class MsalAuthManager(
         if (activity.isFinishing || activity.isDestroyed) {
             return Result.failure(IllegalStateException("Tela indisponível — abra o login de novo."))
         }
-        return withContext(Dispatchers.Main.immediate) {
-            suspendCancellableCoroutine { cont ->
-                val params = AcquireTokenParameters.Builder()
-                    .startAuthorizationFromActivity(activity)
-                    .withScopes(scopes.toList())
-                    .withCallback(object : AuthenticationCallback {
-                        override fun onSuccess(authenticationResult: IAuthenticationResult) {
-                            _state.value = AuthState(
-                                isSignedIn = true,
-                                displayName = authenticationResult.account.username,
-                                accountId = authenticationResult.account.id,
-                                accessToken = authenticationResult.accessToken,
-                            )
-                            if (cont.isActive) cont.resume(Result.success(Unit))
-                        }
+        var lastFailure: Result<Unit>? = null
+        for (attemptScopes in signInScopeAttempts) {
+            val result = acquireTokenInteractive(activity, msal, attemptScopes)
+            if (result.isSuccess) return result
+            lastFailure = result
+            val msg = result.exceptionOrNull()?.message?.lowercase().orEmpty()
+            val scopeDeclined = msg.contains("scope") && msg.contains("declin")
+            if (!scopeDeclined) return result
+        }
+        return lastFailure ?: Result.failure(IllegalStateException("Login falhou"))
+    }
 
-                        override fun onError(exception: MsalException) {
-                            val msg = enrichMsalError(exception.message)
-                            _state.value = _state.value.copy(lastError = msg)
-                            if (cont.isActive) {
-                                cont.resume(Result.failure(IllegalStateException(msg, exception)))
-                            }
-                        }
+    private suspend fun acquireTokenInteractive(
+        activity: Activity,
+        msal: ISingleAccountPublicClientApplication,
+        attemptScopes: List<String>,
+    ): Result<Unit> = withContext(Dispatchers.Main.immediate) {
+        suspendCancellableCoroutine { cont ->
+            val params = AcquireTokenParameters.Builder()
+                .startAuthorizationFromActivity(activity)
+                .withScopes(attemptScopes)
+                .withCallback(object : AuthenticationCallback {
+                    override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                        _state.value = AuthState(
+                            isSignedIn = true,
+                            displayName = authenticationResult.account.username,
+                            accountId = authenticationResult.account.id,
+                            accessToken = authenticationResult.accessToken,
+                        )
+                        if (cont.isActive) cont.resume(Result.success(Unit))
+                    }
 
-                        override fun onCancel() {
-                            if (cont.isActive) {
-                                cont.resume(Result.failure(IllegalStateException("Login cancelado")))
-                            }
+                    override fun onError(exception: MsalException) {
+                        val msg = enrichMsalError(
+                            exception.message,
+                            attemptScopes.joinToString(", "),
+                        )
+                        _state.value = _state.value.copy(lastError = msg)
+                        if (cont.isActive) {
+                            cont.resume(Result.failure(IllegalStateException(msg, exception)))
                         }
-                    })
-                    .build()
-                try {
-                    msal.acquireToken(params)
-                } catch (t: Throwable) {
-                    val msg = enrichMsalError(t.message ?: t.javaClass.simpleName)
-                    if (cont.isActive) cont.resume(Result.failure(IllegalStateException(msg, t)))
-                }
+                    }
+
+                    override fun onCancel() {
+                        if (cont.isActive) {
+                            cont.resume(Result.failure(IllegalStateException("Login cancelado")))
+                        }
+                    }
+                })
+                .build()
+            try {
+                msal.acquireToken(params)
+            } catch (t: Throwable) {
+                val msg = enrichMsalError(t.message ?: t.javaClass.simpleName, attemptScopes.joinToString(", "))
+                if (cont.isActive) cont.resume(Result.failure(IllegalStateException(msg, t)))
             }
         }
     }
