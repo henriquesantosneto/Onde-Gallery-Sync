@@ -94,20 +94,27 @@ fun SettingsScreen(
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
             }
-            Button(onClick = onBrowseOneDriveSaf) {
-                Text("Navegar OneDrive (estilo gerenciador)")
+            Button(onClick = {
+                val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
+                folderPicker.launch(OneDrivePickerHelper.openFullTreeIntent(context, initial))
+            }) {
+                Text(
+                    if (OneDrivePickerHelper.isSamsungDevice()) {
+                        "Escolher pasta (Meus Arquivos / OneDrive)"
+                    } else {
+                        "Escolher pasta (seletor completo)"
+                    },
+                )
             }
-            Button(
-                onClick = {
-                    val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
-                    folderPicker.launch(OneDrivePickerHelper.openTreeIntent(context, initial))
-                },
-                modifier = Modifier.padding(top = 8.dp),
-            ) {
-                Text("Escolher pasta Pictures (seletor do sistema)")
+            Button(onClick = onBrowseOneDriveSaf, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Navegar OneDrive dentro do app")
             }
             Text(
-                OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON,
+                if (OneDrivePickerHelper.isSamsungDevice()) {
+                    OneDrivePickerHelper.SAMSUNG_ONEDRIVE_HINT
+                } else {
+                    OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),

@@ -141,7 +141,7 @@ fun OneDriveSafBrowserScreen(
             current?.let { node ->
                 Button(
                     onClick = {
-                        val intent = OneDrivePickerHelper.openTreeIntent(context, node.documentUri)
+                        val intent = OneDrivePickerHelper.openFullTreeIntent(context, node.documentUri)
                         grantTree.launch(intent)
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),

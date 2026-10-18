@@ -16,11 +16,10 @@ object OneDriveDocumentBrowser {
     )
 
     fun loadRoots(context: Context): List<BrowseEntry> {
-        return OneDrivePickerHelper.listOneDriveStorageRoots(context).mapNotNull { root ->
-            val authority = root.initialDocumentUri.authority ?: return@mapNotNull null
+        return OneDrivePickerHelper.listCloudRelatedRoots(context).map { root ->
             val docId = DocumentsContract.getDocumentId(root.initialDocumentUri)
             BrowseEntry(
-                authority = authority,
+                authority = root.authority,
                 documentId = docId,
                 name = root.title,
                 isDirectory = true,

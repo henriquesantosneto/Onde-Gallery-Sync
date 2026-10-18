@@ -36,7 +36,8 @@ fun WelcomeScreen(
     val context = LocalContext.current
     val oneDriveInstalled = OneDrivePickerHelper.isOneDriveAppInstalled(context)
     val pickerAvailable = OneDrivePickerHelper.isDocumentTreePickerAvailable(context)
-    val oneDriveRoots = OneDrivePickerHelper.listOneDriveStorageRoots(context)
+    val samsung = OneDrivePickerHelper.isSamsungDevice()
+    val cloudRoots = OneDrivePickerHelper.listCloudRelatedRoots(context)
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -50,17 +51,27 @@ fun WelcomeScreen(
         }
     }
 
-    fun openPicturesPicker() {
+    fun openSamsungStylePicker() {
         if (!pickerAvailable) {
             Toast.makeText(
                 context,
-                "Ative o app Arquivos do Samsung (ou Google Arquivos) para escolher pastas.",
+                "Ative o app Arquivos / Meus Arquivos para escolher pastas.",
                 Toast.LENGTH_LONG,
             ).show()
             return
         }
         val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
-        folderPicker.launch(OneDrivePickerHelper.openTreeIntent(context, initial))
+        folderPicker.launch(OneDrivePickerHelper.openFullTreeIntent(context, initial))
+    }
+
+    fun openInternalPicker() {
+        if (!pickerAvailable) return
+        folderPicker.launch(
+            OneDrivePickerHelper.openInternalStorageTreeIntent(
+                context,
+                OneDrivePickerHelper.picturesFolderUri(),
+            ),
+        )
     }
 
     Column(
@@ -75,29 +86,22 @@ fun WelcomeScreen(
             "Versão ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             modifier = Modifier.padding(bottom = 12.dp),
         )
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    "OneDrive não aparece no seletor?",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                if (oneDriveRoots.isEmpty()) {
+        if (samsung) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Neste aparelho o OneDrive também não expõe pasta pelo provedor de documentos " +
-                            "(detectado: nenhuma raiz). Use o modo automático abaixo.",
+                        "OneDrive no Meus Arquivos",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        OneDrivePickerHelper.SAMSUNG_ONEDRIVE_HINT,
                         style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -111,18 +115,27 @@ fun WelcomeScreen(
             )
         }
         Button(
-            onClick = {
-                syncCoordinator.useOneDriveLocalMirrorMode()
-                onFinished()
-            },
+            onClick = { openSamsungStylePicker() },
             modifier = Modifier.fillMaxWidth(),
+            enabled = pickerAvailable,
         ) {
-            Text("Configurar sem seletor (recomendado)")
+            Text(
+                if (samsung) {
+                    "Escolher pasta (Meus Arquivos / OneDrive)"
+                } else {
+                    "Escolher pasta (seletor completo / nuvem)"
+                },
+            )
         }
         Text(
-            "Grava em Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} no celular. " +
-                "Depois, no app OneDrive: Configurações → backup/sincronização de fotos e inclua Pictures/Câmera. " +
-                "É assim que a nuvem fica ligada sem Azure.",
+            if (cloudRoots.isNotEmpty()) {
+                "Raízes detectadas: ${cloudRoots.joinToString { it.title }}. " +
+                    "Se o seletor abrir no lugar certo, entre no OneDrive e toque em “Usar esta pasta”."
+            } else if (samsung) {
+                "Se ainda não aparecer OneDrive, use o menu lateral do Meus Arquivos dentro do seletor."
+            } else {
+                OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
@@ -131,34 +144,23 @@ fun WelcomeScreen(
             onClick = onBrowseOneDriveLikeFileManager,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Navegar OneDrive (estilo gerenciador de arquivos)")
+            Text("Navegar pastas OneDrive dentro do app")
         }
-        Text(
-            "Só funciona se o OneDrive expuser pastas ao sistema; em muitos Samsung a lista vem vazia.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-        )
         OutlinedButton(
-            onClick = { openPicturesPicker() },
+            onClick = {
+                syncCoordinator.useOneDriveLocalMirrorMode()
+                onFinished()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Sem seletor: Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT}")
+        }
+        OutlinedButton(
+            onClick = { openInternalPicker() },
             modifier = Modifier.fillMaxWidth(),
             enabled = pickerAvailable,
         ) {
-            Text("Escolher pasta Pictures manualmente")
-        }
-        Text(
-            "Só verá Armazenamento interno / SD — não OneDrive. Escolha Pictures ou ${SyncPolicy.ONEDRIVE_MIRROR_ROOT}.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
-        )
-        if (!pickerAvailable) {
-            Text(
-                "Seletor de pastas indisponível: ative o app Arquivos (Samsung ou Google) nas configurações do aparelho.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
+            Text("Só armazenamento interno (Pictures)")
         }
         OutlinedButton(
             onClick = {
@@ -169,7 +171,7 @@ fun WelcomeScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = oneDriveInstalled,
         ) {
-            Text("Abrir OneDrive → ativar backup de fotos")
+            Text("Abrir app OneDrive")
         }
         OutlinedButton(
             onClick = {
@@ -178,7 +180,7 @@ fun WelcomeScreen(
             },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) {
-            Text("Só galeria local (sem nuvem)")
+            Text("Só galeria local")
         }
     }
 }
