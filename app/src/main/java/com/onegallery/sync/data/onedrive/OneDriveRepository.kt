@@ -14,6 +14,8 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.io.File
 import java.io.InputStream
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.ArrayDeque
 
@@ -55,7 +57,7 @@ class OneDriveRepository(
 
     suspend fun ensureMirrorRootFolder(): Result<String> {
         return runWithToken { token ->
-            val rootPath = SyncPolicy.ONEDRIVE_MIRROR_ROOT
+            val rootPath = encodeDrivePath(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
             try {
                 graphApi.getItemByDrivePath("Bearer $token", rootPath).id
             } catch (http: HttpException) {
@@ -72,10 +74,8 @@ class OneDriveRepository(
         return runWithToken { token ->
             val rootId = ensureMirrorRootFolder().getOrThrow()
             val allItems = listFilesRecursive(token, rootId)
-            allItems.mapNotNull { item ->
-                if (item.file == null) return@mapNotNull null
-                if (!SyncPolicy.shouldIncludeLocalItem(item.canonicalPath, item.name)) return@mapNotNull null
-                item
+            allItems.filter { item ->
+                SyncPolicy.shouldIncludeLocalItem(item.canonicalPath, item.name)
             }
         }
     }
@@ -86,7 +86,7 @@ class OneDriveRepository(
         mimeType: String?,
     ): Result<DriveItem> {
         return runWithToken { token ->
-            val drivePath = SyncPaths.drivePathFromCanonical(canonicalPath)
+            val drivePath = encodeDrivePath(SyncPaths.drivePathFromCanonical(canonicalPath))
             val mediaType = mimeType?.toMediaTypeOrNull()
             val body = sourceFile.asRequestBody(mediaType)
             graphApi.uploadSmallFile("Bearer $token", drivePath, body)
@@ -174,5 +174,12 @@ class OneDriveRepository(
     private fun parseGraphTime(value: String?): Long? {
         if (value.isNullOrBlank()) return null
         return runCatching { Instant.parse(value).epochSecond }.getOrNull()
+    }
+
+    private fun encodeDrivePath(path: String): String {
+        return path.trim('/').split('/')
+            .joinToString("/") { segment ->
+                URLEncoder.encode(segment, StandardCharsets.UTF_8.name()).replace("+", "%20")
+            }
     }
 }

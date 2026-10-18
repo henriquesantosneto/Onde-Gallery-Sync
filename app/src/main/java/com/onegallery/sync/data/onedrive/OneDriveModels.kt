@@ -22,7 +22,7 @@ data class DriveFileFacet(
 )
 
 data class DriveFolderFacet(
-    val childCount: Int?,
+    val childCount: Int? = null,
 )
 
 data class ParentReference(

@@ -3,6 +3,7 @@ package com.onegallery.sync.auth
 import android.app.Activity
 import android.content.Context
 import com.microsoft.identity.client.AcquireTokenParameters
+import com.microsoft.identity.client.AcquireTokenSilentParameters
 import com.microsoft.identity.client.AuthenticationCallback
 import com.microsoft.identity.client.IAuthenticationResult
 import com.microsoft.identity.client.IPublicClientApplication
@@ -122,11 +123,14 @@ class MsalAuthManager(context: Context) {
 
     suspend fun acquireTokenSilent(): Result<String> {
         val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
+        val account = msal.currentAccount?.currentAccount
+            ?: return Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
         return suspendCancellableCoroutine { cont ->
-            msal.acquireTokenSilentAsync(
-                scopes,
-                msal.currentAccount?.authority,
-                object : AuthenticationCallback {
+            val params = AcquireTokenSilentParameters.Builder()
+                .withScopes(scopes.toList())
+                .forAccount(account)
+                .fromAuthority(account.authority)
+                .withCallback(object : AuthenticationCallback {
                     override fun onSuccess(authenticationResult: IAuthenticationResult) {
                         _state.value = _state.value.copy(
                             accessToken = authenticationResult.accessToken,
@@ -147,8 +151,9 @@ class MsalAuthManager(context: Context) {
                             cont.resume(Result.failure(IllegalStateException("Token silencioso cancelado")))
                         }
                     }
-                },
-            )
+                })
+                .build()
+            msal.acquireTokenSilent(params)
         }
     }
 
