@@ -1,16 +1,12 @@
-OneGallery Sync — APK 0.8.2 (versionCode 58)
+OneGallery Sync — APK 0.8.3 (versionCode 59)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.2-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.3-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Pinça não dispara mais rolagem, swipe entre fotos ou seleção acidental
-- Vídeos iniciam sem som (volume 0; ajuste nos controles do player)
-
-Versões anteriores (0.8.x):
-- Pinça estável em fotos/vídeos; zoom focal no player
-- Fotos com timeline; álbuns/locais; mapa GPS; sync resumável; Wi‑Fi only
+- Pinça com dois dedos volta a ampliar (correção: eventos não são mais “engolidos”)
+- Mantém: sem rolagem/seleção acidental ao pinçar; vídeos mudos ao abrir
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
