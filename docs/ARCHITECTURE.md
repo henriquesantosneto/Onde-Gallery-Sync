@@ -24,7 +24,7 @@ Pasta no OneDrive: **`OneGallerySync/`** (espelha caminhos relativos, ex. `Pictu
 ui (Compose) → gallery, álbuns, detalhe, sync, settings, MSAL gate
 sync → SyncCoordinator, SyncPolicy, SyncPaths, WorkManager
 data.local → MediaStore, cache de originais, Room
-data.onedrive → MS Graph (listagem recursiva, upload, download, delete)
+data.onedrive → MS Graph (listagem recursiva, upload simples ≤4 MiB, sessão resumável + Range no download)
 auth → MsalAuthManager
 ```
 
@@ -33,7 +33,7 @@ auth → MsalAuthManager
 1. Indexar mídia local → linhas Room (`LOCAL_ONLY` ou estado anterior).
 2. Garantir pasta `OneGallerySync` no drive.
 3. Listar arquivos remotos recursivamente.
-4. Para cada item local: upload se ausente/desatualizado; marcar `PENDING_DOWNLOAD` se remoto mais novo.
+4. Para cada item local: upload se ausente/desatualizado; marcar `PENDING_DOWNLOAD` só se o OneDrive mudou desde a última sync (não basta a data de upload na nuvem ser mais nova que `DATE_ADDED` no celular).
 5. Itens remotos sem par local → `CLOUD_ONLY`.
 6. Detecção de remoção → fila `pendingDeleteTarget` (confirmação obrigatória).
 

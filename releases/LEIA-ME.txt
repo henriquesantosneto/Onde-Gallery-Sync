@@ -1,17 +1,12 @@
-OneGallery Sync — APK de debug
-================================
+OneGallery Sync — APK 0.8.36 (versionCode 92)
+============================================
 
-Arquivo: OneGallerySync-debug.apk (~24 MB)
+Download:
 
-Clone só desta branch:
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.36-debug/OneGallerySync-debug.apk
 
-  git clone --branch cursor/apk-download-0dd7 --single-branch \
-    https://origin.cursor.com/henriquekako/tmp-a53cc6c3697b04a5.git onegallery-apk
+Novidades nesta versão:
+- Locais (aba Álbuns): blocos agrupados e ordenados País · Estado · Cidade · Bairro
+- v0.8.35: mapa estilo Fotos + minha localização; v0.8.34: seleção de álbuns
 
-  cd onegallery-apk/releases
-  # instale OneGallerySync-debug.apk no Samsung
-
-Hash MSAL (deste build debug):
-  pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
-
-Pacote Android: com.onegallery.sync
+Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=

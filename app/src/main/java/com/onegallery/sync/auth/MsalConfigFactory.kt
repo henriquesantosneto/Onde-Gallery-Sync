@@ -5,31 +5,36 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Base64
 import java.io.File
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 object MsalConfigFactory {
+    /** Hash Base64 (campo “Assinatura” no Azure Android). */
+    fun signatureHashBase64(context: Context): String? =
+        sha1SignatureHash(context, context.packageName)
+
     fun computeRedirectUri(context: Context): String {
         val packageName = context.packageName
         val hash = sha1SignatureHash(context, packageName)
-            ?: return "msauth://$packageName/UNABLE_TO_READ_SIGNATURE"
-        val encodedPackage = URLEncoder.encode(packageName, StandardCharsets.UTF_8.name())
-        val encodedHash = URLEncoder.encode(hash, StandardCharsets.UTF_8.name())
-        return "msauth://$encodedPackage/$encodedHash"
+        return MsalRedirectUri.forMsalConfig(packageName, hash)
     }
 
     fun signatureHashForManifest(context: Context): String {
-        return sha1SignatureHash(context, context.packageName)?.let { "/$it" } ?: "/unknown"
+        val baked = MsalRedirectUri.bakedSignatureHash()
+        if (baked.isNotEmpty() && baked != "UNCONFIGURED") {
+            return MsalRedirectUri.manifestPath(baked)
+        }
+        return sha1SignatureHash(context, context.packageName)?.let { MsalRedirectUri.manifestPath(it) }
+            ?: "/unknown"
     }
 
     fun writeConfigFile(context: Context, clientId: String): File {
-        val redirectUri = computeRedirectUri(context)
+        val redirectUri = redirectUriForInstalledApk(context)
         val json = """
             {
               "client_id": "$clientId",
               "authorization_user_agent": "DEFAULT",
               "redirect_uri": "$redirectUri",
+              "broker_redirect_uri_registered": false,
               "account_mode": "SINGLE",
               "authorities": [
                 {
@@ -45,6 +50,16 @@ object MsalConfigFactory {
         val file = File(context.filesDir, "msal_auth_config.json")
         file.writeText(json)
         return file
+    }
+
+    /** Redirect alinhado ao APK instalado (evita JSON ≠ assinatura do aparelho). */
+    private fun redirectUriForInstalledApk(context: Context): String {
+        val runtimeHash = sha1SignatureHash(context, context.packageName)
+        val baked = MsalRedirectUri.bakedSignatureHash()
+        if (runtimeHash != null && baked.isNotBlank() && baked != "UNCONFIGURED" && runtimeHash != baked) {
+            return MsalRedirectUri.format(context.packageName, runtimeHash)
+        }
+        return computeRedirectUri(context)
     }
 
     private fun sha1SignatureHash(context: Context, packageName: String): String? {

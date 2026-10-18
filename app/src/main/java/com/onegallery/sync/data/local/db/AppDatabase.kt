@@ -24,13 +24,15 @@ class SyncEnumConverters {
 }
 
 @Database(
-    entities = [SyncMetadataEntity::class],
-    version = 2,
+    entities = [SyncMetadataEntity::class, UserAlbumEntity::class],
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(SyncEnumConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun syncMetadataDao(): SyncMetadataDao
+
+    abstract fun userAlbumDao(): UserAlbumDao
 
     companion object {
         fun create(context: Context): AppDatabase {

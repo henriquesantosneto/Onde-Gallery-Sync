@@ -14,6 +14,10 @@ data class LocalMediaItem(
     val bucketDisplayName: String,
     val relativePath: String?,
     val dateAddedSeconds: Long,
+    /** MediaStore DATE_TAKEN (segundos UTC), quando disponível. */
+    val dateTakenSeconds: Long? = null,
+    /** MediaStore DATE_MODIFIED (segundos UTC). Usado na reconciliação com a nuvem. */
+    val dateModifiedSeconds: Long,
     val sizeBytes: Long,
     val kind: MediaKind,
     val mimeType: String?,
@@ -24,4 +28,9 @@ data class MediaAlbum(
     val title: String,
     val itemCount: Int,
     val coverUri: Uri?,
+    val sortTimestamp: Long = 0L,
+    /** Álbum criado pelo usuário (pode renomear/excluir a organização). */
+    val isUserManaged: Boolean = false,
+    val userAlbumId: String? = null,
+    val createdAtEpoch: Long? = null,
 )

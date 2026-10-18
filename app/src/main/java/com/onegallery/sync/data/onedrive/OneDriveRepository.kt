@@ -1,6 +1,10 @@
 package com.onegallery.sync.data.onedrive
 
+import android.content.Context
 import com.onegallery.sync.auth.MsalAuthManager
+import com.onegallery.sync.data.local.MediaLocation
+import com.onegallery.sync.data.local.MediaCaptureTimeResolver
+import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -27,19 +31,36 @@ data class RemoteDriveFile(
     val sizeBytes: Long?,
 )
 
+data class OneDriveBrowseEntry(
+    val id: String,
+    val name: String,
+    val isFolder: Boolean,
+    val childCount: Int?,
+)
+
 class OneDriveRepository(
+    private val appContext: Context,
     private val authManager: MsalAuthManager,
+    private val graphFolderPreferences: GraphFolderPreferences,
 ) {
-    private val graphApi: GraphApiService by lazy {
+    private val uploadSessionStore = UploadSessionStore(appContext)
+    private val resumableTransfer by lazy {
+        GraphResumableTransfer(graphApi, uploadSessionStore, graphHttpClient)
+    }
+
+    private val graphHttpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         }
-        val client = OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .addInterceptor(logging)
             .build()
+    }
+
+    private val graphApi: GraphApiService by lazy {
         Retrofit.Builder()
             .baseUrl("https://graph.microsoft.com/")
-            .client(client)
+            .client(graphHttpClient)
             .addConverterFactory(
                 MoshiConverterFactory.create(
                     Moshi.Builder()
@@ -52,10 +73,64 @@ class OneDriveRepository(
     }
 
     suspend fun accessToken(): Result<String> {
-        return authManager.acquireTokenSilent()
+        return authManager.accessTokenForGraph()
+    }
+
+    fun syncRootLabel(): String? = graphFolderPreferences.displayLabel
+
+    fun isSyncRootConfigured(): Boolean = graphFolderPreferences.isConfigured()
+
+    fun setSyncRoot(itemId: String, driveRelativePath: String, label: String) {
+        graphFolderPreferences.setSyncRoot(itemId, driveRelativePath, label)
+    }
+
+    /** Verdadeiro se já havia pasta e a nova seleção é diferente (reconfiguração). */
+    fun willChangeSyncRoot(itemId: String, driveRelativePath: String): Boolean {
+        if (!graphFolderPreferences.isConfigured()) return false
+        return !graphFolderPreferences.matchesRoot(itemId, driveRelativePath)
+    }
+
+    suspend fun getDriveRootId(): Result<String> {
+        return runWithToken { token ->
+            graphApi.getDriveRoot("Bearer $token").id
+        }
+    }
+
+    suspend fun listBrowseChildren(folderId: String): Result<List<OneDriveBrowseEntry>> {
+        return runWithToken { token ->
+            val page = graphApi.listFolderChildren("Bearer $token", folderId)
+            page.value.map { item ->
+                OneDriveBrowseEntry(
+                    id = item.id,
+                    name = item.name,
+                    isFolder = item.folder != null,
+                    childCount = item.folder?.childCount,
+                )
+            }.filter { it.isFolder }
+                .sortedBy { it.name.lowercase() }
+        }
+    }
+
+    suspend fun createSubfolder(parentId: String, name: String): Result<OneDriveBrowseEntry> {
+        return runWithToken { token ->
+            val created = graphApi.createFolderUnderParent(
+                authorization = "Bearer $token",
+                parentId = parentId,
+                body = CreateFolderRequest(name = name),
+            )
+            OneDriveBrowseEntry(
+                id = created.id,
+                name = created.name,
+                isFolder = true,
+                childCount = 0,
+            )
+        }
     }
 
     suspend fun ensureMirrorRootFolder(): Result<String> {
+        if (graphFolderPreferences.isConfigured()) {
+            return Result.success(graphFolderPreferences.syncRootItemId!!)
+        }
         return runWithToken { token ->
             val rootPath = encodeDrivePath(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
             try {
@@ -64,8 +139,14 @@ class OneDriveRepository(
                 if (http.code() != 404) throw http
                 graphApi.createFolderUnderDriveRoot(
                     authorization = "Bearer $token",
-                    body = CreateFolderRequest(name = rootPath),
+                    body = CreateFolderRequest(name = SyncPolicy.ONEDRIVE_MIRROR_ROOT),
                 ).id
+            }.also { id ->
+                graphFolderPreferences.setSyncRoot(
+                    itemId = id,
+                    driveRelativePath = SyncPolicy.ONEDRIVE_MIRROR_ROOT,
+                    label = SyncPolicy.ONEDRIVE_MIRROR_ROOT,
+                )
             }
         }
     }
@@ -84,12 +165,24 @@ class OneDriveRepository(
         canonicalPath: String,
         sourceFile: File,
         mimeType: String?,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<DriveItem> {
         return runWithToken { token ->
-            val drivePath = encodeDrivePath(SyncPaths.drivePathFromCanonical(canonicalPath))
-            val mediaType = mimeType?.toMediaTypeOrNull()
-            val body = sourceFile.asRequestBody(mediaType)
-            graphApi.uploadSmallFile("Bearer $token", drivePath, body)
+            val auth = "Bearer $token"
+            val drivePath = encodeDrivePath(syncDrivePathFromCanonical(canonicalPath))
+            val fileSize = sourceFile.length()
+            if (sourceFile.length() <= GraphResumableTransfer.SIMPLE_UPLOAD_MAX_BYTES) {
+                onProgress?.invoke(0L, fileSize)
+                val mediaType = mimeType?.toMediaTypeOrNull()
+                val body = sourceFile.asRequestBody(mediaType)
+                val item = graphApi.uploadSmallFile(auth, drivePath, body)
+                onProgress?.invoke(fileSize, fileSize)
+                item
+            } else {
+                resumableTransfer.uploadFile(auth, drivePath, canonicalPath, sourceFile) { done, total ->
+                    onProgress?.invoke(done, total)
+                }
+            }
         }
     }
 
@@ -110,10 +203,22 @@ class OneDriveRepository(
         }
     }
 
-    suspend fun downloadToFile(itemId: String, destination: File): Result<Unit> {
+    suspend fun downloadToFile(
+        itemId: String,
+        destination: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
+        return runWithToken { token ->
+            val part = File(destination.absolutePath + ".part")
+            val meta = File(destination.absolutePath + ".part.meta")
+            resumableTransfer.downloadToFile("Bearer $token", itemId, destination, part, meta, onProgress)
+        }
+    }
+
+    suspend fun downloadThumbnailToFile(itemId: String, destination: File): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()
-            graphApi.downloadItemContent("Bearer $token", itemId).use { body ->
+            graphApi.downloadItemThumbnail("Bearer $token", itemId).use { body ->
                 destination.outputStream().use { out ->
                     body.byteStream().copyTo(out)
                 }
@@ -121,10 +226,88 @@ class OneDriveRepository(
         }
     }
 
+    /**
+     * Lê GPS do EXIF na nuvem (até ~512 KiB do início/fim do arquivo), sem baixar o original completo.
+     */
+    suspend fun probeExifLocationFromItem(
+        itemId: String,
+        locationResolver: MediaLocationResolver,
+    ): Result<MediaLocation?> {
+        return runWithToken { token ->
+            val temp = File.createTempFile("ogs-exif-probe-", ".bin", appContext.cacheDir)
+            try {
+                resumableTransfer.downloadByteRange(
+                    authorization = "Bearer $token",
+                    itemId = itemId,
+                    rangeHeader = "bytes=0-${EXIF_PROBE_BYTES - 1}",
+                    destination = temp,
+                )
+                locationResolver.resolveFromFile(temp)?.let { return@runWithToken it }
+                val size = graphApi.getDriveItem("Bearer $token", itemId).size
+                if (size != null && size > EXIF_PROBE_BYTES) {
+                    resumableTransfer.downloadByteRange(
+                        authorization = "Bearer $token",
+                        itemId = itemId,
+                        rangeHeader = "bytes=-$EXIF_PROBE_BYTES",
+                        destination = temp,
+                    )
+                    locationResolver.resolveFromFile(temp)
+                } else {
+                    null
+                }
+            } finally {
+                temp.delete()
+            }
+        }
+    }
+
+    /** Lê data de captura no EXIF na nuvem (mesmo alcance de bytes que o GPS). */
+    suspend fun probeExifCaptureTimeFromItem(
+        itemId: String,
+        captureResolver: MediaCaptureTimeResolver,
+    ): Result<Long?> {
+        return runWithToken { token ->
+            val temp = File.createTempFile("ogs-exif-capture-", ".bin", appContext.cacheDir)
+            try {
+                resumableTransfer.downloadByteRange(
+                    authorization = "Bearer $token",
+                    itemId = itemId,
+                    rangeHeader = "bytes=0-${EXIF_PROBE_BYTES - 1}",
+                    destination = temp,
+                )
+                captureResolver.resolveFromFile(temp)?.let { return@runWithToken it }
+                val size = graphApi.getDriveItem("Bearer $token", itemId).size
+                if (size != null && size > EXIF_PROBE_BYTES) {
+                    resumableTransfer.downloadByteRange(
+                        authorization = "Bearer $token",
+                        itemId = itemId,
+                        rangeHeader = "bytes=-$EXIF_PROBE_BYTES",
+                        destination = temp,
+                    )
+                    captureResolver.resolveFromFile(temp)
+                } else {
+                    null
+                }
+            } finally {
+                temp.delete()
+            }
+        }
+    }
+
+    private companion object {
+        const val EXIF_PROBE_BYTES = 512 * 1024L
+    }
+
     suspend fun deleteRemoteItem(itemId: String): Result<Unit> {
         return runWithToken { token ->
             graphApi.deleteItem("Bearer $token", itemId)
         }
+    }
+
+    private fun syncDrivePathFromCanonical(canonicalPath: String): String {
+        val base = graphFolderPreferences.syncRootDrivePath?.trim('/')
+            ?: SyncPolicy.ONEDRIVE_MIRROR_ROOT
+        return SyncPaths.drivePathFromCanonical(canonicalPath, base)
     }
 
     private suspend fun listFilesRecursive(
@@ -167,8 +350,29 @@ class OneDriveRepository(
     }
 
     private suspend fun <T> runWithToken(block: suspend (String) -> T): Result<T> {
+        return runWithTokenInternal(block, allowRetryAfter401 = true)
+    }
+
+    private suspend fun <T> runWithTokenInternal(
+        block: suspend (String) -> T,
+        allowRetryAfter401: Boolean,
+    ): Result<T> {
         val token = accessToken().getOrElse { return Result.failure(it) }
-        return runCatching { block(token) }
+        val first = runCatching { block(token) }
+        if (first.isSuccess || !allowRetryAfter401) return first
+        val http = first.exceptionOrNull() as? HttpException ?: return first
+        if (http.code() != 401) return first
+        authManager.clearCachedAccessToken()
+        val refreshed = accessToken().getOrElse { return Result.failure(it) }
+        return runCatching { block(refreshed) }.recoverCatching { retryError ->
+            if (retryError is HttpException && retryError.code() == 401) {
+                throw IllegalStateException(
+                    "Sessão Microsoft expirou (401). Em Ajustes, saia da conta e entre de novo.",
+                    retryError,
+                )
+            }
+            throw retryError
+        }
     }
 
     private fun parseGraphTime(value: String?): Long? {

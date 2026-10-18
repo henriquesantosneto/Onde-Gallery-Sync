@@ -3,6 +3,7 @@ package com.onegallery.sync.data.onedrive
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.onegallery.sync.sync.SyncPolicy
 import java.io.File
@@ -13,11 +14,24 @@ class SaOneDriveRepository(
 ) {
     fun isConnected(): Boolean = folderPreferences.treeUri != null
 
-    fun connectFolder(treeUri: Uri) {
+    fun persistedTreeUriString(): String? = folderPreferences.treeUri?.toString()
+
+    fun connectFolder(uri: Uri): Result<Unit> {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        context.contentResolver.takePersistableUriPermission(treeUri, flags)
-        folderPreferences.treeUri = treeUri
-        folderPreferences.displayName = DocumentFile.fromTreeUri(context, treeUri)?.name
+        val treeUri = FolderAccessUri.normalizeToTreeUri(uri)
+        return runCatching {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }
+            if (treeUri != uri) {
+                runCatching { context.contentResolver.takePersistableUriPermission(treeUri, flags) }
+            }
+            val root = DocumentFile.fromTreeUri(context, treeUri)
+                ?: DocumentFile.fromSingleUri(context, uri)
+                ?: error("Pasta inacessível — abra de novo pelo Meus Arquivos")
+            if (!root.isDirectory) error("Escolha uma pasta, não um arquivo")
+            folderPreferences.treeUri = if (root.uri.let { DocumentsContract.isTreeUri(it) }) root.uri else treeUri
+            folderPreferences.displayName = DocumentFile.fromTreeUri(context, treeUri)?.name
+                ?: DocumentFile.fromSingleUri(context, uri)?.name
+        }
     }
 
     fun disconnect() {
@@ -73,11 +87,10 @@ class SaOneDriveRepository(
         }
     }
 
+    /** Pasta que você escolheu no celular — o app OneDrive sincroniza a partir daqui (sem Azure). */
     private fun mirrorRoot(): DocumentFile? {
         val treeUri = folderPreferences.treeUri ?: return null
-        val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return null
-        return tree.findFile(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
-            ?: tree.createDirectory(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
+        return DocumentFile.fromTreeUri(context, treeUri)
     }
 
     private fun ensureFile(canonicalPath: String, mimeType: String?): DocumentFile? {

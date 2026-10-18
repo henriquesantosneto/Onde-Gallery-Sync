@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,7 +31,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.BuildConfig
 import com.onegallery.sync.R
+import com.onegallery.sync.auth.AzureClientIdValidator
 import com.onegallery.sync.auth.MsalAuthManager
+import com.onegallery.sync.auth.MsalBuiltInConfig
+import com.onegallery.sync.auth.MsalConfigFactory
+import com.onegallery.sync.auth.MsalRedirectUri
 import kotlinx.coroutines.launch
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -43,14 +49,30 @@ fun SignInGate(
     authManager: MsalAuthManager,
     msalConfigurationError: String?,
     onClientConfigured: () -> Unit,
-    onLocalOnly: () -> Unit,
+    onBack: () -> Unit,
+    onSignedIn: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var clientId by remember { mutableStateOf(authManager.savedClientId()) }
     var busy by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
+    val needsClientId = authManager.needsUserClientId()
+    var showDevClientId by remember(needsClientId) { mutableStateOf(needsClientId) }
     val redirect = remember { authManager.redirectUriForAzure }
+    val signatureHash = remember { MsalConfigFactory.signatureHashBase64(context) }
+    val buildHash = remember { MsalRedirectUri.bakedSignatureHash() }
+    val signatureMismatch = remember(signatureHash, buildHash) {
+        !MsalRedirectUri.runtimeMatchesBuild(signatureHash)
+    }
+    val packageName = remember { context.packageName }
+    val embedded = MsalBuiltInConfig.isEmbeddedClientConfigured()
+
+    LaunchedEffect(embedded) {
+        if (embedded) {
+            authManager.initialize()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -60,35 +82,119 @@ fun SignInGate(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("OneGallery Sync", style = MaterialTheme.typography.headlineMedium)
+        Text("OneDrive na nuvem", style = MaterialTheme.typography.headlineMedium)
         Text(
             "Versão ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
         )
         Text(
-            "1) Registre o app no Azure. 2) Cole o Client ID abaixo. 3) Use o redirect exibido no registro Android.",
+            "Igual ES File Explorer: entre com sua conta Microsoft. " +
+                "Em seguida você navega e escolhe a pasta do OneDrive para a galeria.",
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(bottom = 16.dp),
         )
-        OutlinedTextField(
-            value = clientId,
-            onValueChange = { clientId = it.trim() },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Application (client) ID") },
-            singleLine = true,
-        )
-        Text(
-            "Redirect URI (copie para o Azure → Android):",
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(top = 16.dp),
-        )
-        Text(
-            redirect,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-        )
+        if (needsClientId && !showDevClientId) {
+            Text(
+                "Cole abaixo o Application (client) ID do registro no Azure (Visão geral). " +
+                    "Isso substitui msal.properties — fica salvo neste aparelho.",
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+            TextButton(onClick = { showDevClientId = true }) {
+                Text("Informar Client ID")
+            }
+        }
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            colors = androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Registre no Azure (deste APK)", style = MaterialTheme.typography.labelLarge)
+                Text("Pacote: $packageName", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                Text(
+                    "Hash (tile Android): ${signatureHash ?: buildHash.ifBlank { "—" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    "URI (Mobile/desktop — cole exatamente):",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    redirect,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                if (signatureMismatch) {
+                    Text(
+                        "A assinatura deste aparelho não bate com a build esperada. " +
+                            "Use a URI acima no Azure (não a de outro APK ou versão antiga).",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Text(
+                    "Escopos pedidos: ${authManager.requestedScopesLabel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Text(
+                    "Azure: Graph delegadas User.Read + Files.ReadWrite; cliente público = Sim. " +
+                        "Files.ReadWrite ≠ Files.ReadWrite.All.",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+        if (needsClientId && showDevClientId) {
+            OutlinedTextField(
+                value = clientId,
+                onValueChange = { clientId = it.trim() },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Application (client) ID (Azure)") },
+                placeholder = { Text("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx") },
+                singleLine = true,
+            )
+            Text(
+                "Redirect URI (Android no Azure):",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            Text(
+                redirect,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
+            Button(
+                onClick = {
+                    if (clientId.isBlank()) {
+                        localError = "Informe o Client ID."
+                        return@Button
+                    }
+                    busy = true
+                    authManager.saveClientId(clientId)
+                    scope.launch {
+                        authManager.initialize()
+                            .onSuccess { onClientConfigured() }
+                            .onFailure { localError = it.message }
+                        busy = false
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Salvar Client ID")
+            }
+        }
         val error = localError ?: msalConfigurationError
         if (error != null) {
             Text(
@@ -99,43 +205,53 @@ fun SignInGate(
         }
         Button(
             onClick = {
-                if (clientId.isBlank()) {
-                    localError = "Informe o Client ID do Azure."
-                    return@Button
-                }
+                val hostActivity = context.findActivity() ?: return@Button
                 busy = true
                 localError = null
-                authManager.saveClientId(clientId)
                 scope.launch {
+                    val idToUse = when {
+                        clientId.isNotBlank() -> clientId
+                        else -> authManager.savedClientId()
+                    }
+                    if (authManager.needsUserClientId() || clientId.isNotBlank()) {
+                        if (!AzureClientIdValidator.isValid(idToUse)) {
+                            localError =
+                                "Client ID inválido. Cole o GUID completo do Azure (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)."
+                            busy = false
+                            return@launch
+                        }
+                        authManager.saveClientId(idToUse)
+                    }
                     authManager.initialize()
-                        .onSuccess { onClientConfigured() }
+                        .onFailure {
+                            localError = it.message
+                            busy = false
+                            return@launch
+                        }
+                    authManager.signInInteractive(hostActivity)
                         .onFailure { localError = it.message }
+                        .onSuccess { /* navegação via authState + LaunchedEffect no app */ }
                     busy = false
                 }
             },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("Salvar Client ID e continuar")
-        }
-        Button(
-            onClick = {
-                val hostActivity = context.findActivity() ?: return@Button
-                scope.launch {
-                    authManager.signInInteractive(hostActivity)
-                        .onFailure { localError = it.message }
-                }
-            },
-            enabled = !busy && authManager.savedClientId().isNotBlank(),
+            enabled = !busy && (!needsClientId || clientId.isNotBlank() || authManager.savedClientId().isNotBlank()),
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) {
             Text(stringResource(R.string.auth_sign_in))
         }
         TextButton(
-            onClick = onLocalOnly,
-            modifier = Modifier.padding(top = 16.dp),
+            onClick = {
+                scope.launch {
+                    authManager.signOut()
+                    localError = null
+                }
+            },
+            modifier = Modifier.padding(top = 8.dp),
         ) {
-            Text("Usar galeria local sem OneDrive (por enquanto)")
+            Text("Limpar conta Microsoft salva")
+        }
+        TextButton(onClick = onBack, modifier = Modifier.padding(top = 8.dp)) {
+            Text("Voltar")
         }
     }
 }

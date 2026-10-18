@@ -2,6 +2,7 @@
   "client_id": "00000000-0000-0000-0000-000000000000",
   "authorization_user_agent": "DEFAULT",
   "redirect_uri": "msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D",
+  "broker_redirect_uri_registered": false,
   "account_mode": "SINGLE",
   "authorities": [
     {

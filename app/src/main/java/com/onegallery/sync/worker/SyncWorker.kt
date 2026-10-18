@@ -12,12 +12,16 @@ class SyncWorker(
 
     override suspend fun doWork(): Result {
         val app = applicationContext as OneGalleryApplication
-        return app.syncCoordinator.runBidirectionalSync()
+        if (app.syncPreferences.isAutoSyncPaused()) {
+            return Result.success()
+        }
+        return app.syncCoordinator.runBidirectionalSync(userInitiated = false)
             .fold(
                 onSuccess = { Result.success() },
                 onFailure = {
                     if (it.message?.contains("Offline", ignoreCase = true) == true ||
-                        it.message?.contains("Wi‑Fi", ignoreCase = true) == true
+                        it.message?.contains("Wi‑Fi", ignoreCase = true) == true ||
+                        it.message?.contains("pausa", ignoreCase = true) == true
                     ) {
                         Result.success()
                     } else {

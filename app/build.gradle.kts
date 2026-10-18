@@ -1,8 +1,69 @@
+import java.io.File
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.util.Base64
+import java.util.Properties
+
+fun sha1SignatureHashBase64(
+    storeFile: File,
+    storePassword: String,
+    keyAlias: String,
+): String? {
+    if (!storeFile.isFile) return null
+    return runCatching {
+        val keystore = KeyStore.getInstance(KeyStore.getDefaultType())
+        storeFile.inputStream().use { keystore.load(it, storePassword.toCharArray()) }
+        val cert = keystore.getCertificate(keyAlias) ?: return null
+        val md = MessageDigest.getInstance("SHA-1")
+        md.update(cert.encoded)
+        Base64.getEncoder().encodeToString(md.digest())
+    }.getOrNull()
+}
+
+fun msalRedirectUri(packageName: String, hashBase64: String): String {
+    val encoded = hashBase64
+        .replace("+", "%2B")
+        .replace("/", "%2F")
+        .replace("=", "%3D")
+    return "msauth://$packageName/$encoded"
+}
+
+/** Mesmo keystore padrão do `signingConfig debug` do Android Gradle Plugin. */
+fun defaultDebugKeystoreFile(): File =
+    File(System.getProperty("user.home"), ".android/debug.keystore")
+
+fun resolveDebugMsalSignature(): Pair<String, String> {
+    val storeFile = defaultDebugKeystoreFile()
+    val hash = sha1SignatureHashBase64(storeFile, "android", "androiddebugkey")
+        ?: "UNCONFIGURED"
+    val packageName = "com.onegallery.sync"
+    val redirect = if (hash == "UNCONFIGURED") {
+        "msauth://$packageName/UNCONFIGURED"
+    } else {
+        msalRedirectUri(packageName, hash)
+    }
+    return hash to redirect
+}
+
+val (msalSignatureHashBase64, msalRedirectUriForBuild) = resolveDebugMsalSignature()
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
 }
+
+fun readMsalClientId(): String {
+    System.getenv("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    val props = Properties()
+    rootProject.file("msal.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+    props.getProperty("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+    props.getProperty("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    return "00000000-0000-0000-0000-000000000000"
+}
+
+val embeddedMsalClientId: String = readMsalClientId()
 
 android {
     namespace = "com.onegallery.sync"
@@ -12,22 +73,20 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 92
+        versionName = "0.8.36"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Substitua pelos valores do registro Microsoft (ver docs/MICROSOFT_APP_REGISTRATION.md)
-        buildConfigField("String", "MSAL_CLIENT_ID", "\"00000000-0000-0000-0000-000000000000\"")
-        buildConfigField(
-            "String",
-            "MSAL_REDIRECT_URI",
-            "\"msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D\"",
-        )
+        manifestPlaceholders["msalSignaturePath"] = "/$msalSignatureHashBase64"
+
+        buildConfigField("String", "MSAL_CLIENT_ID", "\"$embeddedMsalClientId\"")
+        buildConfigField("String", "MSAL_SIGNATURE_HASH", "\"$msalSignatureHashBase64\"")
+        buildConfigField("String", "MSAL_REDIRECT_URI", "\"$msalRedirectUriForBuild\"")
         buildConfigField(
             "String",
             "GRAPH_SCOPES",
-            "\"Files.ReadWrite.All offline_access User.Read\"",
+            "\"User.Read Files.ReadWrite\"",
         )
     }
 
@@ -70,6 +129,8 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
 
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("org.maplibre.gl:android-sdk:11.7.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
     implementation("androidx.activity:activity-compose:1.9.0")
@@ -100,6 +161,9 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0")
+
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-ui:1.3.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

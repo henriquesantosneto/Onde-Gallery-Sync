@@ -1,0 +1,10 @@
+{
+  "note": "Cole/edite no Manifesto do aplicativo (Entra). Mantenha o resto do JSON; mescle replyUrlsWithType e allowPublicClient.",
+  "allowPublicClient": true,
+  "replyUrlsWithType": [
+    {
+      "url": "msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D",
+      "type": "InstalledClient"
+    }
+  ]
+}

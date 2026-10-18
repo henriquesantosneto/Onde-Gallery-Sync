@@ -10,13 +10,20 @@ data class SyncMetadataEntity(
     @PrimaryKey val canonicalPath: String,
     val displayName: String,
     val albumName: String,
+    /** Álbum escolhido pelo usuário (organização na galeria; caminho na nuvem não muda). */
+    val userAlbumName: String? = null,
     val localMediaId: Long?,
     val localContentUri: String?,
     val oneDriveItemId: String?,
     val localModifiedAt: Long?,
+    /** Quando a foto/vídeo foi capturado (EXIF / DATE_TAKEN), em segundos UTC. */
+    val capturedAtSeconds: Long? = null,
     val remoteModifiedAt: Long?,
     val cloudState: CloudSyncState,
     val cachedFilePath: String?,
     val pendingDeleteTarget: PendingDeleteTarget,
     val lastError: String?,
+    val locationLabel: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )

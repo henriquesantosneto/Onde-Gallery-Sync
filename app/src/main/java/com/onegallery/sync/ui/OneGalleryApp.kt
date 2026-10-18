@@ -21,11 +21,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,26 +41,93 @@ import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
+import com.onegallery.sync.data.onedrive.OneDriveRepository
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.ui.albums.AlbumsScreen
+import com.onegallery.sync.ui.places.PlacesMapScreen
 import com.onegallery.sync.ui.auth.SignInGate
 import com.onegallery.sync.ui.gallery.GalleryScreen
+import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
+import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
 import com.onegallery.sync.ui.welcome.WelcomeScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.launch
+
+private const val PLACES_MAP_ROUTE = "places_map"
+/** Conteúdo filtrado de um álbum/local; mantém a aba Álbuns selecionada na barra inferior. */
+private const val ALBUMS_BROWSE_ROUTE = "albums/browse"
+
+private fun albumsTabSelected(route: String?): Boolean =
+    route == MainTab.Albums.route || route == ALBUMS_BROWSE_ROUTE
+
+private fun showsMainBottomBar(route: String?): Boolean =
+    route in MainTab.entries.map { it.route } || route == ALBUMS_BROWSE_ROUTE
+
+private fun NavHostController.openGalleryTab(clearBrowseFilters: () -> Unit) {
+    clearBrowseFilters()
+    navigate(MainTab.Gallery.route) {
+        popUpTo(MainTab.Gallery.route) {
+            inclusive = false
+            saveState = true
+        }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
+    clearBrowseFilters()
+    if (currentBackStackEntry?.destination?.route == ALBUMS_BROWSE_ROUTE) {
+        popBackStack(MainTab.Albums.route, inclusive = false)
+        return
+    }
+    navigate(MainTab.Albums.route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
+        }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+private fun NavHostController.openMainTab(tab: MainTab, clearBrowseFilters: () -> Unit) {
+    when (tab) {
+        MainTab.Gallery -> openGalleryTab(clearBrowseFilters)
+        MainTab.Albums -> openAlbumsTab(clearBrowseFilters)
+        MainTab.Sync, MainTab.Settings -> {
+            clearBrowseFilters()
+            navigate(tab.route) {
+                popUpTo(graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+}
 
 private enum class MainTab(val route: String) {
     Gallery("gallery"),
     Albums("albums"),
     Sync("sync"),
     Settings("settings"),
+}
+
+private enum class CloudSetupStep {
+    Hidden,
+    SignIn,
+    Browse,
 }
 
 @Composable
@@ -65,15 +137,43 @@ fun OneGalleryApp(
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
     oneDriveFolderPreferences: OneDriveFolderPreferences,
+    oneDriveRepository: OneDriveRepository,
+    galleryPreferences: GalleryPreferences,
+    mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
 ) {
-    var setupDone by remember { mutableStateOf(syncPreferences.hasCompletedSetup) }
-    var showOptionalMicrosoftLogin by remember { mutableStateOf(false) }
+    var setupDone by rememberSaveable { mutableStateOf(syncPreferences.hasCompletedSetup) }
+    var cloudSetupStepOrdinal by rememberSaveable { mutableStateOf(CloudSetupStep.Hidden.ordinal) }
+    val cloudSetupStep = CloudSetupStep.entries[
+        cloudSetupStepOrdinal.coerceIn(CloudSetupStep.entries.indices)
+    ]
+    fun setCloudSetupStep(step: CloudSetupStep) {
+        cloudSetupStepOrdinal = step.ordinal
+    }
+    val scope = rememberCoroutineScope()
+    val app = LocalContext.current.applicationContext as OneGalleryApplication
+    val syncTasks = remember { SyncTaskLauncher.from(app) }
 
     val authState by authManager.state.collectAsStateWithLifecycle()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { }
+    ) { results ->
+        val mediaOk = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                results[Manifest.permission.READ_MEDIA_IMAGES] == true
+            else -> results[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+        val locationOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            results[Manifest.permission.ACCESS_MEDIA_LOCATION] == true
+        if (mediaOk && locationOk) {
+            syncTasks.runBidirectionalSync(userInitiated = false)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        authManager.initialize()
+        setupDone = syncPreferences.hasCompletedSetup
+    }
 
     LaunchedEffect(Unit) {
         val permissions = buildList {
@@ -83,6 +183,9 @@ fun OneGalleryApp(
             } else {
                 add(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(Manifest.permission.ACCESS_MEDIA_LOCATION)
+            }
         }
         permissionLauncher.launch(permissions.toTypedArray())
     }
@@ -91,43 +194,80 @@ fun OneGalleryApp(
         if (!setupDone) return@LaunchedEffect
         when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_FOLDER -> if (oneDriveFolderPreferences.treeUri != null) {
-                syncCoordinator.runBidirectionalSync()
+                syncTasks.runBidirectionalSync()
             }
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> syncTasks.runBidirectionalSync()
             SyncMode.ONEDRIVE_GRAPH -> if (authState.isSignedIn) {
-                syncCoordinator.runBidirectionalSync()
+                syncTasks.runBidirectionalSync()
             }
             SyncMode.LOCAL_ONLY -> Unit
         }
+    }
+
+    LaunchedEffect(authState.isSignedIn, cloudSetupStep) {
+        if (cloudSetupStep == CloudSetupStep.SignIn && authState.isSignedIn) {
+            setCloudSetupStep(CloudSetupStep.Browse)
+        }
+    }
+
+    fun openCloudFolderPicker() {
+        setCloudSetupStep(CloudSetupStep.SignIn)
+    }
+
+    if (cloudSetupStep == CloudSetupStep.Browse) {
+        OneDriveCloudBrowserScreen(
+            oneDriveRepository = oneDriveRepository,
+            onFolderSelected = { itemId, path, label ->
+                syncCoordinator.connectGraphSyncFolder(itemId, path, label)
+                setCloudSetupStep(CloudSetupStep.Hidden)
+                setupDone = true
+                syncTasks.runBidirectionalSync()
+            },
+            onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
+        )
+        return
+    }
+
+    if (cloudSetupStep == CloudSetupStep.SignIn) {
+        SignInGate(
+            authManager = authManager,
+            msalConfigurationError = null,
+            onClientConfigured = {
+                scope.launch {
+                    authManager.initialize().onSuccess {
+                        if (authState.isSignedIn) {
+                            setCloudSetupStep(CloudSetupStep.Browse)
+                        }
+                    }
+                }
+            },
+            onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
+            onSignedIn = { setCloudSetupStep(CloudSetupStep.Browse) },
+        )
+        return
     }
 
     if (!setupDone) {
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
             onFinished = { setupDone = true },
-        )
-        return
-    }
-
-    if (showOptionalMicrosoftLogin) {
-        SignInGate(
-            authManager = authManager,
-            msalConfigurationError = null,
-            onClientConfigured = {
-                syncCoordinator.useGraphMode()
-                showOptionalMicrosoftLogin = false
-            },
-            onLocalOnly = { showOptionalMicrosoftLogin = false },
+            onConnectOneDriveCloud = { openCloudFolderPicker() },
         )
         return
     }
 
     val navController = rememberNavController()
     val galleryViewModel: GalleryViewModel = viewModel(
-        factory = GalleryViewModelFactory(localMediaRepository, syncCoordinator),
+        factory = GalleryViewModelFactory(
+            localMediaRepository,
+            syncCoordinator,
+            galleryPreferences,
+            mediaCacheRepository,
+        ),
     )
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
-    val showBottomBar = currentRoute in MainTab.entries.map { it.route }
+    val showBottomBar = showsMainBottomBar(currentRoute)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -136,15 +276,13 @@ fun OneGalleryApp(
                 NavigationBar {
                     MainTab.entries.forEach { tab ->
                         NavigationBarItem(
-                            selected = currentRoute == tab.route,
+                            selected = when (tab) {
+                                MainTab.Albums -> albumsTabSelected(currentRoute)
+                                else -> currentRoute == tab.route
+                            },
                             onClick = {
-                                if (tab == MainTab.Gallery) {
-                                    galleryViewModel.setAlbumFilter(null)
-                                }
-                                navController.navigate(tab.route) {
-                                    popUpTo(MainTab.Gallery.route) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                navController.openMainTab(tab) {
+                                    galleryViewModel.clearBrowseFilters()
                                 }
                             },
                             icon = {
@@ -182,32 +320,79 @@ fun OneGalleryApp(
             composable(MainTab.Gallery.route) {
                 GalleryScreen(
                     viewModel = galleryViewModel,
+                    syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    galleryPreferences = galleryPreferences,
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
+                    },
+                    onExitAlbumFilter = {
+                        navController.navigate(MainTab.Albums.route) {
+                            popUpTo(MainTab.Gallery.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                 )
             }
             composable(MainTab.Albums.route) {
                 AlbumsScreen(
                     viewModel = galleryViewModel,
+                    galleryPreferences = galleryPreferences,
                     onOpenAlbum = {
-                        navController.navigate(MainTab.Gallery.route) {
-                            popUpTo(MainTab.Gallery.route) { inclusive = true }
+                        navController.navigate(ALBUMS_BROWSE_ROUTE) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onOpenMap = {
+                        navController.navigate(PLACES_MAP_ROUTE)
+                    },
+                )
+            }
+            composable(PLACES_MAP_ROUTE) {
+                PlacesMapScreen(
+                    viewModel = galleryViewModel,
+                    syncCoordinator = syncCoordinator,
+                    syncTasks = syncTasks,
+                    onBack = { navController.popBackStack() },
+                    onOpenItem = { encoded ->
+                        navController.navigate("media/$encoded")
+                    },
+                    onShowAllAtPlace = { placeLabel ->
+                        galleryViewModel.setPlaceFilterFromLocationLabel(placeLabel)
+                        navController.navigate(ALBUMS_BROWSE_ROUTE) {
                             launchSingleTop = true
                         }
                     },
                 )
             }
+            composable(ALBUMS_BROWSE_ROUTE) {
+                GalleryScreen(
+                    viewModel = galleryViewModel,
+                    syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    galleryPreferences = galleryPreferences,
+                    onOpenItem = { encoded ->
+                        navController.navigate("media/$encoded")
+                    },
+                    onExitAlbumFilter = {
+                        galleryViewModel.clearBrowseFilters()
+                        navController.popBackStack()
+                    },
+                )
+            }
             composable(MainTab.Sync.route) {
-                SyncStatusScreen(syncCoordinator = syncCoordinator)
+                SyncStatusScreen(
+                    syncCoordinator = syncCoordinator,
+                    syncPreferences = syncPreferences,
+                )
             }
             composable(MainTab.Settings.route) {
                 SettingsScreen(
                     authManager = authManager,
                     syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
-                    oneDriveFolderPreferences = oneDriveFolderPreferences,
-                    onOpenOptionalMicrosoftLogin = { showOptionalMicrosoftLogin = true },
+                    onOpenCloudFolderPicker = { openCloudFolderPicker() },
                 )
             }
             composable(
@@ -217,8 +402,10 @@ fun OneGalleryApp(
                 val encoded = entry.arguments?.getString("encodedPath").orEmpty()
                 val path = URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
                 MediaDetailScreen(
-                    canonicalPath = path,
+                    initialCanonicalPath = path,
+                    viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
                     onBack = { navController.popBackStack() },
                 )
             }

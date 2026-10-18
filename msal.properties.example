@@ -1,0 +1,3 @@
+# Copie para msal.properties (não vai para o Git) — só quem compila o APK.
+# Registro gratuito: docs/BUILTIN_MSAL.md
+MSAL_CLIENT_ID=00000000-0000-0000-0000-000000000000
