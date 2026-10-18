@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -51,11 +52,17 @@ fun SyncStatusScreen(
     val scope = rememberCoroutineScope()
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
-    val problemItems = remember(metadata) {
+    val pendingDeletePaths = remember(pendingDeletes) {
+        pendingDeletes.map { it.canonicalPath }.toSet()
+    }
+    val problemItems = remember(metadata, pendingDeletePaths) {
         metadata.filter {
-            it.cloudState == CloudSyncState.ERROR ||
-                it.cloudState == CloudSyncState.CONFLICT ||
-                !it.lastError.isNullOrBlank()
+            it.canonicalPath !in pendingDeletePaths &&
+                (
+                    it.cloudState == CloudSyncState.ERROR ||
+                        it.cloudState == CloudSyncState.CONFLICT ||
+                        !it.lastError.isNullOrBlank()
+                    )
         }.take(25)
     }
 
@@ -72,6 +79,7 @@ fun SyncStatusScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 32.dp),
         ) {
             item {
                 Column(Modifier.padding(top = 8.dp)) {
@@ -143,7 +151,10 @@ fun SyncStatusScreen(
                 item {
                     SectionTitle("Atenção (${problemItems.size})")
                 }
-                items(problemItems, key = { it.canonicalPath }) { row ->
+                items(
+                    problemItems,
+                    key = { "attention-${it.canonicalPath}" },
+                ) { row ->
                     ProblemItemCard(row)
                 }
             }
@@ -153,7 +164,10 @@ fun SyncStatusScreen(
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     SectionTitle("Exclusões aguardando confirmação")
                 }
-                items(pendingDeletes, key = { it.canonicalPath }) { row ->
+                items(
+                    pendingDeletes,
+                    key = { "pending-delete-${it.canonicalPath}" },
+                ) { row ->
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(row.displayName, style = MaterialTheme.typography.titleSmall)
