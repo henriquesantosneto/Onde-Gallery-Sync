@@ -29,6 +29,24 @@ interface SyncMetadataDao {
     )
     fun observePendingCount(): Flow<Int>
 
+    /** Itens na fila: envio, download ou exclusão pendente (ordem estável para a UI). */
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE cloudState IN ('PENDING_UPLOAD', 'PENDING_DOWNLOAD')
+           OR pendingDeleteTarget != 'NONE'
+        ORDER BY
+            CASE cloudState
+                WHEN 'PENDING_UPLOAD' THEN 0
+                WHEN 'PENDING_DOWNLOAD' THEN 1
+                ELSE 2
+            END,
+            COALESCE(localModifiedAt, remoteModifiedAt) DESC
+        LIMIT 200
+        """,
+    )
+    fun observePendingQueue(): Flow<List<SyncMetadataEntity>>
+
     @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
     fun observePendingDeletes(): Flow<List<SyncMetadataEntity>>
 

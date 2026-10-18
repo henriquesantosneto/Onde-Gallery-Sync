@@ -50,6 +50,8 @@ data class SyncUiState(
     val lastMessage: String = "Pronto para sincronizar.",
     val isRunning: Boolean = false,
     val isOffline: Boolean = false,
+    /** Arquivo em transferência agora (upload/download). */
+    val activeItem: ActiveSyncItem? = null,
 )
 
 class SyncCoordinator(
@@ -150,6 +152,7 @@ class SyncCoordinator(
         } else if (_state.value.isRunning) {
             _state.value = _state.value.copy(
                 isRunning = false,
+                activeItem = null,
                 lastMessage = completedMessageForCancelReason(reason),
             )
             resetSyncCancel()
@@ -182,7 +185,7 @@ class SyncCoordinator(
     private fun ensureAutoSyncAllowed(userInitiated: Boolean): Result<Unit>? {
         if (userInitiated || !syncPreferences.isAutoSyncPaused()) return null
         val msg = autoSyncPausedMessage("Sync automático em pausa após cancelamento.")
-        _state.value = _state.value.copy(isRunning = false, lastMessage = msg)
+        _state.value = _state.value.copy(isRunning = false, activeItem = null, lastMessage = msg)
         return Result.failure(IllegalStateException(msg))
     }
 
@@ -247,6 +250,11 @@ class SyncCoordinator(
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
     val pendingOperationCount: Flow<Int> = syncMetadataDao.observePendingCount()
+    val syncQueue: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingQueue()
+
+    private fun setActiveSyncItem(item: ActiveSyncItem?) {
+        _state.value = _state.value.copy(activeItem = item)
+    }
 
     suspend fun getMetadata(canonicalPath: String): SyncMetadataEntity? {
         return syncMetadataDao.getByCanonicalPath(canonicalPath)
@@ -295,6 +303,7 @@ class SyncCoordinator(
                 _state.value = _state.value.copy(
                     lastIndexedLocalCount = items.size,
                     isRunning = false,
+                activeItem = null,
                     lastMessage = "Indexação local: ${items.size} itens (todas as pastas visíveis, ex. WhatsApp).",
                 )
             } else {
@@ -306,6 +315,7 @@ class SyncCoordinator(
             if (manageRunningState) {
                 _state.value = _state.value.copy(
                     isRunning = false,
+                activeItem = null,
                     lastMessage = if (cancelled) {
                         autoSyncPausedMessage("Indexação cancelada.")
                     } else {
@@ -455,6 +465,7 @@ class SyncCoordinator(
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
                     _state.value = _state.value.copy(
                         isRunning = false,
+                activeItem = null,
                         isOffline = false,
                         pendingOperations = pendingCount,
                         lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
@@ -466,6 +477,7 @@ class SyncCoordinator(
                     val cancelled = error is CancellationException
                     _state.value = _state.value.copy(
                         isRunning = false,
+                activeItem = null,
                         lastMessage = when {
                             cancelled -> cancellationResultMessage()
                             else -> error.message ?: "Erro na sincronização."
@@ -531,14 +543,24 @@ class SyncCoordinator(
         }
 
         val target = mediaCacheRepository.originalFile(canonicalPath)
-        return downloadRemoteFile(itemId, target).map {
-            syncMetadataDao.upsert(
-                row.copy(
-                    cachedFilePath = target.absolutePath,
-                    cloudState = CloudSyncState.CLOUD_ONLY,
-                ),
-            )
-            target
+        setActiveSyncItem(
+            ActiveSyncItem(
+                displayName = row.displayName,
+                operationLabel = "Baixando da nuvem…",
+            ),
+        )
+        return try {
+            downloadRemoteFile(itemId, target).map {
+                syncMetadataDao.upsert(
+                    row.copy(
+                        cachedFilePath = target.absolutePath,
+                        cloudState = CloudSyncState.CLOUD_ONLY,
+                    ),
+                )
+                target
+            }
+        } finally {
+            setActiveSyncItem(null)
         }
     }
 
@@ -812,8 +834,14 @@ class SyncCoordinator(
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
         ensureSyncMayContinue()
-        val localId = row.localMediaId ?: return 0
-        val item = localMediaRepository.findById(localId) ?: return 0
+        setActiveSyncItem(
+            ActiveSyncItem(
+                displayName = row.displayName,
+                operationLabel = "Enviando para OneDrive…",
+            ),
+        )
+        val localId = row.localMediaId ?: return 0.also { setActiveSyncItem(null) }
+        val item = localMediaRepository.findById(localId) ?: return 0.also { setActiveSyncItem(null) }
         val temp = localMediaRepository.materializeToTempFile(item) ?: run {
             syncMetadataDao.upsert(
                 row.copy(
@@ -821,6 +849,7 @@ class SyncCoordinator(
                     cloudState = CloudSyncState.ERROR,
                 ),
             )
+            setActiveSyncItem(null)
             return 0
         }
         return runCatching {
@@ -846,7 +875,10 @@ class SyncCoordinator(
         }.getOrElse {
             syncMetadataDao.upsert(row.copy(cloudState = CloudSyncState.ERROR, lastError = it.message))
             0
-        }.also { temp.delete() }
+        }.also {
+            temp.delete()
+            setActiveSyncItem(null)
+        }
     }
 
     private fun reconcileWithRemote(row: SyncMetadataEntity, remote: RemoteDriveFile): SyncMetadataEntity {

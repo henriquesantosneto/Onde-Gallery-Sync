@@ -40,6 +40,7 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
+import com.onegallery.sync.sync.queueDetailLabel
 import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,6 +52,7 @@ fun SyncStatusScreen(
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
     val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
+    val syncQueue by syncCoordinator.syncQueue.collectAsStateWithLifecycle(initialValue = emptyList())
     val app = LocalContext.current.applicationContext as OneGalleryApplication
     val syncTasks = remember { SyncTaskLauncher.from(app) }
 
@@ -85,14 +87,23 @@ fun SyncStatusScreen(
                         ) {
                             CircularProgressIndicator(strokeWidth = 2.dp)
                             Text(
-                                when {
-                                    coordinatorState.lastMessage.contains("Cancelando", ignoreCase = true) ->
-                                        "Cancelando…"
-                                    coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
-                                        "Indexando biblioteca local…"
-                                    else -> "Sincronizando com OneDrive…"
-                                },
+                                coordinatorState.activeItem?.operationLabel
+                                    ?: when {
+                                        coordinatorState.lastMessage.contains("Cancelando", ignoreCase = true) ->
+                                            "Cancelando…"
+                                        coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
+                                            "Indexando biblioteca local…"
+                                        else -> "Sincronizando com OneDrive…"
+                                    },
                                 style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        coordinatorState.activeItem?.let { active ->
+                            Text(
+                                active.displayName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 4.dp),
                             )
                         }
                     }
@@ -149,6 +160,37 @@ fun SyncStatusScreen(
             }
             item {
                 StatsCard(stats, pendingOps)
+            }
+
+            item {
+                SectionTitle(
+                    if (syncQueue.size > 50) {
+                        "Fila de sincronização (mostrando 50 de ${syncQueue.size})"
+                    } else {
+                        "Fila de sincronização (${syncQueue.size})"
+                    },
+                )
+            }
+            if (syncQueue.isEmpty()) {
+                item {
+                    Text(
+                        "Nada na fila. Itens aguardando envio ou download aparecem aqui durante e após o sync.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+            } else {
+                items(
+                    syncQueue.take(50),
+                    key = { "queue-${it.canonicalPath}" },
+                ) { row ->
+                    SyncQueueItemCard(
+                        row = row,
+                        isActive = coordinatorState.activeItem?.displayName == row.displayName &&
+                            coordinatorState.isRunning,
+                    )
+                }
             }
 
             if (problemCount > 0) {
@@ -254,6 +296,40 @@ private fun StatRow(label: String, value: String, emphasized: Boolean = false) {
             fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Normal,
             color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+@Composable
+private fun SyncQueueItemCard(
+    row: SyncMetadataEntity,
+    isActive: Boolean,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isActive) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            },
+        ),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(row.displayName, style = MaterialTheme.typography.titleSmall)
+            Text(
+                row.queueDetailLabel(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (isActive) {
+                Text(
+                    "Em andamento…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
     }
 }
 
