@@ -61,7 +61,6 @@ fun SyncStatusScreen(
     val problemItems = remember(metadata) {
         metadata.filter { syncCoordinator.shouldShowAttentionItem(it) }.take(25)
     }
-    val scope = rememberCoroutineScope()
     var clearingErrors by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -170,7 +169,7 @@ fun SyncStatusScreen(
                                 clearingErrors = false
                             }
                         },
-                        enabled = !clearingErrors,
+                        enabled = !clearingErrors && !coordinatorState.isRunning,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
@@ -178,8 +177,12 @@ fun SyncStatusScreen(
                         )
                     }
                     Text(
-                        "Só remove mensagens da lista. Fotos e fila de sync não são apagadas. " +
-                            "Depois, use Sincronizar agora com internet estável.",
+                        if (coordinatorState.isRunning) {
+                            "Aguarde o fim do sync ou toque em Cancelar para limpar avisos."
+                        } else {
+                            "Só remove mensagens da lista. Fotos e fila de sync não são apagadas. " +
+                                "Depois, use Sincronizar agora com internet estável."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
