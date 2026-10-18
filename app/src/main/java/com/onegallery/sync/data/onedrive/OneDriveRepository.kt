@@ -84,6 +84,12 @@ class OneDriveRepository(
         graphFolderPreferences.setSyncRoot(itemId, driveRelativePath, label)
     }
 
+    /** Verdadeiro se já havia pasta e a nova seleção é diferente (reconfiguração). */
+    fun willChangeSyncRoot(itemId: String, driveRelativePath: String): Boolean {
+        if (!graphFolderPreferences.isConfigured()) return false
+        return !graphFolderPreferences.matchesRoot(itemId, driveRelativePath)
+    }
+
     suspend fun getDriveRootId(): Result<String> {
         return runWithToken { token ->
             graphApi.getDriveRoot("Bearer $token").id

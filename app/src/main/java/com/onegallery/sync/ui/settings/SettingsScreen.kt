@@ -51,6 +51,7 @@ fun SettingsScreen(
     val app = LocalContext.current.applicationContext as OneGalleryApplication
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val syncState by syncCoordinator.state.collectAsStateWithLifecycle()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
@@ -190,6 +191,26 @@ fun SettingsScreen(
                         Icon(Icons.Outlined.Wifi, contentDescription = null)
                     },
                 )
+            }
+            item {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch { syncCoordinator.runIndexSanitation(userInitiated = true) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !syncState.isRunning,
+                    ) {
+                        Text("Verificar e limpar índice")
+                    }
+                    Text(
+                        "Remove entradas órfãs do índice. Trocar a pasta na nuvem recria o índice " +
+                            "no próximo sync; cada sync também faz uma verificação rápida.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
         }
     }

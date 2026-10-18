@@ -21,6 +21,11 @@ class GraphFolderPreferences(context: Context) {
 
     fun isConfigured(): Boolean = !syncRootItemId.isNullOrBlank()
 
+    fun matchesRoot(itemId: String, driveRelativePath: String): Boolean {
+        val path = driveRelativePath.trim('/')
+        return syncRootItemId == itemId && syncRootDrivePath?.trim('/') == path
+    }
+
     fun setSyncRoot(itemId: String, driveRelativePath: String, label: String) {
         prefs.edit()
             .putString(KEY_ITEM_ID, itemId)

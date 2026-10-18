@@ -56,6 +56,9 @@ interface SyncMetadataDao {
     @Query("DELETE FROM sync_metadata WHERE canonicalPath = :canonicalPath")
     suspend fun deleteByCanonicalPath(canonicalPath: String)
 
+    @Query("DELETE FROM sync_metadata")
+    suspend fun deleteAll()
+
     @Query("UPDATE sync_metadata SET pendingDeleteTarget = :target WHERE canonicalPath = :canonicalPath")
     suspend fun updatePendingDelete(canonicalPath: String, target: PendingDeleteTarget)
 

@@ -14,6 +14,8 @@ class SaOneDriveRepository(
 ) {
     fun isConnected(): Boolean = folderPreferences.treeUri != null
 
+    fun persistedTreeUriString(): String? = folderPreferences.treeUri?.toString()
+
     fun connectFolder(uri: Uri): Result<Unit> {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         val treeUri = FolderAccessUri.normalizeToTreeUri(uri)

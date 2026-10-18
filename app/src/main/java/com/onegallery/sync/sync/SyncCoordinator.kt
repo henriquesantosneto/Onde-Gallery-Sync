@@ -76,7 +76,12 @@ class SyncCoordinator(
     private val appForegroundState: AppForegroundState,
 ) {
     fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
+        val previousTree = saOneDriveRepository.persistedTreeUriString()
         return saOneDriveRepository.connectFolder(treeUri).onSuccess {
+            val currentTree = saOneDriveRepository.persistedTreeUriString()
+            if (previousTree != null && currentTree != null && previousTree != currentTree) {
+                scheduleIndexRebuild()
+            }
             syncPreferences.syncMode = SyncMode.ONEDRIVE_FOLDER
             syncPreferences.hasCompletedSetup = true
         }
@@ -93,6 +98,9 @@ class SyncCoordinator(
     }
 
     fun connectGraphSyncFolder(itemId: String, driveRelativePath: String, label: String) {
+        if (oneDriveRepository.willChangeSyncRoot(itemId, driveRelativePath)) {
+            scheduleIndexRebuild()
+        }
         oneDriveRepository.setSyncRoot(itemId, driveRelativePath, label)
         useGraphMode()
     }
@@ -115,6 +123,7 @@ class SyncCoordinator(
     private val syncCancelRequested = AtomicBoolean(false)
     private val syncCancelReason = AtomicReference(SyncCancelReason.NONE)
     private val activeLongTaskJob = AtomicReference<Job?>(null)
+    private val pendingIndexRebuild = AtomicBoolean(false)
     private val longTaskMutex = Mutex()
     private val foregroundGuard = SyncForegroundGuard(appContext)
 
@@ -209,6 +218,57 @@ class SyncCoordinator(
         val job = coroutineContext[Job] ?: return
         activeLongTaskJob.set(job)
         job.invokeOnCompletion { activeLongTaskJob.compareAndSet(job, null) }
+    }
+
+    /**
+     * Verifica o índice contra aparelho + pasta na nuvem e remove entradas órfãs.
+     * Também aplica recriação pendente após troca de pasta.
+     */
+    suspend fun runIndexSanitation(userInitiated: Boolean = true): Result<IndexSanitizeResult> {
+        ensureAutoSyncAllowed(userInitiated)?.let { denied ->
+            return Result.failure(denied.exceptionOrNull() ?: IllegalStateException("Sync pausado"))
+        }
+        return longTaskMutex.withLock {
+            runCatching {
+                resetSyncCancel()
+                bindActiveLongTaskJob()
+                _state.value = _state.value.copy(
+                    isRunning = true,
+                    lastMessage = "Verificando índice da galeria…",
+                    runQueue = emptyList(),
+                    activeItem = null,
+                )
+                val rebuilt = applyPendingIndexRebuildIfNeeded()
+                indexLocalLibrary(manageRunningState = false, userInitiated = userInitiated).getOrThrow()
+                val remoteListingAvailable: Boolean
+                val remotePaths: Set<String> = when (syncPreferences.syncMode) {
+                    SyncMode.LOCAL_ONLY -> {
+                        remoteListingAvailable = true
+                        emptySet()
+                    }
+                    else -> if (networkMonitor.isOnline()) {
+                        remoteListingAvailable = true
+                        listRemoteFiles().getOrThrow().associateBy { it.canonicalPath }.keys
+                    } else {
+                        remoteListingAvailable = false
+                        emptySet()
+                    }
+                }
+                val sanitized = runIndexSanitizePass(remotePaths, remoteListingAvailable)
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    activeItem = null,
+                    lastMessage = buildSanitizeMessage(rebuilt, sanitized),
+                )
+                sanitized.copy(fullRebuild = rebuilt || sanitized.fullRebuild)
+            }.onFailure { error ->
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    activeItem = null,
+                    lastMessage = error.message ?: "Falha na manutenção do índice.",
+                )
+            }
+        }
     }
 
     /** Remove mensagens de erro gravadas por item (lista Atenção). Não apaga fotos nem fila de sync. */
@@ -371,6 +431,18 @@ class SyncCoordinator(
             reconcileMissingLocalItems(seenPaths)
             backfillMissingGpsLocations()
             backfillMissingCaptureTimes()
+            if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) {
+                val sanitized = runIndexSanitizePass(
+                    remoteCanonicalPaths = emptySet(),
+                    remoteListingAvailable = true,
+                )
+                if (sanitized.removedRows > 0 && manageRunningState) {
+                    _state.value = _state.value.copy(
+                        lastMessage = "Indexação local: ${items.size} itens. " +
+                            "Manutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s).",
+                    )
+                }
+            }
             if (manageRunningState) {
                 _state.value = _state.value.copy(
                     lastIndexedLocalCount = items.size,
@@ -460,6 +532,7 @@ class SyncCoordinator(
                 runCatching {
                     ensureNotCancelled()
                     flushLegacyPendingDeletes()
+                    applyPendingIndexRebuildIfNeeded()
                     _state.value = _state.value.copy(
                         lastMessage = "Indexando biblioteca local e GPS das fotos…",
                     )
@@ -551,6 +624,10 @@ class SyncCoordinator(
                     )
                     backfillMissingGpsLocations()
                     backfillMissingCaptureTimes()
+                    val sanitized = runIndexSanitizePass(
+                        remoteCanonicalPaths = remoteByPath.keys,
+                        remoteListingAvailable = true,
+                    )
                     val gpsNote = _state.value.lastMessage.takeIf {
                         it.startsWith("Localização GPS:") || it.startsWith("Data de captura:")
                     }
@@ -565,6 +642,9 @@ class SyncCoordinator(
                                 "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
                                     "$cloudOnly só na nuvem$freeMsg.",
                             )
+                            if (sanitized.removedRows > 0) {
+                                append("\nManutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s).")
+                            }
                             if (gpsNote != null) {
                                 append("\n")
                                 append(gpsNote)
@@ -1384,6 +1464,48 @@ class SyncCoordinator(
             _state.value = _state.value.copy(
                 lastMessage = "Data de captura: $indexed item(ns) indexado(s)$suffix",
             )
+        }
+    }
+
+    private fun scheduleIndexRebuild() {
+        pendingIndexRebuild.set(true)
+    }
+
+    private suspend fun applyPendingIndexRebuildIfNeeded(): Boolean {
+        if (!pendingIndexRebuild.compareAndSet(true, false)) return false
+        rebuildSyncMetadataIndex(syncMetadataDao, mediaCacheRepository)
+        _state.value = _state.value.copy(
+            lastMessage = "Pasta na nuvem alterada — índice recriado. Reindexando…",
+        )
+        return true
+    }
+
+    private suspend fun runIndexSanitizePass(
+        remoteCanonicalPaths: Set<String>,
+        remoteListingAvailable: Boolean,
+    ): IndexSanitizeResult {
+        val localPaths = syncMetadataDao.getAll()
+            .filter { it.localMediaId != null }
+            .map { it.canonicalPath }
+            .toSet()
+        return sanitizeSyncMetadataIndex(
+            syncMode = syncPreferences.syncMode,
+            dao = syncMetadataDao,
+            mediaCacheRepository = mediaCacheRepository,
+            seenLocalCanonicalPaths = localPaths,
+            remoteCanonicalPaths = remoteCanonicalPaths,
+            remoteListingAvailable = remoteListingAvailable,
+        )
+    }
+
+    private fun buildSanitizeMessage(rebuilt: Boolean, sanitized: IndexSanitizeResult): String {
+        return when {
+            rebuilt && sanitized.removedRows > 0 ->
+                "Índice recriado após troca de pasta. Removidas ${sanitized.removedRows} entrada(s) obsoleta(s)."
+            rebuilt -> "Índice recriado após troca de pasta. Sincronize para repopular a galeria."
+            sanitized.removedRows > 0 ->
+                "Manutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s) do índice."
+            else -> "Índice verificado — nada a limpar."
         }
     }
 

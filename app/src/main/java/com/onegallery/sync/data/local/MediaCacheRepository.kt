@@ -48,4 +48,10 @@ class MediaCacheRepository(context: Context) {
 
     fun thumbnailIfCached(canonicalPath: String): File? =
         thumbFile(canonicalPath).takeIf { it.exists() && it.length() > 0L }
+
+    /** Após recriar o índice (ex.: troca de pasta na nuvem). */
+    fun clearAll() {
+        originalsDir.listFiles()?.forEach { it.delete() }
+        thumbsDir.listFiles()?.forEach { it.delete() }
+    }
 }
