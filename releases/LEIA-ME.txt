@@ -1,14 +1,17 @@
-OneGallery Sync — APK 0.7.19 (versionCode 55)
+OneGallery Sync — APK 0.8.0 (versionCode 56)
 ============================================
-
-Novidades: renovação de token Microsoft Graph (corrige 401 após sessão expirada).
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.7.19-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.0-debug/OneGallerySync-debug.apk
 
-Página:
-
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.7.19-debug
+Novidades principais:
+- Aba Fotos com timeline (ano/mês) e pinça para tamanho da grade
+- Álbuns em grade grande + pinça; seção Locais (GPS)
+- Mapa de fotos por localização (MapLibre)
+- Upload/download resumável (Graph) para arquivos grandes
+- Token Microsoft renovado automaticamente (401)
+- Sync só Wi‑Fi: para em dados móveis; retoma ao desligar opção
+- Zoom pinça em fotos/vídeos; correções de álbuns e sync
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=

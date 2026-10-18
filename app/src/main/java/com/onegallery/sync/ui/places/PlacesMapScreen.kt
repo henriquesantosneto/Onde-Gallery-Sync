@@ -70,6 +70,7 @@ fun PlacesMapScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val clusters = remember(state.geoItems) { buildPhotoMapClusters(state.geoItems) }
+    val latestClusters by rememberUpdatedState(clusters)
     var selectedCluster by remember { mutableStateOf<PhotoMapCluster?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -97,9 +98,18 @@ fun PlacesMapScreen(
         }
     }
 
-    LaunchedEffect(clusters, mapRef, styleReady) {
+    LaunchedEffect(clusters, mapRef, styleReady, latestClusters) {
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
+        map.setOnMarkerClickListener { marker ->
+            val match = latestClusters.minByOrNull { cluster ->
+                val dLat = cluster.latitude - marker.position.latitude
+                val dLon = cluster.longitude - marker.position.longitude
+                dLat * dLat + dLon * dLon
+            }
+            match?.let { selectedCluster = it }
+            true
+        }
         markers.forEach { map.removeMarker(it) }
         markers.clear()
         clusters.forEach { cluster ->
@@ -173,15 +183,6 @@ fun PlacesMapScreen(
                             created.getMapAsync { map ->
                                 mapRef = map
                                 map.uiSettings.isCompassEnabled = true
-                                map.setOnMarkerClickListener { marker ->
-                                    val match = clusters.minByOrNull { cluster ->
-                                        val dLat = cluster.latitude - marker.position.latitude
-                                        val dLon = cluster.longitude - marker.position.longitude
-                                        dLat * dLat + dLon * dLon
-                                    }
-                                    match?.let { selectedCluster = it }
-                                    true
-                                }
                                 map.setStyle(Style.Builder().fromUri(MAP_STYLE_URL)) {
                                     styleReady = true
                                 }
