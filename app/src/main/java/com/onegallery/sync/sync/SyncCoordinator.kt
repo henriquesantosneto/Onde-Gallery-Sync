@@ -292,49 +292,58 @@ class SyncCoordinator(
         }
 
         return runCatching {
-            when (row.pendingDeleteTarget) {
-                PendingDeleteTarget.LOCAL -> {
-                    if (!skipLocalMediaStoreDelete) {
-                        deleteLocalMediaStoreCopy(row).getOrThrow()
-                    }
-                    mediaCacheRepository.deleteCached(canonicalPath)
-                    if (row.oneDriveItemId != null) {
-                        syncMetadataDao.upsert(
-                            row.copy(
-                                localMediaId = null,
-                                localContentUri = null,
-                                pendingDeleteTarget = PendingDeleteTarget.NONE,
-                                cloudState = CloudSyncState.CLOUD_ONLY,
-                            ),
-                        )
-                    } else {
-                        syncMetadataDao.deleteByCanonicalPath(canonicalPath)
-                    }
+            executeDeleteTarget(row, row.pendingDeleteTarget, skipLocalMediaStoreDelete)
+        }
+    }
+
+    private suspend fun executeDeleteTarget(
+        row: SyncMetadataEntity,
+        target: PendingDeleteTarget,
+        skipLocalMediaStoreDelete: Boolean,
+    ) {
+        val canonicalPath = row.canonicalPath
+        when (target) {
+            PendingDeleteTarget.LOCAL -> {
+                if (!skipLocalMediaStoreDelete) {
+                    deleteLocalMediaStoreCopy(row).getOrThrow()
                 }
-                PendingDeleteTarget.REMOTE -> {
-                    row.oneDriveItemId?.let { deleteRemoteFile(it).getOrThrow() }
-                    if (row.localMediaId != null) {
-                        syncMetadataDao.upsert(
-                            row.copy(
-                                oneDriveItemId = null,
-                                pendingDeleteTarget = PendingDeleteTarget.NONE,
-                                cloudState = CloudSyncState.LOCAL_ONLY,
-                            ),
-                        )
-                    } else {
-                        syncMetadataDao.deleteByCanonicalPath(canonicalPath)
-                    }
-                }
-                PendingDeleteTarget.BOTH -> {
-                    row.oneDriveItemId?.let { deleteRemoteFile(it).getOrThrow() }
-                    if (!skipLocalMediaStoreDelete) {
-                        deleteLocalMediaStoreCopy(row).getOrThrow()
-                    }
-                    mediaCacheRepository.deleteCached(canonicalPath)
+                mediaCacheRepository.deleteCached(canonicalPath)
+                if (row.oneDriveItemId != null) {
+                    syncMetadataDao.upsert(
+                        row.copy(
+                            localMediaId = null,
+                            localContentUri = null,
+                            pendingDeleteTarget = PendingDeleteTarget.NONE,
+                            cloudState = CloudSyncState.CLOUD_ONLY,
+                        ),
+                    )
+                } else {
                     syncMetadataDao.deleteByCanonicalPath(canonicalPath)
                 }
-                PendingDeleteTarget.NONE -> Unit
             }
+            PendingDeleteTarget.REMOTE -> {
+                row.oneDriveItemId?.let { deleteRemoteFile(it).getOrThrow() }
+                if (row.localMediaId != null) {
+                    syncMetadataDao.upsert(
+                        row.copy(
+                            oneDriveItemId = null,
+                            pendingDeleteTarget = PendingDeleteTarget.NONE,
+                            cloudState = CloudSyncState.LOCAL_ONLY,
+                        ),
+                    )
+                } else {
+                    syncMetadataDao.deleteByCanonicalPath(canonicalPath)
+                }
+            }
+            PendingDeleteTarget.BOTH -> {
+                row.oneDriveItemId?.let { deleteRemoteFile(it).getOrThrow() }
+                if (!skipLocalMediaStoreDelete) {
+                    deleteLocalMediaStoreCopy(row).getOrThrow()
+                }
+                mediaCacheRepository.deleteCached(canonicalPath)
+                syncMetadataDao.deleteByCanonicalPath(canonicalPath)
+            }
+            PendingDeleteTarget.NONE -> Unit
         }
     }
 
@@ -379,23 +388,20 @@ class SyncCoordinator(
             if (needsLocalDelete) {
                 val uris = rows.mapNotNull { row -> localContentUri(row) }
                 if (uris.isNotEmpty()) {
-                    val approved = mediaDeleteRequestRouter.requestDelete(appContext, uris)
-                    if (!approved) {
+                    val removed = mediaDeleteRequestRouter.requestDelete(appContext, uris)
+                    if (!removed) {
                         error(
-                            "Exclusão no aparelho cancelada ou negada. " +
-                                "Confirme no diálogo do Android.",
+                            "Não foi possível excluir no aparelho. " +
+                                "Confirme no diálogo do Android ou verifique se a foto ainda existe na galeria.",
                         )
                     }
                 }
             }
             var deleted = 0
             for (path in canonicalPaths) {
-                requestDelete(path, target).getOrThrow()
-                resolvePendingDelete(
-                    path,
-                    confirmed = true,
-                    skipLocalMediaStoreDelete = needsLocalDelete,
-                ).getOrThrow()
+                val row = syncMetadataDao.getByCanonicalPath(path)
+                    ?: continue
+                executeDeleteTarget(row, target, skipLocalMediaStoreDelete = needsLocalDelete)
                 deleted++
             }
             deleted
