@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -46,11 +47,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
@@ -184,11 +186,16 @@ fun GalleryScreen(
                 val gridEntries = remember(state.items, state.sortOrder, timelineGrouping) {
                     buildGalleryGridEntries(state.items, state.sortOrder, timelineGrouping)
                 }
-                val stickyLabel = rememberStickyTimelineLabel(
+                val density = LocalDensity.current
+                val stickyBarHeightPx = remember(density) {
+                    with(density) { 44.dp.roundToPx() }
+                }
+                val timelineSticky = rememberTimelineStickyUiState(
                     gridState = gridState,
                     entries = if (dateTimeline) gridEntries else emptyList(),
                     gridScale = gridPinch.scale,
                     enabled = dateTimeline,
+                    stickyBarHeightPx = stickyBarHeightPx,
                 )
                 Box(
                     modifier = Modifier
@@ -204,7 +211,7 @@ fun GalleryScreen(
                         contentPadding = PaddingValues(
                             start = 8.dp,
                             end = 8.dp,
-                            top = if (dateTimeline) 52.dp else 4.dp,
+                            top = 4.dp,
                             bottom = 4.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -225,6 +232,7 @@ fun GalleryScreen(
                                     TimelineSectionHeader(
                                         title = entry.header.title,
                                         kind = entry.header.kind,
+                                        hiddenInStickyZone = entry.header.id in timelineSticky.hiddenHeaderIds,
                                     )
                                 }
                                 is GalleryGridEntry.Photo -> {
@@ -242,7 +250,7 @@ fun GalleryScreen(
                     }
                     if (dateTimeline) {
                         GalleryStickyTimelineBar(
-                            title = stickyLabel,
+                            title = timelineSticky.label,
                             modifier = Modifier.align(Alignment.TopCenter),
                         )
                     }
@@ -307,7 +315,12 @@ private fun TimelinePhotoCell(
 private fun TimelineSectionHeader(
     title: String,
     kind: TimelineHeaderKind,
+    hiddenInStickyZone: Boolean = false,
 ) {
+    if (hiddenInStickyZone) {
+        Box(Modifier.fillMaxWidth().height(0.dp))
+        return
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()

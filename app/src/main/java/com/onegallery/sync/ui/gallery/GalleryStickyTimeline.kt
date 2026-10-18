@@ -34,24 +34,42 @@ fun stickyLabelForGridIndex(
     return null
 }
 
+data class TimelineStickyUiState(
+    val label: String?,
+    /** Cabeçalhos da grade já cobertos pela barra fixa (evita “Hoje” duplicado). */
+    val hiddenHeaderIds: Set<String>,
+)
+
 @Composable
-fun rememberStickyTimelineLabel(
+fun rememberTimelineStickyUiState(
     gridState: LazyGridState,
     entries: List<GalleryGridEntry>,
     gridScale: Float,
     enabled: Boolean,
-): String? {
-    val label by remember(gridState, entries, gridScale, enabled) {
+    stickyBarHeightPx: Int,
+): TimelineStickyUiState {
+    val state by remember(gridState, entries, gridScale, enabled, stickyBarHeightPx) {
         derivedStateOf {
-            if (!enabled || entries.isEmpty()) return@derivedStateOf null
-            val anchor = gridState.layoutInfo.visibleItemsInfo
+            if (!enabled || entries.isEmpty() || stickyBarHeightPx <= 0) {
+                return@derivedStateOf TimelineStickyUiState(null, emptySet())
+            }
+            val visible = gridState.layoutInfo.visibleItemsInfo
                 .filter { info -> info.index in entries.indices }
-                .minByOrNull { it.offset.y }
-                ?: return@derivedStateOf null
-            stickyLabelForGridIndex(entries, anchor.index, gridScale)
+            val anchor = visible.minByOrNull { it.offset.y }
+                ?: return@derivedStateOf TimelineStickyUiState(null, emptySet())
+            val label = stickyLabelForGridIndex(entries, anchor.index, gridScale)
+            val hiddenHeaderIds = visible.mapNotNull { info ->
+                when (val entry = entries[info.index]) {
+                    is GalleryGridEntry.Header -> {
+                        if (info.offset.y < stickyBarHeightPx) entry.header.id else null
+                    }
+                    is GalleryGridEntry.Photo -> null
+                }
+            }.toSet()
+            TimelineStickyUiState(label, hiddenHeaderIds)
         }
     }
-    return label
+    return state
 }
 
 @Composable
@@ -62,16 +80,16 @@ fun GalleryStickyTimelineBar(
     if (title.isNullOrBlank()) return
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 3.dp,
-        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = 2.dp,
+        tonalElevation = 1.dp,
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
         )
     }
 }
