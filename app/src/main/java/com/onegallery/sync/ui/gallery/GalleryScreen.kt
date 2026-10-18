@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
@@ -67,6 +69,7 @@ import java.nio.charset.StandardCharsets
 fun GalleryScreen(
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
+    mediaCacheRepository: MediaCacheRepository,
     galleryPreferences: GalleryPreferences,
     onOpenItem: (String) -> Unit,
     onExitAlbumFilter: () -> Unit = {},
@@ -79,6 +82,7 @@ fun GalleryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
+    var showMediaDetails by remember { mutableStateOf(false) }
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -116,6 +120,11 @@ fun GalleryScreen(
                 },
                 actions = {
                     if (state.selectionMode) {
+                        if (state.selectedPaths.isNotEmpty()) {
+                            IconButton(onClick = { showMediaDetails = true }) {
+                                Icon(Icons.Outlined.Info, contentDescription = "Detalhes")
+                            }
+                        }
                         IconButton(onClick = { showMoveDialog = true }) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
@@ -260,6 +269,16 @@ fun GalleryScreen(
                 }
             }
         }
+    }
+
+    if (showMediaDetails && state.selectedPaths.isNotEmpty()) {
+        MediaDetailsBottomSheet(
+            canonicalPaths = state.selectedPaths.toList(),
+            displayItems = state.items,
+            syncCoordinator = syncCoordinator,
+            mediaCacheRepository = mediaCacheRepository,
+            onDismiss = { showMediaDetails = false },
+        )
     }
 
     if (showMoveDialog) {

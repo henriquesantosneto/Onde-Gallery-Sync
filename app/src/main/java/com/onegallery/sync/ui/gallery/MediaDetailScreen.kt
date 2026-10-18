@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,6 +66,7 @@ fun MediaDetailScreen(
     val liveItems = state.items
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
+    var showMediaDetails by remember { mutableStateOf(false) }
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
 
@@ -108,6 +110,11 @@ fun MediaDetailScreen(
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
     val currentItem = currentPath?.let { path -> liveItems.find { it.canonicalPath == path } }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
+    val detailPaths = when {
+        state.selectionMode && state.selectedPaths.isNotEmpty() -> state.selectedPaths.toList()
+        currentPath != null -> listOf(currentPath)
+        else -> emptyList()
+    }
 
     val chromeVisible = !immersive
 
@@ -148,6 +155,11 @@ fun MediaDetailScreen(
                         }
                     },
                     actions = {
+                        if (detailPaths.isNotEmpty()) {
+                            IconButton(onClick = { showMediaDetails = true }) {
+                                Icon(Icons.Outlined.Info, contentDescription = "Detalhes")
+                            }
+                        }
                         if (!state.selectionMode && currentItem != null) {
                             IconButton(onClick = { immersive = true }) {
                                 Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
@@ -234,6 +246,16 @@ fun MediaDetailScreen(
                 )
             }
         }
+    }
+
+    if (showMediaDetails && detailPaths.isNotEmpty()) {
+        MediaDetailsBottomSheet(
+            canonicalPaths = detailPaths,
+            displayItems = liveItems,
+            syncCoordinator = syncCoordinator,
+            mediaCacheRepository = mediaCacheRepository,
+            onDismiss = { showMediaDetails = false },
+        )
     }
 
     if (showMoveDialog) {

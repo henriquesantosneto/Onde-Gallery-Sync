@@ -321,6 +321,7 @@ fun OneGalleryApp(
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
                     galleryPreferences = galleryPreferences,
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
@@ -369,6 +370,7 @@ fun OneGalleryApp(
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
                     galleryPreferences = galleryPreferences,
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
