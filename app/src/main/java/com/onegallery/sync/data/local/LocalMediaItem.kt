@@ -29,4 +29,8 @@ data class MediaAlbum(
     val itemCount: Int,
     val coverUri: Uri?,
     val sortTimestamp: Long = 0L,
+    /** Álbum criado pelo usuário (pode renomear/excluir a organização). */
+    val isUserManaged: Boolean = false,
+    val userAlbumId: String? = null,
+    val createdAtEpoch: Long? = null,
 )

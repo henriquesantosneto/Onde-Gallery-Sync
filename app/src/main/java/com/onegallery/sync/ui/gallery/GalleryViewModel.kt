@@ -29,6 +29,8 @@ data class GalleryUiState(
     val albumListSort: AlbumListSort = AlbumListSort.NAME_A_Z,
     val selectionMode: Boolean = false,
     val selectedPaths: Set<String> = emptySet(),
+    val albumSelectionMode: Boolean = false,
+    val selectedAlbumTitles: Set<String> = emptySet(),
     val error: String? = null,
     val actionMessage: String? = null,
     /** Itens com coordenadas GPS (mapa de locais). */
@@ -58,6 +60,8 @@ private data class UiControls(
     val selected: Set<String>,
     val order: GallerySortOrder,
     val albumSort: AlbumListSort,
+    val albumSelecting: Boolean,
+    val selectedAlbums: Set<String>,
 )
 
 class GalleryViewModel(
@@ -75,6 +79,8 @@ class GalleryViewModel(
     private val selectedPaths = MutableStateFlow<Set<String>>(emptySet())
     private val sortOrder = MutableStateFlow(galleryPreferences.sortOrder)
     private val albumListSort = MutableStateFlow(galleryPreferences.albumListSort)
+    private val albumSelectionMode = MutableStateFlow(false)
+    private val selectedAlbumTitles = MutableStateFlow<Set<String>>(emptySet())
 
     private val libraryFlow = combine(
         syncCoordinator.galleryMetadata,
@@ -89,7 +95,10 @@ class GalleryViewModel(
         combine(selectedPaths, sortOrder, albumListSort) { selected, order, albumSort ->
             SortSlice(selected, order, albumSort)
         },
-    ) { selection, sort ->
+        combine(albumSelectionMode, selectedAlbumTitles) { selecting, titles ->
+            selecting to titles
+        },
+    ) { selection, sort, albumSelection ->
         UiControls(
             browseFilter = selection.browseFilter,
             isLoading = selection.isLoading,
@@ -99,6 +108,8 @@ class GalleryViewModel(
             selected = sort.selected,
             order = sort.order,
             albumSort = sort.albumSort,
+            albumSelecting = albumSelection.first,
+            selectedAlbums = albumSelection.second,
         )
     }
 
@@ -129,6 +140,8 @@ class GalleryViewModel(
             albumListSort = controls.albumSort,
             selectionMode = controls.selecting,
             selectedPaths = controls.selected,
+            albumSelectionMode = controls.albumSelecting,
+            selectedAlbumTitles = controls.selectedAlbums,
             error = controls.error,
             actionMessage = controls.message,
             geoItems = allItems.filter { it.latitude != null && it.longitude != null },
@@ -202,6 +215,55 @@ class GalleryViewModel(
 
     fun clearActionMessage() {
         actionMessage.value = null
+    }
+
+    fun enterAlbumSelectionMode(initialTitle: String? = null) {
+        albumSelectionMode.value = true
+        if (initialTitle != null) {
+            selectedAlbumTitles.value = setOf(initialTitle)
+        }
+    }
+
+    fun toggleAlbumSelection(title: String) {
+        selectedAlbumTitles.update { current ->
+            if (title in current) current - title else current + title
+        }
+    }
+
+    fun clearAlbumSelection() {
+        albumSelectionMode.value = false
+        selectedAlbumTitles.value = emptySet()
+    }
+
+    fun renameUserAlbum(oldTitle: String, newTitle: String, onSuccess: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            syncCoordinator.renameUserAlbum(oldTitle, newTitle)
+                .onSuccess {
+                    selectedAlbumTitles.update { selected ->
+                        if (oldTitle in selected) (selected - oldTitle) + newTitle else selected
+                    }
+                    actionMessage.value = "Álbum renomeado para \"$newTitle\"."
+                    onSuccess(newTitle)
+                }
+                .onFailure { actionMessage.value = it.message }
+        }
+    }
+
+    fun deleteSelectedUserAlbums() {
+        val titles = selectedAlbumTitles.value.toList()
+        if (titles.isEmpty()) return
+        viewModelScope.launch {
+            syncCoordinator.deleteUserAlbums(titles)
+                .onSuccess { count ->
+                    actionMessage.value = if (count > 0) {
+                        "$count álbum(ns) personalizado(s) removido(s). As fotos foram mantidas."
+                    } else {
+                        "Nenhum álbum personalizado para remover."
+                    }
+                    clearAlbumSelection()
+                }
+                .onFailure { actionMessage.value = it.message }
+        }
     }
 
     fun createUserAlbum(title: String, onSuccess: (String) -> Unit = {}) {
@@ -287,6 +349,7 @@ private fun buildAlbums(
     val albums = titles.map { title ->
         val items = grouped[title].orEmpty()
         val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
+        val userMeta = userAlbums.find { it.title == title }
         MediaAlbum(
             bucketId = "album:$title",
             title = title,
@@ -295,6 +358,9 @@ private fun buildAlbums(
                 android.net.Uri.fromFile(it)
             },
             sortTimestamp = latest,
+            isUserManaged = userMeta != null,
+            userAlbumId = userMeta?.id,
+            createdAtEpoch = userMeta?.createdAtEpoch,
         )
     }
     return sortMediaAlbums(albums, sort)

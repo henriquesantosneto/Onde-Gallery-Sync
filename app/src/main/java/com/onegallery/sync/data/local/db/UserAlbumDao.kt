@@ -14,6 +14,9 @@ interface UserAlbumDao {
     @Query("SELECT * FROM user_albums ORDER BY title COLLATE NOCASE ASC")
     suspend fun getAll(): List<UserAlbumEntity>
 
+    @Query("SELECT * FROM user_albums WHERE title = :title LIMIT 1")
+    suspend fun getByTitle(title: String): UserAlbumEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(album: UserAlbumEntity)
 

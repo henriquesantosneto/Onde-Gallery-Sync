@@ -913,6 +913,42 @@ class SyncCoordinator(
         return Result.success(canonicalPaths.size)
     }
 
+    suspend fun renameUserAlbum(oldTitle: String, newTitle: String): Result<Unit> {
+        val from = oldTitle.trim()
+        val to = newTitle.trim()
+        if (from.isBlank() || to.isBlank()) {
+            return Result.failure(IllegalArgumentException("Informe um nome válido."))
+        }
+        if (from.equals(to, ignoreCase = true)) return Result.success(Unit)
+        val entity = userAlbumDao.getByTitle(from)
+            ?: return Result.failure(IllegalArgumentException("Só álbuns personalizados podem ser renomeados."))
+        if (userAlbumDao.getByTitle(to) != null) {
+            return Result.failure(IllegalArgumentException("Já existe um álbum com esse nome."))
+        }
+        syncMetadataDao.getAll()
+            .filter { it.userAlbumName == from }
+            .forEach { row -> syncMetadataDao.updateUserAlbum(row.canonicalPath, to) }
+        userAlbumDao.upsert(entity.copy(title = to))
+        return Result.success(Unit)
+    }
+
+    /** Remove álbuns personalizados; as fotos permanecem (voltam à pasta original na galeria). */
+    suspend fun deleteUserAlbums(titles: List<String>): Result<Int> {
+        if (titles.isEmpty()) return Result.success(0)
+        var removed = 0
+        titles.distinct().forEach { rawTitle ->
+            val title = rawTitle.trim()
+            if (title.isBlank()) return@forEach
+            val entity = userAlbumDao.getByTitle(title) ?: return@forEach
+            syncMetadataDao.getAll()
+                .filter { it.userAlbumName == title }
+                .forEach { row -> syncMetadataDao.updateUserAlbum(row.canonicalPath, null) }
+            userAlbumDao.delete(entity.id)
+            removed++
+        }
+        return Result.success(removed)
+    }
+
     suspend fun releaseLocalSpace(canonicalPaths: List<String>): Result<Int> {
         if (canonicalPaths.isEmpty()) return Result.success(0)
         return runCatching {
