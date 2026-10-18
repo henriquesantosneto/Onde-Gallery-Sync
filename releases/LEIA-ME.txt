@@ -1,4 +1,4 @@
-OneGallery Sync — APK 0.5.4 (versionCode 17)
+OneGallery Sync — APK 0.7.5 (versionCode 41)
 ============================================
 
 Arquivo: OneGallerySync-debug.apk (~24 MB)
