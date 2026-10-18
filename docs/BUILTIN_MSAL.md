@@ -14,9 +14,9 @@ Se aparecer erro de configuração, o APK foi gerado sem Client ID — peça uma
 
 1. [Portal Azure](https://portal.azure.com/) → **Registros de aplicativo** → **Novo registro**.
 2. Contas: **pessoais + organizacionais**.
-3. Plataforma **Android**:
+3. Plataforma **Android** (valores do APK GitHub): [docs/AZURE_REDIRECT.md](AZURE_REDIRECT.md)
    - Pacote: `com.onegallery.sync`
-   - Assinatura debug (hash): ver `docs/MICROSOFT_APP_REGISTRATION.md`
+   - Hash: `XNT/U2cXeU6BS9HUWsT4MsU1wY4=`
 4. Permissões Graph delegadas: `User.Read`, `Files.ReadWrite.All`, `offline_access`.
 5. Copie o **Application (client) ID** para `msal.properties`:
 

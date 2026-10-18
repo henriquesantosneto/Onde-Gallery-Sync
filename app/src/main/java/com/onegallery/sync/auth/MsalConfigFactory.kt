@@ -10,6 +10,10 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 object MsalConfigFactory {
+    /** Hash Base64 (campo “Assinatura” no Azure Android). */
+    fun signatureHashBase64(context: Context): String? =
+        sha1SignatureHash(context, context.packageName)
+
     fun computeRedirectUri(context: Context): String {
         val packageName = context.packageName
         val hash = sha1SignatureHash(context, packageName)

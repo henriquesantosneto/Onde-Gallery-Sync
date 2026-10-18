@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -32,6 +33,7 @@ import com.onegallery.sync.BuildConfig
 import com.onegallery.sync.R
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
+import com.onegallery.sync.auth.MsalConfigFactory
 import kotlinx.coroutines.launch
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -55,6 +57,8 @@ fun SignInGate(
     var localError by remember { mutableStateOf<String?>(null) }
     var showDevClientId by remember { mutableStateOf(false) }
     val redirect = remember { authManager.redirectUriForAzure }
+    val signatureHash = remember { MsalConfigFactory.signatureHashBase64(context) }
+    val packageName = remember { context.packageName }
     val needsClientId = authManager.needsUserClientId()
     val embedded = MsalBuiltInConfig.isEmbeddedClientConfigured()
 
@@ -93,6 +97,34 @@ fun SignInGate(
             )
             TextButton(onClick = { showDevClientId = true }) {
                 Text("Sou desenvolvedor — colar Client ID")
+            }
+        }
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            colors = androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Cole no Azure → Android", style = MaterialTheme.typography.labelLarge)
+                Text("Pacote: $packageName", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                Text(
+                    "Hash assinatura: ${signatureHash ?: "—"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    "Redirect (referência): $redirect",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    "Use plataforma Android, não Web. Hash com / e = vai cru no campo assinatura.",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
         }
         if (needsClientId && showDevClientId) {

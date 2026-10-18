@@ -26,8 +26,8 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.5.0"
+        versionCode = 14
+        versionName = "0.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -35,7 +35,7 @@ android {
         buildConfigField(
             "String",
             "MSAL_REDIRECT_URI",
-            "\"msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D\"",
+            "\"msauth://com.onegallery.sync/XNT%2FU2cXeU6BS9HUWsT4MsU1wY4%3D\"",
         )
         buildConfigField(
             "String",
