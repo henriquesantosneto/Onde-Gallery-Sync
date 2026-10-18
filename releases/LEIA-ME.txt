@@ -33,10 +33,14 @@ GitHub (henriquesantosneto/Onde-Gallery-Sync) — após publicar esta branch no 
   git clone --branch cursor/apk-download-0dd7 --single-branch \
     https://github.com/henriquesantosneto/Onde-Gallery-Sync.git onegallery-apk
 
-Download direto (raw), quando a branch existir no GitHub:
+Download direto no navegador (Release GitHub — recomendado):
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/raw/cursor/apk-download-0dd7/releases/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.5.4-debug/OneGallerySync-debug.apk
 
-  https://raw.githubusercontent.com/henriquesantosneto/Onde-Gallery-Sync/cursor/apk-download-0dd7/releases/OneGallerySync-debug.apk
+Página da release:
 
-(Hoje o GitHub só tem main; use Origin ou crie o repo a partir desta run no Cursor.)
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/tag/v0.5.4-debug
+
+Ver APK no GitHub (botão Download na página):
+
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/blob/cursor/apk-download-0dd7/releases/OneGallerySync-debug.apk
