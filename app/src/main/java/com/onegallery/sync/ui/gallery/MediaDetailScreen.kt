@@ -294,25 +294,34 @@ private fun MediaDetailPage(
     var item by remember(canonicalPath) { mutableStateOf<GalleryDisplayItem?>(null) }
     var loading by remember(canonicalPath) { mutableStateOf(true) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
+    var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
+
+    suspend fun refreshDisplayItem() {
+        item = syncCoordinator.getMetadata(canonicalPath)?.let {
+            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
+        }
+    }
+
+    suspend fun loadFullOriginalForViewing() {
+        val current = item ?: return
+        if (current.localUri != null || current.cachedOriginal?.exists() == true) return
+        loadingFull = true
+        error = null
+        syncCoordinator.downloadOriginalOnDemand(canonicalPath)
+            .onSuccess {
+                syncCoordinator.ensureThumbnailCached(canonicalPath)
+                refreshDisplayItem()
+            }
+            .onFailure { err -> error = err.message }
+        loadingFull = false
+    }
 
     LaunchedEffect(canonicalPath) {
         if (item == null) loading = true
         error = null
-        var display = syncCoordinator.getMetadata(canonicalPath)?.let {
-            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
-        }
-        if (display != null) {
-            syncCoordinator.ensureThumbnailCached(canonicalPath)
-            if (display.localUri == null && display.cachedOriginal == null) {
-                syncCoordinator.downloadOriginalOnDemand(canonicalPath)
-                    .onSuccess { file ->
-                        display = display?.copy(cachedOriginal = file)
-                        syncCoordinator.ensureThumbnailCached(canonicalPath)
-                    }
-                    .onFailure { err -> error = err.message }
-            }
-        }
-        item = display
+        refreshDisplayItem()
+        syncCoordinator.ensureThumbnailCached(canonicalPath)
+        refreshDisplayItem()
         loading = false
     }
 
@@ -349,19 +358,24 @@ private fun MediaDetailPage(
                             )
                         }
                         display.kind == MediaKind.VIDEO -> {
-                            ZoomableMediaContainer(
-                                resetKey = canonicalPath,
-                                modifier = mediaModifier,
-                                onZoomActiveChanged = onZoomActiveChanged,
-                                onSingleTap = onToggleImmersive,
-                            ) {
-                                MediaThumbnailImage(
-                                    item = display,
-                                    syncCoordinator = syncCoordinator,
-                                    contentDescription = display.displayName,
+                            Box(modifier = mediaModifier, contentAlignment = Alignment.Center) {
+                                ZoomableMediaContainer(
+                                    resetKey = canonicalPath,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit,
-                                )
+                                    onZoomActiveChanged = onZoomActiveChanged,
+                                    onSingleTap = onToggleImmersive,
+                                ) {
+                                    MediaThumbnailImage(
+                                        item = display,
+                                        syncCoordinator = syncCoordinator,
+                                        contentDescription = display.displayName,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                }
+                                if (loadingFull) {
+                                    CircularProgressIndicator()
+                                }
                             }
                         }
                         display.detailPreviewModel() != null -> {
@@ -395,17 +409,17 @@ private fun MediaDetailPage(
                         }
                         if (display.localUri == null && display.cachedOriginal == null) {
                             Button(
-                                onClick = {
-                                    scope.launch {
-                                        syncCoordinator.downloadOriginalOnDemand(canonicalPath)
-                                            .onSuccess { file ->
-                                                item = display.copy(cachedOriginal = file)
-                                                syncCoordinator.ensureThumbnailCached(canonicalPath)
-                                            }
-                                            .onFailure { err -> error = err.message }
-                                    }
-                                },
-                            ) { Text("Baixar original") }
+                                onClick = { scope.launch { loadFullOriginalForViewing() } },
+                                enabled = !loadingFull,
+                            ) {
+                                Text(
+                                    if (display.kind == MediaKind.VIDEO) {
+                                        "Reproduzir (carregar da nuvem)"
+                                    } else {
+                                        "Visualizar em tamanho real"
+                                    },
+                                )
+                            }
                         }
                         RowWithActions(
                             onDeleteAll = { viewModel.deleteSingle(canonicalPath, onRemoved) },

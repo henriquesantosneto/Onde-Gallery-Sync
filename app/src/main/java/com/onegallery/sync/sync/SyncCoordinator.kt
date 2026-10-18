@@ -624,6 +624,7 @@ class SyncCoordinator(
                     )
                     backfillMissingGpsLocations()
                     backfillMissingCaptureTimes()
+                    prefetchCloudThumbnails()
                     val sanitized = runIndexSanitizePass(
                         remoteCanonicalPaths = remoteByPath.keys,
                         remoteListingAvailable = true,
@@ -1192,26 +1193,20 @@ class SyncCoordinator(
             remoteModifiedAt = remote.modifiedAtEpoch,
             lastError = null,
         )
-        if (row.localMediaId != null) {
-            val lastKnownRemote = row.remoteModifiedAt
-            val remoteChangedSinceSync = lastKnownRemote != null &&
-                remoteTs > lastKnownRemote + SYNC_TIMESTAMP_TOLERANCE_SEC
-            val localNewerThanCloud = localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC
-            return when {
-                remoteChangedSinceSync && localNewerThanCloud ->
-                    base.copy(cloudState = CloudSyncState.CONFLICT)
-                remoteChangedSinceSync ->
-                    base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
-                localNewerThanCloud ->
-                    base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
-                else -> base.copy(cloudState = CloudSyncState.SYNCED)
-            }
+        if (row.localMediaId == null) {
+            return base.copy(cloudState = CloudSyncState.CLOUD_ONLY)
         }
+        val lastKnownRemote = row.remoteModifiedAt
+        val remoteChangedSinceSync = lastKnownRemote != null &&
+            remoteTs > lastKnownRemote + SYNC_TIMESTAMP_TOLERANCE_SEC
+        val localNewerThanCloud = localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         return when {
-            localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC ->
-                base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
-            remoteTs > localTs + SYNC_TIMESTAMP_TOLERANCE_SEC ->
+            remoteChangedSinceSync && localNewerThanCloud ->
+                base.copy(cloudState = CloudSyncState.CONFLICT)
+            remoteChangedSinceSync ->
                 base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+            localNewerThanCloud ->
+                base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
             else -> base.copy(cloudState = CloudSyncState.SYNCED)
         }
     }
@@ -1404,6 +1399,30 @@ class SyncCoordinator(
         if (!networkMonitor.isOnline()) return null
         return oneDriveRepository.probeExifLocationFromItem(oneDriveItemId, mediaLocationResolver)
             .getOrNull()
+    }
+
+    /** Miniaturas da nuvem para grade/mapa — sem baixar originais. */
+    private suspend fun prefetchCloudThumbnails(maxPerRun: Int = 200) {
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return
+        if (!networkMonitor.isOnline()) return
+        val rows = syncMetadataDao.getAll().filter { row ->
+            row.oneDriveItemId != null &&
+                mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null
+        }.take(maxPerRun)
+        if (rows.isEmpty()) return
+        var cached = 0
+        rows.forEachIndexed { index, row ->
+            if (index % 12 == 0) {
+                ensureNotCancelled()
+                coroutineContext.ensureActive()
+            }
+            ensureThumbnailCached(row.canonicalPath).getOrNull()?.let { cached++ }
+        }
+        if (cached > 0) {
+            _state.value = _state.value.copy(
+                lastMessage = "Miniaturas na nuvem: $cached de ${rows.size} nesta passagem.",
+            )
+        }
     }
 
     private suspend fun backfillMissingGpsLocations() {

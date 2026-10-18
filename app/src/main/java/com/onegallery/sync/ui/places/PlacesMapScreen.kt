@@ -435,6 +435,11 @@ private fun PlacesMapView(
         markers.clear()
         markerToPin.clear()
         val iconFactory = IconFactory.getInstance(context)
+        withContext(Dispatchers.IO) {
+            pins.forEach { pin ->
+                syncCoordinator.ensureThumbnailCached(pin.item.canonicalPath)
+            }
+        }
         val markerArt = withContext(Dispatchers.Default) {
             pins.map { pin ->
                 val bitmap = PhotoStackMarkerBitmap.create(
