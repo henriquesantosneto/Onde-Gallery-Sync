@@ -22,7 +22,7 @@ android {
         buildConfigField(
             "String",
             "MSAL_REDIRECT_URI",
-            "\"msauth://com.onegallery.sync/YOUR_BASE64_SIGNATURE_HASH\"",
+            "\"msauth://com.onegallery.sync/pH93hJ0fsCAwFF5NxVPK0Snx6Ws%3D\"",
         )
         buildConfigField(
             "String",

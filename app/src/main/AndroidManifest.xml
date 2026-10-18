@@ -40,7 +40,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:host="com.onegallery.sync"
-                    android:path="/YOUR_BASE64_SIGNATURE_HASH"
+                    android:path="/pH93hJ0fsCAwFF5NxVPK0Snx6Ws="
                     android:scheme="msauth" />
             </intent-filter>
         </activity>

@@ -58,6 +58,11 @@ fun SignInGate(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
         }
+        Text(
+            text = "No Azure, cadastre o app e coloque o Client ID em auth_config.json (veja docs/MICROSOFT_APP_REGISTRATION.md).",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
         Button(
             onClick = {
                 val hostActivity = context.findActivity() ?: return@Button
