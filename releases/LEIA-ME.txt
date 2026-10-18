@@ -1,14 +1,13 @@
-OneGallery Sync — APK 0.8.38 (versionCode 94)
+OneGallery Sync — APK 0.8.39 (versionCode 95)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.38-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.39-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Nuvem: grade e mapa com miniatura/placeholder; original só ao visualizar/reproduzir
-- Sync baixa miniaturas da nuvem (sem encher o aparelho com arquivos completos)
-- Liberar espaço mantém placeholder e OneDrive (v0.8.37)
-- Locais: País · Estado · Cidade · Bairro (v0.8.36)
+- Escolher pasta no OneDrive recria o índice na hora (inclui 1ª configuração) + sync
+- v0.8.38: miniaturas na nuvem; original só ao visualizar
+- v0.8.37: liberar espaço mantém placeholder
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
