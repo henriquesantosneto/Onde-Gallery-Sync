@@ -17,6 +17,10 @@ class SyncTaskLauncher(
         scope.launch { coordinator.indexLocalLibrary(userInitiated = userInitiated) }
     }
 
+    fun refreshPhotoLocations(userInitiated: Boolean = true) {
+        scope.launch { coordinator.refreshPhotoLocations(userInitiated = userInitiated) }
+    }
+
     fun clearStoredItemErrors(onDone: (Int) -> Unit = {}) {
         scope.launch {
             val count = coordinator.clearStoredItemErrors()

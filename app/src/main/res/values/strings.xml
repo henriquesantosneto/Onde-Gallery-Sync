@@ -9,6 +9,7 @@
     <string name="sync_not_implemented_title">Sincronização bidirecional</string>
     <string name="sync_not_implemented_body">Espelha pastas locais no OneDrive, baixa originais sob demanda e pede confirmação antes de propagar exclusões. Valide no dispositivo após configurar o app Microsoft.</string>
     <string name="permission_rationale">Precisamos acessar fotos e vídeos no dispositivo para espelhar a galeria local.</string>
+    <string name="permission_media_location_rationale">A permissão “Localização das mídias” permite ler GPS das fotos para o mapa de locais.</string>
     <string name="cloud_badge">Nuvem</string>
     <string name="offline_badge">Offline</string>
     <string name="pending_badge">Pendente</string>

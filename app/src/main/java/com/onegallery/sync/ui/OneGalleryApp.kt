@@ -157,7 +157,18 @@ fun OneGalleryApp(
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { }
+    ) { results ->
+        val mediaOk = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                results[Manifest.permission.READ_MEDIA_IMAGES] == true
+            else -> results[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+        val locationOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            results[Manifest.permission.ACCESS_MEDIA_LOCATION] == true
+        if (mediaOk && locationOk) {
+            syncTasks.refreshPhotoLocations(userInitiated = false)
+        }
+    }
 
     LaunchedEffect(Unit) {
         authManager.initialize()
@@ -171,6 +182,9 @@ fun OneGalleryApp(
                 add(Manifest.permission.READ_MEDIA_VIDEO)
             } else {
                 add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(Manifest.permission.ACCESS_MEDIA_LOCATION)
             }
         }
         permissionLauncher.launch(permissions.toTypedArray())
@@ -338,6 +352,7 @@ fun OneGalleryApp(
                 PlacesMapScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
+                    syncTasks = syncTasks,
                     onBack = { navController.popBackStack() },
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")

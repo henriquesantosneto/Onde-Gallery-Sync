@@ -22,7 +22,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.os.Build
+import androidx.compose.ui.platform.LocalContext
+import com.onegallery.sync.data.local.MediaAccessPermissions
+import com.onegallery.sync.sync.SyncTaskLauncher
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -64,10 +73,19 @@ private const val MAP_STYLE_URL = "https://demotiles.maplibre.org/style.json"
 fun PlacesMapScreen(
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
+    syncTasks: SyncTaskLauncher,
     onBack: () -> Unit,
     onOpenItem: (String) -> Unit,
     onShowAllAtPlace: (String) -> Unit,
 ) {
+    val context = LocalContext.current
+    val hasMediaLocation = MediaAccessPermissions.hasMediaLocationAccess(context)
+    val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) syncTasks.refreshPhotoLocations()
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val clusters = remember(state.geoItems) { buildPhotoMapClusters(state.geoItems) }
     val latestClusters by rememberUpdatedState(clusters)
@@ -157,17 +175,46 @@ fun PlacesMapScreen(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "Nenhuma foto com GPS no índice. Com Wi‑Fi, use Sync → Sincronizar agora " +
-                            "(lê EXIF local e trechos na nuvem).",
+                        if (!hasMediaLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            "Para ver fotos no mapa, conceda “Localização das mídias” (GPS no EXIF). " +
+                                "Sem essa permissão o Android oculta as coordenadas."
+                        } else {
+                            "Nenhuma foto com GPS no índice. Toque abaixo para ler EXIF no aparelho " +
+                                "e na nuvem (Wi‑Fi)."
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "Ative localização na câmera e sincronize de novo.",
+                        "Ative localização na câmera ao tirar fotos.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
                     )
+                    if (!hasMediaLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        Button(
+                            onClick = {
+                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp),
+                            enabled = !coordinatorState.isRunning,
+                        ) { Text("Permitir localização das mídias") }
+                    }
+                    OutlinedButton(
+                        onClick = { syncTasks.refreshPhotoLocations() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        enabled = !coordinatorState.isRunning &&
+                            (hasMediaLocation || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q),
+                    ) {
+                        Text(
+                            if (coordinatorState.isRunning) "Indexando GPS…"
+                            else "Indexar GPS para o mapa",
+                        )
+                    }
                     TextButton(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) {
                         Text("Voltar")
                     }

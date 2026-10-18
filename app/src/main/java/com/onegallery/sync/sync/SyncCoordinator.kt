@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -575,6 +576,56 @@ class SyncCoordinator(
         }
     }
 
+    /** Reindexa EXIF/GPS local + trechos na nuvem (mapa de locais). */
+    suspend fun refreshPhotoLocations(userInitiated: Boolean = true): Result<Int> {
+        ensureAutoSyncAllowed(userInitiated)?.let { denied ->
+            return Result.failure(denied.exceptionOrNull() ?: IllegalStateException("Sync pausado"))
+        }
+        return longTaskMutex.withLock {
+            foregroundGuard.runWithForeground {
+                resetSyncCancel()
+                bindActiveLongTaskJob()
+                _state.value = _state.value.copy(
+                    isRunning = true,
+                    lastMessage = "Indexando localização das fotos…",
+                    runQueue = emptyList(),
+                    activeItem = null,
+                )
+                val result = runCatching {
+                    ensureNotCancelled()
+                    indexLocalLibrary(manageRunningState = false, userInitiated = userInitiated).getOrThrow()
+                    backfillMissingGpsLocations()
+                    syncMetadataDao.getAll().count { it.latitude != null && it.longitude != null }
+                }
+                result.onSuccess { withGps ->
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        activeItem = null,
+                        lastMessage = if (withGps > 0) {
+                            "Mapa: $withGps foto(s) com GPS no índice."
+                        } else {
+                            "Nenhuma foto com GPS encontrada. Conceda “Localização das mídias” " +
+                                "e confira se a câmera grava localização."
+                        },
+                    )
+                }.onFailure { error ->
+                    val cancelled = error is CancellationException
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        activeItem = null,
+                        lastMessage = if (cancelled) {
+                            cancellationResultMessage()
+                        } else {
+                            error.message ?: "Erro ao indexar GPS."
+                        },
+                    )
+                    if (cancelled) resetSyncCancel()
+                }
+                result
+            }
+        }
+    }
+
     suspend fun ensureThumbnailCached(canonicalPath: String): Result<File?> {
         mediaCacheRepository.thumbnailIfCached(canonicalPath)?.let { return Result.success(it) }
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
@@ -1107,11 +1158,14 @@ class SyncCoordinator(
         existing: SyncMetadataEntity?,
     ): Triple<String?, Double?, Double?> {
         if (existing?.localMediaId == item.id &&
-            existing.locationLabel != null &&
             existing.latitude != null &&
             existing.longitude != null
         ) {
-            return Triple(existing.locationLabel, existing.latitude, existing.longitude)
+            return Triple(
+                existing.locationLabel ?: formatCoordLabel(existing.latitude, existing.longitude),
+                existing.latitude,
+                existing.longitude,
+            )
         }
         val resolved = resolveLocationLocalOnly(
             uri = item.uri,
@@ -1146,6 +1200,20 @@ class SyncCoordinator(
         return null
     }
 
+    private suspend fun resolveLocationForBackfill(row: SyncMetadataEntity): MediaLocation? {
+        resolveLocationFromSources(
+            uri = localContentUri(row),
+            cachedFilePath = row.cachedFilePath,
+            oneDriveItemId = null,
+        )?.let { return it }
+        val localId = row.localMediaId ?: return null
+        val item = localMediaRepository.findById(localId) ?: return null
+        val temp = localMediaRepository.materializeToTempFile(item) ?: return null
+        return runCatching {
+            mediaLocationResolver.resolveFromFile(temp)
+        }.getOrNull().also { temp.delete() }
+    }
+
     private suspend fun probeCloudExifLocation(oneDriveItemId: String): MediaLocation? {
         if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return null
         if (!networkMonitor.isOnline()) return null
@@ -1173,11 +1241,7 @@ class SyncCoordinator(
                 }
                 val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
                 val resolved = when {
-                    hasLocal -> resolveLocationFromSources(
-                        uri = localContentUri(row),
-                        cachedFilePath = row.cachedFilePath,
-                        oneDriveItemId = null,
-                    )
+                    hasLocal -> resolveLocationForBackfill(row)
                     row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
                         cloudProbes++
                         resolveLocationFromSources(
@@ -1207,6 +1271,10 @@ class SyncCoordinator(
                 lastMessage = "Localização GPS: $indexed item(ns) indexado(s)$suffix",
             )
         }
+    }
+
+    private fun formatCoordLabel(lat: Double, lon: Double): String {
+        return String.format(Locale.US, "%.2f°", lat) + ", " + String.format(Locale.US, "%.2f°", lon)
     }
 
     private fun restoredCloudState(row: SyncMetadataEntity): CloudSyncState {

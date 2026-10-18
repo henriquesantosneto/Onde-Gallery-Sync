@@ -4,6 +4,7 @@ import android.content.Context
 import android.location.Geocoder
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
@@ -15,6 +16,10 @@ class MediaLocationResolver(context: Context) {
     private val geocodeCache = LruCache<String, String>(512)
 
     fun resolveFromUri(uri: Uri): MediaLocation? {
+        if (!MediaAccessPermissions.hasMediaLocationAccess(appContext)) return null
+        readGpsFromMediaStore(uri)?.let { (lat, lon) ->
+            return coordinatesToLocation(lat, lon)
+        }
         val coordinates = readGpsCoordinates(uri) ?: return null
         return coordinatesToLocation(coordinates.first, coordinates.second)
     }
@@ -41,7 +46,28 @@ class MediaLocationResolver(context: Context) {
     }
 
     /** Preferível: EXIF completo (GPS) sem exigir mark/reset no stream. */
+    /** Coordenadas indexadas pelo MediaStore (requer ACCESS_MEDIA_LOCATION). */
+    private fun readGpsFromMediaStore(uri: Uri): Pair<Double, Double>? {
+        if (uri.scheme != "content") return null
+        val projection = arrayOf(
+            MediaStore.Images.ImageColumns.LATITUDE,
+            MediaStore.Images.ImageColumns.LONGITUDE,
+        )
+        return runCatching {
+            appContext.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val latCol = cursor.getColumnIndex(MediaStore.Images.ImageColumns.LATITUDE)
+                val lonCol = cursor.getColumnIndex(MediaStore.Images.ImageColumns.LONGITUDE)
+                if (latCol < 0 || lonCol < 0) return@use null
+                val lat = cursor.getDouble(latCol)
+                val lon = cursor.getDouble(lonCol)
+                normalizeCoordinates(lat, lon)
+            }
+        }.getOrNull()
+    }
+
     private fun readGpsFromFileDescriptor(uri: Uri): Pair<Double, Double>? {
+        if (!MediaAccessPermissions.hasMediaLocationAccess(appContext)) return null
         return runCatching {
             appContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 val exif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -55,6 +81,7 @@ class MediaLocationResolver(context: Context) {
     }
 
     private fun readGpsFromInputStream(uri: Uri): Pair<Double, Double>? {
+        if (!MediaAccessPermissions.hasMediaLocationAccess(appContext)) return null
         return runCatching {
             appContext.contentResolver.openInputStream(uri)?.use { input ->
                 readGpsFromExif(ExifInterface(input))
@@ -65,9 +92,13 @@ class MediaLocationResolver(context: Context) {
     private fun readGpsFromExif(exif: ExifInterface): Pair<Double, Double>? {
         val latLong = FloatArray(2)
         if (!exif.getLatLong(latLong)) return null
-        val lat = latLong[0].toDouble()
-        val lon = latLong[1].toDouble()
-        if (!lat.isFinite() || !lon.isFinite() || (lat == 0.0 && lon == 0.0)) return null
+        return normalizeCoordinates(latLong[0].toDouble(), latLong[1].toDouble())
+    }
+
+    private fun normalizeCoordinates(lat: Double, lon: Double): Pair<Double, Double>? {
+        if (!lat.isFinite() || !lon.isFinite()) return null
+        if (lat == 0.0 && lon == 0.0) return null
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
         return lat to lon
     }
 
