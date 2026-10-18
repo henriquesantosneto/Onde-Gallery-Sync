@@ -94,7 +94,16 @@ class SyncCoordinator(
     fun requestCancelSync() {
         syncCancelRequested.set(true)
         _state.value = _state.value.copy(lastMessage = "Cancelando…")
-        activeLongTaskJob.get()?.cancel(CancellationException("Sincronismo cancelado."))
+        val job = activeLongTaskJob.get()
+        if (job != null) {
+            job.cancel(CancellationException("Sincronismo cancelado."))
+        } else if (_state.value.isRunning) {
+            _state.value = _state.value.copy(
+                isRunning = false,
+                lastMessage = "Operação interrompida.",
+            )
+            resetSyncCancel()
+        }
     }
 
     private suspend fun bindActiveLongTaskJob() {
@@ -107,28 +116,31 @@ class SyncCoordinator(
     suspend fun clearStoredItemErrors(): Int {
         var cleared = 0
         syncMetadataDao.getAll().forEach { row ->
-            val flagged = row.cloudState == CloudSyncState.ERROR ||
-                row.cloudState == CloudSyncState.CONFLICT ||
-                !row.lastError.isNullOrBlank()
-            if (!flagged) return@forEach
-            val state = when (row.cloudState) {
-                CloudSyncState.ERROR, CloudSyncState.CONFLICT ->
-                    if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) {
-                        row.cloudState
-                    } else {
-                        restoredCloudState(row)
-                    }
-                else -> row.cloudState
-            }
-            syncMetadataDao.upsert(row.copy(cloudState = state, lastError = null))
+            if (!shouldShowInAttentionList(row)) return@forEach
+            syncMetadataDao.upsert(
+                row.copy(
+                    cloudState = restoredCloudState(row),
+                    lastError = null,
+                ),
+            )
             cleared++
         }
-        if (cleared > 0) {
-            _state.value = _state.value.copy(
-                lastMessage = "Avisos limpos em $cleared item(ns). Sincronize de novo se ainda faltar envio.",
-            )
-        }
+        _state.value = _state.value.copy(
+            lastMessage = if (cleared > 0) {
+                "Avisos limpos em $cleared item(ns). Sincronize de novo se ainda faltar envio."
+            } else {
+                "Nenhum aviso para limpar."
+            },
+        )
         return cleared
+    }
+
+    fun shouldShowAttentionItem(row: SyncMetadataEntity): Boolean = shouldShowInAttentionList(row)
+
+    private fun shouldShowInAttentionList(row: SyncMetadataEntity): Boolean {
+        return !row.lastError.isNullOrBlank() ||
+            row.cloudState == CloudSyncState.ERROR ||
+            row.cloudState == CloudSyncState.CONFLICT
     }
 
     private fun resetSyncCancel() {

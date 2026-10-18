@@ -26,9 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -58,18 +56,10 @@ fun SyncStatusScreen(
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
     val problemCount = remember(metadata) {
-        metadata.count {
-            it.cloudState == CloudSyncState.ERROR ||
-                it.cloudState == CloudSyncState.CONFLICT ||
-                !it.lastError.isNullOrBlank()
-        }
+        metadata.count { syncCoordinator.shouldShowAttentionItem(it) }
     }
     val problemItems = remember(metadata) {
-        metadata.filter {
-            it.cloudState == CloudSyncState.ERROR ||
-                it.cloudState == CloudSyncState.CONFLICT ||
-                !it.lastError.isNullOrBlank()
-        }.take(25)
+        metadata.filter { syncCoordinator.shouldShowAttentionItem(it) }.take(25)
     }
     val scope = rememberCoroutineScope()
     var clearingErrors by remember { mutableStateOf(false) }
@@ -176,12 +166,11 @@ fun SyncStatusScreen(
                     OutlinedButton(
                         onClick = {
                             clearingErrors = true
-                            scope.launch {
-                                syncCoordinator.clearStoredItemErrors()
+                            syncTasks.clearStoredItemErrors {
                                 clearingErrors = false
                             }
                         },
-                        enabled = !clearingErrors && !coordinatorState.isRunning,
+                        enabled = !clearingErrors,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(

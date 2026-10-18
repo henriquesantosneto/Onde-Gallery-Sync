@@ -17,6 +17,13 @@ class SyncTaskLauncher(
         scope.launch { coordinator.indexLocalLibrary() }
     }
 
+    fun clearStoredItemErrors(onDone: (Int) -> Unit = {}) {
+        scope.launch {
+            val count = coordinator.clearStoredItemErrors()
+            onDone(count)
+        }
+    }
+
     companion object {
         fun from(app: OneGalleryApplication): SyncTaskLauncher =
             SyncTaskLauncher(app.applicationScope, app.syncCoordinator)
