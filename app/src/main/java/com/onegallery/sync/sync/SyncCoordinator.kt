@@ -340,7 +340,10 @@ class SyncCoordinator(
         if (manageRunningState) {
             resetSyncCancel()
             bindActiveLongTaskJob()
-            _state.value = _state.value.copy(isRunning = true, lastMessage = "Indexando mídia local…")
+            _state.value = _state.value.copy(
+                isRunning = true,
+                lastMessage = "Indexando biblioteca local e GPS das fotos…",
+            )
         }
         return runCatching {
             ensureNotCancelled()
@@ -366,7 +369,7 @@ class SyncCoordinator(
                     lastIndexedLocalCount = items.size,
                     isRunning = false,
                 activeItem = null,
-                    lastMessage = "Indexação local: ${items.size} itens (todas as pastas visíveis, ex. WhatsApp).",
+                    lastMessage = "Indexação local: ${items.size} itens (incl. localização GPS quando disponível).",
                 )
             } else {
                 _state.value = _state.value.copy(lastIndexedLocalCount = items.size)
@@ -450,7 +453,9 @@ class SyncCoordinator(
                 runCatching {
                     ensureNotCancelled()
                     flushLegacyPendingDeletes()
-                    _state.value = _state.value.copy(lastMessage = "Indexando mídia local…")
+                    _state.value = _state.value.copy(
+                        lastMessage = "Indexando biblioteca local e GPS das fotos…",
+                    )
                     indexLocalLibrary(manageRunningState = false).getOrThrow()
                     _state.value = _state.value.copy(lastMessage = "Sincronizando com OneDrive…")
                     ensureSyncMayContinue()
@@ -534,6 +539,9 @@ class SyncCoordinator(
                         )
                     }
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
+                    _state.value = _state.value.copy(
+                        lastMessage = "Indexando localização GPS (incl. nuvem)…",
+                    )
                     backfillMissingGpsLocations()
                     val gpsNote = _state.value.lastMessage.takeIf {
                         it.startsWith("Localização GPS:")

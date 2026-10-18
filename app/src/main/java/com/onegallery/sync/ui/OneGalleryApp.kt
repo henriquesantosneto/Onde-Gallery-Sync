@@ -166,7 +166,7 @@ fun OneGalleryApp(
         val locationOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             results[Manifest.permission.ACCESS_MEDIA_LOCATION] == true
         if (mediaOk && locationOk) {
-            syncTasks.refreshPhotoLocations(userInitiated = false)
+            syncTasks.runBidirectionalSync(userInitiated = false)
         }
     }
 
