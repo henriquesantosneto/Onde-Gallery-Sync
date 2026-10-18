@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -50,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -293,6 +295,7 @@ private fun TimelinePhotoCell(
         syncCoordinator = syncCoordinator,
         selectionMode = state.selectionMode,
         selected = selected,
+        gridZoomScale = gridPinch.scale,
         gesturesEnabled = !gridPinch.blockItemGestures,
         onClick = {
             if (state.selectionMode) {
@@ -347,10 +350,13 @@ private fun MediaThumbnail(
     syncCoordinator: SyncCoordinator,
     selectionMode: Boolean,
     selected: Boolean,
+    gridZoomScale: Float,
     gesturesEnabled: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val overlayPad = gridOverlayPadding(gridZoomScale)
+    val overlayIconSize = gridOverlayIconSize(gridZoomScale)
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -374,34 +380,54 @@ private fun MediaThumbnail(
                 imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
                 contentDescription = null,
                 tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(overlayPad)
+                    .size(overlayIconSize),
             )
         }
-        CloudBadge(item.cloudState, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp))
+        CloudBadge(
+            state = item.cloudState,
+            iconSize = overlayIconSize,
+            modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
+        )
         if (item.kind == MediaKind.VIDEO) {
             Text(
                 "Vídeo",
-                modifier = Modifier.align(Alignment.BottomStart).padding(4.dp),
-                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.align(Alignment.BottomStart).padding(overlayPad),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = MaterialTheme.typography.labelSmall.fontSize * gridZoomScale.coerceIn(0.45f, 1f),
+                ),
             )
         }
         if (!item.isOfflineAvailable && item.cloudState == CloudSyncState.CLOUD_ONLY) {
             Icon(
                 Icons.Outlined.CloudOff,
                 contentDescription = "Somente nuvem",
-                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(overlayPad)
+                    .size(overlayIconSize),
             )
         }
     }
 }
 
 @Composable
-private fun CloudBadge(state: CloudSyncState, modifier: Modifier = Modifier) {
+private fun CloudBadge(
+    state: CloudSyncState,
+    iconSize: Dp,
+    modifier: Modifier = Modifier,
+) {
     val icon = when (state) {
         CloudSyncState.SYNCED -> Icons.Outlined.CloudDone
         CloudSyncState.CLOUD_ONLY, CloudSyncState.PENDING_DOWNLOAD -> Icons.Outlined.CloudDownload
         CloudSyncState.PENDING_UPLOAD -> Icons.Outlined.Cloud
         else -> Icons.Outlined.Cloud
     }
-    Icon(icon, contentDescription = state.name, modifier = modifier)
+    Icon(
+        icon,
+        contentDescription = state.name,
+        modifier = modifier.size(iconSize),
+    )
 }

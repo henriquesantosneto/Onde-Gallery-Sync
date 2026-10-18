@@ -75,3 +75,14 @@ fun gridAdaptiveMinSize(baseMinDp: Float, zoomScale: Float): Dp {
     val min = (baseMinDp * zoomScale).coerceIn(32f, 260f)
     return min.dp
 }
+
+/** Ícones de nuvem/seleção acompanham o tamanho da célula ao pinçar para fora. */
+fun gridOverlayIconSize(zoomScale: Float): Dp {
+    val size = (20f * zoomScale).coerceIn(9f, 22f)
+    return size.dp
+}
+
+fun gridOverlayPadding(zoomScale: Float): Dp {
+    val pad = (4f * zoomScale).coerceIn(1.5f, 6f)
+    return pad.dp
+}
