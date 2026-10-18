@@ -25,7 +25,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -51,9 +50,6 @@ import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
 import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
-import com.onegallery.sync.ui.onedrive.OneDriveSafBrowserScreen
-import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
-import com.onegallery.sync.ui.onedrive.rememberConnectFolderLauncher
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
 import com.onegallery.sync.ui.welcome.WelcomeScreen
@@ -72,7 +68,6 @@ private enum class CloudSetupStep {
     Hidden,
     SignIn,
     Browse,
-    LocalSafBrowse,
 }
 
 @Composable
@@ -143,35 +138,6 @@ fun OneGalleryApp(
         setCloudSetupStep(CloudSetupStep.SignIn)
     }
 
-    fun openLocalSafBrowser() {
-        setCloudSetupStep(CloudSetupStep.LocalSafBrowse)
-    }
-
-    val launchSystemFolderPicker = rememberConnectFolderLauncher(syncCoordinator) {
-        setCloudSetupStep(CloudSetupStep.Hidden)
-        setupDone = true
-        scope.launch { syncCoordinator.runBidirectionalSync() }
-    }
-
-    if (cloudSetupStep == CloudSetupStep.LocalSafBrowse) {
-        val appContext = LocalContext.current
-        OneDriveSafBrowserScreen(
-            onFolderConfirmed = { uri ->
-                syncCoordinator.connectOneDriveFolder(uri)
-                    .onSuccess {
-                        setCloudSetupStep(CloudSetupStep.Hidden)
-                        setupDone = true
-                        scope.launch { syncCoordinator.runBidirectionalSync() }
-                    }
-            },
-            onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
-            onOpenSystemPicker = {
-                launchSystemFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(appContext))
-            },
-        )
-        return
-    }
-
     if (cloudSetupStep == CloudSetupStep.Browse) {
         OneDriveCloudBrowserScreen(
             oneDriveRepository = oneDriveRepository,
@@ -210,7 +176,6 @@ fun OneGalleryApp(
             syncCoordinator = syncCoordinator,
             onFinished = { setupDone = true },
             onConnectOneDriveCloud = { openCloudFolderPicker() },
-            onBrowseLocalOneDrive = { openLocalSafBrowser() },
         )
         return
     }
@@ -308,9 +273,7 @@ fun OneGalleryApp(
                     authManager = authManager,
                     syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
-                    oneDriveFolderPreferences = oneDriveFolderPreferences,
                     onOpenCloudFolderPicker = { openCloudFolderPicker() },
-                    onOpenLocalSafBrowser = { openLocalSafBrowser() },
                 )
             }
             composable(

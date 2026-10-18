@@ -15,11 +15,13 @@ import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class SyncUiState(
     val lastIndexedLocalCount: Int = 0,
@@ -76,6 +78,22 @@ class SyncCoordinator(
     private val _state = MutableStateFlow(SyncUiState())
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
 
+    private val syncCancelRequested = AtomicBoolean(false)
+
+    fun requestCancelSync() {
+        syncCancelRequested.set(true)
+    }
+
+    private fun resetSyncCancel() {
+        syncCancelRequested.set(false)
+    }
+
+    private fun ensureNotCancelled() {
+        if (syncCancelRequested.get()) {
+            throw CancellationException("Sincronismo cancelado.")
+        }
+    }
+
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAll()
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
@@ -85,29 +103,46 @@ class SyncCoordinator(
         return syncMetadataDao.getByCanonicalPath(canonicalPath)
     }
 
-    suspend fun indexLocalLibrary(): Result<Int> {
-        _state.value = _state.value.copy(isRunning = true, lastMessage = "Indexando mídia local…")
+    suspend fun indexLocalLibrary(manageRunningState: Boolean = true): Result<Int> {
+        if (manageRunningState) {
+            resetSyncCancel()
+            _state.value = _state.value.copy(isRunning = true, lastMessage = "Indexando mídia local…")
+        }
         return runCatching {
             val items = localMediaRepository.loadAllMedia()
             val seenPaths = mutableSetOf<String>()
             items.forEach { item ->
+                ensureNotCancelled()
                 val canonical = SyncPaths.canonicalFromLocal(item)
                 seenPaths.add(canonical)
                 val existing = syncMetadataDao.getByCanonicalPath(canonical)
                 syncMetadataDao.upsert(mergeLocalIntoEntity(item, canonical, existing))
             }
             reconcileMissingLocalItems(seenPaths)
-            _state.value = _state.value.copy(
-                lastIndexedLocalCount = items.size,
-                isRunning = false,
-                lastMessage = "Indexação local: ${items.size} itens (todas as pastas visíveis, ex. WhatsApp).",
-            )
+            if (manageRunningState) {
+                _state.value = _state.value.copy(
+                    lastIndexedLocalCount = items.size,
+                    isRunning = false,
+                    lastMessage = "Indexação local: ${items.size} itens (todas as pastas visíveis, ex. WhatsApp).",
+                )
+            } else {
+                _state.value = _state.value.copy(lastIndexedLocalCount = items.size)
+            }
             items.size
-        }.onFailure {
-            _state.value = _state.value.copy(
-                isRunning = false,
-                lastMessage = it.message ?: "Falha ao indexar mídia local.",
-            )
+        }.onFailure { error ->
+            val cancelled = error is CancellationException
+            if (manageRunningState) {
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    lastMessage = if (cancelled) {
+                        "Indexação cancelada."
+                    } else {
+                        error.message ?: "Falha ao indexar mídia local."
+                    },
+                )
+            } else if (cancelled) {
+                throw error
+            }
         }
     }
 
@@ -159,10 +194,12 @@ class SyncCoordinator(
             return Result.failure(IllegalStateException("Wi‑Fi necessário"))
         }
 
+        resetSyncCancel()
         _state.value = _state.value.copy(isRunning = true, lastMessage = "Sincronizando com OneDrive…")
         return runCatching {
             flushLegacyPendingDeletes()
-            indexLocalLibrary().getOrThrow()
+            indexLocalLibrary(manageRunningState = false).getOrThrow()
+            ensureNotCancelled()
             val remoteFiles = listRemoteFiles().getOrThrow()
             val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
 
@@ -174,6 +211,7 @@ class SyncCoordinator(
             val knownPaths = mutableSetOf<String>()
 
             for (row in rows) {
+                ensureNotCancelled()
                 knownPaths.add(row.canonicalPath)
                 if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
                 val remote = remoteByPath[row.canonicalPath]
@@ -202,6 +240,7 @@ class SyncCoordinator(
             }
 
             remoteByPath.forEach { (path, remote) ->
+                ensureNotCancelled()
                 if (path in knownPaths) return@forEach
                 val existing = syncMetadataDao.getByCanonicalPath(path)
                 if (existing == null) {
@@ -245,10 +284,14 @@ class SyncCoordinator(
                     "$cloudOnly só na nuvem$freeMsg.",
             )
             SyncSummary(uploaded, markedPendingDownload, cloudOnly)
-        }.onFailure {
+        }.onFailure { error ->
+            val cancelled = error is CancellationException
             _state.value = _state.value.copy(
                 isRunning = false,
-                lastMessage = it.message ?: "Erro na sincronização.",
+                lastMessage = when {
+                    cancelled -> "Sincronismo cancelado."
+                    else -> error.message ?: "Erro na sincronização."
+                },
             )
         }
     }

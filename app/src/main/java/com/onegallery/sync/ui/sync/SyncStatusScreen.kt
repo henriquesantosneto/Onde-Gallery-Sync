@@ -17,18 +17,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -52,10 +49,6 @@ fun SyncStatusScreen(
     val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
     val scope = rememberCoroutineScope()
-    var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
-    SideEffect {
-        autoFreeLocal = syncPreferences.autoFreeLocalSpaceWhenSynced
-    }
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
     val problemItems = remember(metadata) {
@@ -71,7 +64,7 @@ fun SyncStatusScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Status de sync") }) },
+        topBar = { TopAppBar(title = { Text("Sync") }) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -105,17 +98,11 @@ fun SyncStatusScreen(
                     ),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Conexão", style = MaterialTheme.typography.titleMedium)
+                        Text("Status", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            syncModeHeadline(syncPreferences.syncMode, syncCoordinator),
+                            connectionHeadline(syncPreferences.syncMode, syncCoordinator),
                             modifier = Modifier.padding(top = 6.dp),
                             fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            syncModeDescription(syncPreferences.syncMode),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
                         )
                         Text(
                             coordinatorState.lastMessage,
@@ -136,6 +123,14 @@ fun SyncStatusScreen(
                                 .fillMaxWidth()
                                 .padding(top = 12.dp),
                         ) { Text("Sincronizar agora") }
+                        if (coordinatorState.isRunning) {
+                            OutlinedButton(
+                                onClick = { syncCoordinator.requestCancelSync() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                            ) { Text("Cancelar sincronismo") }
+                        }
                     }
                 }
             }
@@ -145,37 +140,6 @@ fun SyncStatusScreen(
             }
             item {
                 StatsCard(stats, pendingOps)
-            }
-
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text(
-                                "Liberação automática de espaço",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            Text(
-                                "Ligue ou desligue. Placeholder na nuvem após sync.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = autoFreeLocal,
-                            onCheckedChange = {
-                                autoFreeLocal = it
-                                syncPreferences.autoFreeLocalSpaceWhenSynced = it
-                            },
-                        )
-                    }
-                }
             }
 
             if (problemItems.isNotEmpty()) {
@@ -193,8 +157,7 @@ fun SyncStatusScreen(
             item {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                 Text(
-                    "Com “Liberar espaço após backup” ligado, fotos sincronizadas viram placeholder " +
-                        "automaticamente. Ícone nuvem riscada libera manualmente.",
+                    "Opções de sincronização (Wi‑Fi, liberar espaço, apagar na nuvem) ficam em Ajustes.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 24.dp),
@@ -303,23 +266,12 @@ private fun computeSyncStats(metadata: List<SyncMetadataEntity>): SyncStats {
     )
 }
 
-private fun syncModeHeadline(mode: SyncMode, coordinator: SyncCoordinator): String = when (mode) {
+private fun connectionHeadline(mode: SyncMode, coordinator: SyncCoordinator): String = when (mode) {
     SyncMode.ONEDRIVE_GRAPH -> coordinator.graphSyncRootLabel()?.let { "OneDrive: $it" }
-        ?: "OneDrive na nuvem (escolha a pasta em Ajustes)"
-    SyncMode.ONEDRIVE_FOLDER -> "Pasta local ligada ao OneDrive"
-    SyncMode.ONEDRIVE_LOCAL_MIRROR -> coordinator.localMirrorPathLabel()
-    SyncMode.LOCAL_ONLY -> "Somente galeria local"
-}
-
-private fun syncModeDescription(mode: SyncMode): String = when (mode) {
-    SyncMode.ONEDRIVE_GRAPH ->
-        "Login Microsoft + pasta escolhida no explorador na nuvem. Sync bidirecional via Graph."
-    SyncMode.ONEDRIVE_FOLDER ->
-        "Pasta do OneDrive no aparelho (SAF / Meus Arquivos). O app lê e grava nessa pasta."
-    SyncMode.ONEDRIVE_LOCAL_MIRROR ->
-        "Fotos copiadas para Pictures/OneGallerySync; o app OneDrive envia para a nuvem."
-    SyncMode.LOCAL_ONLY ->
-        "Indexação local sem envio automático. Conecte OneDrive em Ajustes."
+        ?: "OneDrive — escolha a pasta em Ajustes"
+    SyncMode.ONEDRIVE_FOLDER -> "Modo legado: pasta local (migre para Graph em Ajustes)"
+    SyncMode.ONEDRIVE_LOCAL_MIRROR -> "Modo legado: espelho em Pictures (migre para Graph em Ajustes)"
+    SyncMode.LOCAL_ONLY -> "Somente galeria local — conecte OneDrive em Ajustes"
 }
 
 private fun cloudStateLabel(state: CloudSyncState): String = when (state) {
