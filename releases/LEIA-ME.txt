@@ -1,17 +1,21 @@
-OneGallery Sync — APK 0.8.0 (versionCode 56)
+OneGallery Sync — APK 0.8.1 (versionCode 57)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.0-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.1-debug/OneGallerySync-debug.apk
 
-Novidades principais:
+Novidades nesta versão:
+- Pinça com dois dedos mais estável em fotos, vídeos e grades
+- Pager não rouba mais o gesto de zoom na visualização de mídia
+- Correção do zoom focal no player de vídeo
+
+Novidades recentes (0.8.x):
 - Aba Fotos com timeline (ano/mês) e pinça para tamanho da grade
 - Álbuns em grade grande + pinça; seção Locais (GPS)
 - Mapa de fotos por localização (MapLibre)
 - Upload/download resumável (Graph) para arquivos grandes
 - Token Microsoft renovado automaticamente (401)
 - Sync só Wi‑Fi: para em dados móveis; retoma ao desligar opção
-- Zoom pinça em fotos/vídeos; correções de álbuns e sync
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
