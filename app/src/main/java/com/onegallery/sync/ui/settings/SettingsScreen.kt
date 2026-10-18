@@ -85,14 +85,24 @@ fun SettingsScreen(
                         )
                     },
                     supportingContent = {
-                        Text(
-                            if (MsalBuiltInConfig.isEmbeddedClientConfigured()) {
-                                cloudFolderLabel
-                            } else {
-                                "Client ID não embutido no APK — veja docs/BUILTIN_MSAL.md"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Column {
+                            Text(
+                                if (MsalBuiltInConfig.isEmbeddedClientConfigured()) {
+                                    cloudFolderLabel
+                                } else {
+                                    "Client ID não embutido no APK — veja docs/BUILTIN_MSAL.md"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            authState.lastError?.let { err ->
+                                Text(
+                                    err,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
+                        }
                     },
                 )
             }

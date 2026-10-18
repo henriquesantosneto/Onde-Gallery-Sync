@@ -99,6 +99,20 @@ class MsalAuthManager(
         } else {
             ""
         }
+        val reauthHint = if (
+            lower.contains("401") ||
+            lower.contains("unauthorized") ||
+            lower.contains("invalid_grant") ||
+            lower.contains("interaction_required") ||
+            lower.contains("ui_required") ||
+            lower.contains("no account") ||
+            lower.contains("no refresh token")
+        ) {
+            "\n\n— Sessão expirada —\n" +
+                "Em Ajustes → saia da conta Microsoft e entre de novo (ou use Escolher pasta na nuvem)."
+        } else {
+            ""
+        }
         val redirectHint = if (
             lower.contains("90023") ||
             lower.contains("redirect") ||
@@ -111,7 +125,7 @@ class MsalAuthManager(
         } else {
             ""
         }
-        return base + scopeLine + accountMismatchHint + duplicateRedirectHint + scopeHint + redirectHint
+        return base + scopeLine + accountMismatchHint + duplicateRedirectHint + scopeHint + reauthHint + redirectHint
     }
 
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES
@@ -289,9 +303,16 @@ class MsalAuthManager(
         }
     }
 
-    /** Token para Graph — usa token do login interativo antes de chamar MSAL silencioso. */
+    /** Remove token em memória (ex.: Graph respondeu 401). */
+    fun clearCachedAccessToken() {
+        _state.value = _state.value.copy(accessToken = null)
+    }
+
+    /**
+     * Token para Microsoft Graph. Sempre tenta renovação silenciosa via MSAL
+     * (refresh token), em vez de reutilizar access token expirado em memória.
+     */
     suspend fun accessTokenForGraph(): Result<String> {
-        _state.value.accessToken?.takeIf { it.isNotBlank() }?.let { return Result.success(it) }
         return acquireTokenSilent()
     }
 
@@ -319,8 +340,15 @@ class MsalAuthManager(
                         }
 
                         override fun onError(exception: MsalException) {
-                            _state.value = _state.value.copy(lastError = exception.message)
-                            if (cont.isActive) cont.resume(Result.failure(exception))
+                            clearCachedAccessToken()
+                            val msg = enrichMsalError(
+                                exception.message,
+                                scopes.joinToString(", "),
+                            )
+                            _state.value = _state.value.copy(lastError = msg)
+                            if (cont.isActive) {
+                                cont.resume(Result.failure(IllegalStateException(msg, exception)))
+                            }
                         }
 
                         override fun onCancel() {

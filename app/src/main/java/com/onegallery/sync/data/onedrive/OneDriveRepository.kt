@@ -246,8 +246,29 @@ class OneDriveRepository(
     }
 
     private suspend fun <T> runWithToken(block: suspend (String) -> T): Result<T> {
+        return runWithTokenInternal(block, allowRetryAfter401 = true)
+    }
+
+    private suspend fun <T> runWithTokenInternal(
+        block: suspend (String) -> T,
+        allowRetryAfter401: Boolean,
+    ): Result<T> {
         val token = accessToken().getOrElse { return Result.failure(it) }
-        return runCatching { block(token) }
+        val first = runCatching { block(token) }
+        if (first.isSuccess || !allowRetryAfter401) return first
+        val http = first.exceptionOrNull() as? HttpException ?: return first
+        if (http.code() != 401) return first
+        authManager.clearCachedAccessToken()
+        val refreshed = accessToken().getOrElse { return Result.failure(it) }
+        return runCatching { block(refreshed) }.recoverCatching { retryError ->
+            if (retryError is HttpException && retryError.code() == 401) {
+                throw IllegalStateException(
+                    "Sessão Microsoft expirou (401). Em Ajustes, saia da conta e entre de novo.",
+                    retryError,
+                )
+            }
+            throw retryError
+        }
     }
 
     private fun parseGraphTime(value: String?): Long? {
