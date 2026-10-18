@@ -30,19 +30,18 @@
             </intent-filter>
         </activity>
 
-        <!-- MSAL: ajuste android:path para o hash da assinatura do APK (ver documentação). -->
+        <!-- MSAL: path = hash Base64 do APK (decodificado). Azure = msauth://…/XNT%2F…%3D -->
         <activity
             android:name="com.microsoft.identity.client.BrowserTabActivity"
             android:exported="true">
-            <intent-filter>
+            <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <!-- Hash = SHA-1 do certificado do APK instalado (ver Ajustes/login ou docs/AZURE_REDIRECT.md) -->
                 <data
+                    android:scheme="msauth"
                     android:host="com.onegallery.sync"
-                    android:path="/XNT%2FU2cXeU6BS9HUWsT4MsU1wY4%3D"
-                    android:scheme="msauth" />
+                    android:path="/XNT/U2cXeU6BS9HUWsT4MsU1wY4=" />
             </intent-filter>
         </activity>
 

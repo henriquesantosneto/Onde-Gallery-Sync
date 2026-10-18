@@ -37,6 +37,8 @@ msauth://com.onegallery.sync/XNT%2FU2cXeU6BS9HUWsT4MsU1wY4%3D
 
 Não use tipo **Web** nem **SPA** para esse `msauth://`.
 
+O **AndroidManifest.xml** do app usa o path **decodificado** (`/XNT/U2c…=`) para receber o retorno do login; o Azure fica com a URI **codificada** acima.
+
 ### Se ainda disser “URI inválida”
 
 - Apague URIs `http://localhost` ou `https://...` que você não usa.
