@@ -96,6 +96,7 @@ class LocalMediaRepository(private val context: Context) {
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
             MediaStore.MediaColumns.RELATIVE_PATH,
             MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.MIME_TYPE,
         )
@@ -106,7 +107,8 @@ class LocalMediaRepository(private val context: Context) {
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
             val pathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             while (cursor.moveToNext()) {
@@ -119,7 +121,8 @@ class LocalMediaRepository(private val context: Context) {
                         displayName = cursor.getString(nameCol).orEmpty(),
                         bucketDisplayName = cursor.getString(bucketCol).orEmpty(),
                         relativePath = cursor.getString(pathCol),
-                        dateAddedSeconds = cursor.getLong(dateCol),
+                        dateAddedSeconds = cursor.getLong(dateAddedCol),
+                        dateModifiedSeconds = cursor.getLong(dateModifiedCol),
                         sizeBytes = cursor.getLong(sizeCol),
                         kind = kind,
                         mimeType = cursor.getString(mimeCol),

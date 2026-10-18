@@ -33,7 +33,7 @@ auth → MsalAuthManager
 1. Indexar mídia local → linhas Room (`LOCAL_ONLY` ou estado anterior).
 2. Garantir pasta `OneGallerySync` no drive.
 3. Listar arquivos remotos recursivamente.
-4. Para cada item local: upload se ausente/desatualizado; marcar `PENDING_DOWNLOAD` se remoto mais novo.
+4. Para cada item local: upload se ausente/desatualizado; marcar `PENDING_DOWNLOAD` só se o OneDrive mudou desde a última sync (não basta a data de upload na nuvem ser mais nova que `DATE_ADDED` no celular).
 5. Itens remotos sem par local → `CLOUD_ONLY`.
 6. Detecção de remoção → fila `pendingDeleteTarget` (confirmação obrigatória).
 

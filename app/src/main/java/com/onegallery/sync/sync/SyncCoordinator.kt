@@ -31,6 +31,9 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
+/** Margem para diferença de relógio entre aparelho, MediaStore e Graph. */
+private const val SYNC_TIMESTAMP_TOLERANCE_SEC = 2L
+
 data class SyncUiState(
     val lastIndexedLocalCount: Int = 0,
     val pendingOperations: Int = 0,
@@ -781,9 +784,26 @@ class SyncCoordinator(
             remoteModifiedAt = remote.modifiedAtEpoch,
             lastError = null,
         )
+        if (row.localMediaId != null) {
+            val lastKnownRemote = row.remoteModifiedAt
+            val remoteChangedSinceSync = lastKnownRemote != null &&
+                remoteTs > lastKnownRemote + SYNC_TIMESTAMP_TOLERANCE_SEC
+            val localNewerThanCloud = localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC
+            return when {
+                remoteChangedSinceSync && localNewerThanCloud ->
+                    base.copy(cloudState = CloudSyncState.CONFLICT)
+                remoteChangedSinceSync ->
+                    base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+                localNewerThanCloud ->
+                    base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
+                else -> base.copy(cloudState = CloudSyncState.SYNCED)
+            }
+        }
         return when {
-            localTs > remoteTs -> base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
-            remoteTs > localTs -> base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+            localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC ->
+                base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
+            remoteTs > localTs + SYNC_TIMESTAMP_TOLERANCE_SEC ->
+                base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
             else -> base.copy(cloudState = CloudSyncState.SYNCED)
         }
     }
@@ -860,7 +880,7 @@ class SyncCoordinator(
             localMediaId = item.id,
             localContentUri = item.uri.toString(),
             oneDriveItemId = existing?.oneDriveItemId,
-            localModifiedAt = item.dateAddedSeconds,
+            localModifiedAt = item.dateModifiedSeconds,
             remoteModifiedAt = existing?.remoteModifiedAt,
             cloudState = when {
                 existing?.oneDriveItemId != null && existing.cloudState != CloudSyncState.LOCAL_ONLY ->
