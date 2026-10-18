@@ -63,6 +63,21 @@ class MsalAuthManager(
     private fun enrichMsalError(message: String?): String {
         val base = message?.trim().orEmpty()
         val lower = base.lowercase()
+        val scopeHint = if (
+            (lower.contains("scope") && lower.contains("declin")) ||
+            lower.contains("invalid_scope") ||
+            lower.contains("650053") ||
+            lower.contains("650057")
+        ) {
+            "\n\n— Permissões Graph no Azure —\n" +
+                "Registro do app → Permissões de APIs → Microsoft Graph → Delegadas:\n" +
+                "• User.Read\n" +
+                "• Files.ReadWrite\n" +
+                "• offline_access (marque “Conceder consentimento de admin” só se for conta corporativa)\n" +
+                "Salve e tente Entrar de novo. Conta pessoal @outlook/@hotmail precisa aceitar na tela da Microsoft."
+        } else {
+            ""
+        }
         val redirectHint = if (
             lower.contains("90023") ||
             lower.contains("redirect") ||
@@ -75,7 +90,7 @@ class MsalAuthManager(
         } else {
             ""
         }
-        return base + redirectHint
+        return base + scopeHint + redirectHint
     }
 
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES

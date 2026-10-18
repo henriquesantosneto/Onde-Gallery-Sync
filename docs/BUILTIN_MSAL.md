@@ -17,13 +17,17 @@ Se aparecer erro de configuração, o APK foi gerado sem Client ID — peça uma
 3. Plataforma **Android** (valores do APK GitHub): [docs/AZURE_REDIRECT.md](AZURE_REDIRECT.md)
    - Pacote: `com.onegallery.sync`
    - Hash: veja o card no app (build CI: `pH93hJ0fsCAwFF5NxVPK0Snx6Ws=`)
-4. Permissões Graph delegadas: `User.Read`, `Files.ReadWrite.All`, `offline_access`.
-5. Copie o **Application (client) ID** para `msal.properties`:
+4. **Permissões de APIs** → **Microsoft Graph** → **Delegadas** (obrigatório, senão “scopes declined”):
+   - `User.Read`
+   - `Files.ReadWrite` (OneDrive pessoal; **não** use só `Files.ReadWrite.All` em conta @outlook sem admin)
+   - `offline_access`
+5. **Autenticação** → Mobile/desktop → URI `msauth://…` (ver app ou [AZURE_REDIRECT.md](AZURE_REDIRECT.md)).
+6. Copie o **Application (client) ID** para `msal.properties` (ou cole no app 0.5.5+):
 
 ```properties
 MSAL_CLIENT_ID=seu-guid-aqui
 ```
 
-6. Recompile: `./gradlew :app:assembleDebug`
+7. Recompile: `./gradlew :app:assembleDebug`
 
 Também funciona variável de ambiente `MSAL_CLIENT_ID` na hora do build.

@@ -140,7 +140,8 @@ fun SignInGate(
                     )
                 }
                 Text(
-                    "Erro AADSTS90023 = URI ou hash errado no portal. Pode registrar duas URIs se tiver dois APKs.",
+                    "Azure → Permissões de APIs: User.Read + Files.ReadWrite (delegadas). " +
+                        "AADSTS90023 = URI/hash; “scopes declined” = faltam permissões Graph.",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(top = 6.dp),
                 )
