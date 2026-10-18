@@ -253,20 +253,14 @@ object OneDrivePickerHelper {
         }
     }
 
+    /** Abre direto o Meus Arquivos Samsung (onde OneDrive costuma aparecer). */
+    fun openSamsungMyFilesTreeIntent(context: Context): Intent? {
+        if (!isSamsungMyFilesInstalled(context)) return null
+        return openFullTreeIntent(context, preferredLocalSyncPickerInitialUri(context))
+    }
+
+    /** Seletor completo (sem chooser extra — evita abrir modo errado na 2ª vez). */
     fun openFolderPickerChooser(context: Context): Intent {
-        val tree = openFullTreeIntent(context, preferredLocalSyncPickerInitialUri(context))
-        val dirDoc = openDirectoryDocumentIntent()
-        val extras = mutableListOf(dirDoc)
-        if (isSamsungDevice() && isSamsungMyFilesInstalled(context)) {
-            extras.add(
-                Intent("com.sec.android.app.myfiles.PICK_DATA").apply {
-                    putExtra("CONTENT_TYPE", "*/*")
-                    addCategory(Intent.CATEGORY_DEFAULT)
-                },
-            )
-        }
-        return Intent.createChooser(tree, "Escolher pasta").apply {
-            putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
-        }
+        return openFullTreeIntent(context, preferredLocalSyncPickerInitialUri(context))
     }
 }

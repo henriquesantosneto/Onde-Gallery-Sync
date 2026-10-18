@@ -56,7 +56,8 @@ fun SignInGate(
     var clientId by remember { mutableStateOf(authManager.savedClientId()) }
     var busy by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
-    var showDevClientId by remember { mutableStateOf(false) }
+    val needsClientId = authManager.needsUserClientId()
+    var showDevClientId by remember(needsClientId) { mutableStateOf(needsClientId) }
     val redirect = remember { authManager.redirectUriForAzure }
     val signatureHash = remember { MsalConfigFactory.signatureHashBase64(context) }
     val buildHash = remember { MsalRedirectUri.bakedSignatureHash() }
@@ -64,7 +65,6 @@ fun SignInGate(
         !MsalRedirectUri.runtimeMatchesBuild(signatureHash)
     }
     val packageName = remember { context.packageName }
-    val needsClientId = authManager.needsUserClientId()
     val embedded = MsalBuiltInConfig.isEmbeddedClientConfigured()
 
     LaunchedEffect(embedded) {
@@ -95,13 +95,13 @@ fun SignInGate(
         )
         if (needsClientId && !showDevClientId) {
             Text(
-                "Este APK não foi compilado com Client ID. Use o modo Pictures na tela anterior, " +
-                    "ou peça ao desenvolvedor uma build com msal.properties.",
+                "Cole abaixo o Application (client) ID do registro no Azure (Visão geral). " +
+                    "Isso substitui msal.properties — fica salvo neste aparelho.",
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(bottom = 12.dp),
             )
             TextButton(onClick = { showDevClientId = true }) {
-                Text("Sou desenvolvedor — colar Client ID")
+                Text("Informar Client ID")
             }
         }
         Card(
@@ -151,7 +151,8 @@ fun SignInGate(
                 value = clientId,
                 onValueChange = { clientId = it.trim() },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Application (client) ID") },
+                label = { Text("Application (client) ID (Azure)") },
+                placeholder = { Text("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx") },
                 singleLine = true,
             )
             Text(

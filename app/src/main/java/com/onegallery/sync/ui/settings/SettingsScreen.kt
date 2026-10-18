@@ -1,7 +1,5 @@
 package com.onegallery.sync.ui.settings
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -29,6 +27,8 @@ import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.ui.onedrive.rememberConnectFolderLauncher
+import android.widget.Toast
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import kotlinx.coroutines.launch
@@ -46,16 +46,8 @@ fun SettingsScreen(
     val authState by authManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri = result.data?.data
-            if (uri != null) {
-                syncCoordinator.connectOneDriveFolder(uri)
-                    .onSuccess { scope.launch { syncCoordinator.runBidirectionalSync() } }
-            }
-        }
+    val launchFolderPicker = rememberConnectFolderLauncher(syncCoordinator) {
+        scope.launch { syncCoordinator.runBidirectionalSync() }
     }
 
     Scaffold(
@@ -123,11 +115,26 @@ fun SettingsScreen(
             ) {
                 Text("Usar Pictures/OneGallerySync")
             }
+            if (OneDrivePickerHelper.isSamsungDevice() && OneDrivePickerHelper.isSamsungMyFilesInstalled(context)) {
+                Button(
+                    onClick = {
+                        val intent = OneDrivePickerHelper.openSamsungMyFilesTreeIntent(context)
+                        if (intent == null) {
+                            Toast.makeText(context, "Meus Arquivos indisponível", Toast.LENGTH_SHORT).show()
+                        } else {
+                            launchFolderPicker(intent)
+                        }
+                    },
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text("Meus Arquivos (OneDrive)")
+                }
+            }
             Button(
-                onClick = { folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context)) },
+                onClick = { launchFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(context)) },
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                Text("Tentar pasta local (experimental)")
+                Text("Outro seletor de pasta")
             }
             Text("Sync apenas em Wi‑Fi", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
             Switch(

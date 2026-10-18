@@ -1,9 +1,6 @@
 package com.onegallery.sync.ui.welcome
 
-import android.net.Uri
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +25,7 @@ import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
 import com.onegallery.sync.data.onedrive.SyncSetupDiagnosticsFactory
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPolicy
+import com.onegallery.sync.ui.onedrive.rememberConnectFolderLauncher
 
 @Composable
 fun WelcomeScreen(
@@ -39,20 +37,7 @@ fun WelcomeScreen(
     val diagnostics = remember { SyncSetupDiagnosticsFactory.create(context) }
     val msalReady = MsalBuiltInConfig.isEmbeddedClientConfigured()
 
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri: Uri? = result.data?.data
-            if (uri != null) {
-                syncCoordinator.connectOneDriveFolder(uri)
-                    .onSuccess { onFinished() }
-                    .onFailure {
-                        Toast.makeText(context, it.message ?: "Pasta inválida", Toast.LENGTH_LONG).show()
-                    }
-            }
-        }
-    }
+    val launchFolderPicker = rememberConnectFolderLauncher(syncCoordinator, onFinished)
 
     Column(
         modifier = Modifier
@@ -86,8 +71,8 @@ fun WelcomeScreen(
                 )
                 if (!msalReady) {
                     Text(
-                        "Este APK ainda não tem Client ID embutido (quem compila configura msal.properties). " +
-                            "Até lá, use o modo Pictures abaixo.",
+                        "Login na nuvem: na próxima tela cole o Application (client) ID do seu app no Azure " +
+                            "(Registros de aplicativo → Visão geral). Não precisa recompilar o APK.",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.error,
@@ -123,17 +108,32 @@ fun WelcomeScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
         )
+        if (OneDrivePickerHelper.isSamsungDevice() && diagnostics.myFilesInstalled) {
+            OutlinedButton(
+                onClick = {
+                    val intent = OneDrivePickerHelper.openSamsungMyFilesTreeIntent(context)
+                    if (intent == null) {
+                        Toast.makeText(context, "Meus Arquivos indisponível", Toast.LENGTH_SHORT).show()
+                    } else {
+                        launchFolderPicker(intent)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Meus Arquivos (OneDrive)")
+            }
+        }
         OutlinedButton(
             onClick = {
                 if (!diagnostics.documentTreeAvailable) {
                     Toast.makeText(context, "Seletor indisponível", Toast.LENGTH_SHORT).show()
                     return@OutlinedButton
                 }
-                folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context))
+                launchFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(context))
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) {
-            Text("Tentar pasta local (experimental)")
+            Text("Outro seletor de pasta")
         }
         OutlinedButton(
             onClick = {
