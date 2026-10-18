@@ -288,39 +288,42 @@ class MsalAuthManager(
         return silent
     }
 
-    suspend fun acquireTokenSilent(): Result<String> = withContext(Dispatchers.IO) {
-        val msal = client ?: return@withContext Result.failure(IllegalStateException("MSAL não inicializado"))
-        val account = msal.currentAccount?.currentAccount
-            ?: return@withContext Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
-        suspendCancellableCoroutine { cont ->
-            val params = AcquireTokenSilentParameters.Builder()
-                .withScopes(scopes.toList())
-                .forAccount(account)
-                .fromAuthority(account.authority)
-                .withCallback(object : AuthenticationCallback {
-                    override fun onSuccess(authenticationResult: IAuthenticationResult) {
-                        _state.value = _state.value.copy(
-                            accessToken = authenticationResult.accessToken,
-                            isSignedIn = true,
-                            displayName = authenticationResult.account.username,
-                            accountId = authenticationResult.account.id,
-                        )
-                        if (cont.isActive) cont.resume(Result.success(authenticationResult.accessToken))
-                    }
-
-                    override fun onError(exception: MsalException) {
-                        _state.value = _state.value.copy(lastError = exception.message)
-                        if (cont.isActive) cont.resume(Result.failure(exception))
-                    }
-
-                    override fun onCancel() {
-                        if (cont.isActive) {
-                            cont.resume(Result.failure(IllegalStateException("Token silencioso cancelado")))
+    suspend fun acquireTokenSilent(): Result<String> {
+        val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
+        val account = withContext(Dispatchers.IO) {
+            msal.currentAccount?.currentAccount
+        } ?: return Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
+        return withContext(Dispatchers.Main.immediate) {
+            suspendCancellableCoroutine { cont ->
+                val params = AcquireTokenSilentParameters.Builder()
+                    .withScopes(scopes.toList())
+                    .forAccount(account)
+                    .fromAuthority(account.authority)
+                    .withCallback(object : AuthenticationCallback {
+                        override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                            _state.value = _state.value.copy(
+                                accessToken = authenticationResult.accessToken,
+                                isSignedIn = true,
+                                displayName = authenticationResult.account.username,
+                                accountId = authenticationResult.account.id,
+                            )
+                            if (cont.isActive) cont.resume(Result.success(authenticationResult.accessToken))
                         }
-                    }
-                })
-                .build()
-            msal.acquireTokenSilent(params)
+
+                        override fun onError(exception: MsalException) {
+                            _state.value = _state.value.copy(lastError = exception.message)
+                            if (cont.isActive) cont.resume(Result.failure(exception))
+                        }
+
+                        override fun onCancel() {
+                            if (cont.isActive) {
+                                cont.resume(Result.failure(IllegalStateException("Token silencioso cancelado")))
+                            }
+                        }
+                    })
+                    .build()
+                msal.acquireTokenSilent(params)
+            }
         }
     }
 
