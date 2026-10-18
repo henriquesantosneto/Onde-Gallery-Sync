@@ -1,14 +1,12 @@
-OneGallery Sync — APK 0.8.28 (versionCode 84)
+OneGallery Sync — APK 0.8.29 (versionCode 85)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.28-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.29-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Vídeos: pinça com dois dedos para zoom (corrigido)
-- Detalhes da mídia: botão Info na galeria (seleção) e no visualizador (v0.8.27)
-- Vídeos mudos por padrão; ícone ou Volume +/- para ativar som (v0.8.26)
-- Deslize horizontal para próxima/anterior foto ou vídeo no detalhe
+- Mapa: um pin por foto/vídeo na coordenada GPS (EXIF) exata — sem agrupar por cidade
+- Pinça para zoom em vídeos, detalhes da mídia (Info), swipe no detalhe (v0.8.28)
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
