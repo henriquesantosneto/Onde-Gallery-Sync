@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Collections
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material3.AlertDialog
@@ -61,6 +62,7 @@ fun AlbumsScreen(
     viewModel: GalleryViewModel,
     galleryPreferences: GalleryPreferences,
     onOpenAlbum: (String) -> Unit,
+    onOpenMap: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val (gridZoom, pinchModifier) = rememberGalleryGridZoom(galleryPreferences.albumGridZoom) { scale ->
@@ -77,6 +79,9 @@ fun AlbumsScreen(
             TopAppBar(
                 title = { Text("Álbuns") },
                 actions = {
+                    IconButton(onClick = onOpenMap) {
+                        Icon(Icons.Outlined.Map, contentDescription = "Mapa de fotos")
+                    }
                     IconButton(onClick = { showSortMenu = true }) {
                         Icon(Icons.Outlined.Sort, contentDescription = "Ordenar álbuns")
                     }

@@ -31,6 +31,8 @@ data class GalleryUiState(
     val selectedPaths: Set<String> = emptySet(),
     val error: String? = null,
     val actionMessage: String? = null,
+    /** Itens com coordenadas GPS (mapa de locais). */
+    val geoItems: List<GalleryDisplayItem> = emptyList(),
 )
 
 private data class SelectionSlice(
@@ -129,6 +131,7 @@ class GalleryViewModel(
             selectedPaths = controls.selected,
             error = controls.error,
             actionMessage = controls.message,
+            geoItems = allItems.filter { it.latitude != null && it.longitude != null },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
 

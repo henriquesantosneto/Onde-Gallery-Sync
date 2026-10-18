@@ -46,6 +46,7 @@ import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.ui.albums.AlbumsScreen
+import com.onegallery.sync.ui.places.PlacesMapScreen
 import com.onegallery.sync.ui.auth.SignInGate
 import com.onegallery.sync.ui.gallery.GalleryScreen
 import com.onegallery.sync.ui.gallery.GalleryPreferences
@@ -59,6 +60,8 @@ import com.onegallery.sync.ui.welcome.WelcomeScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.launch
+
+private const val PLACES_MAP_ROUTE = "places_map"
 
 private enum class MainTab(val route: String) {
     Gallery("gallery"),
@@ -271,6 +274,26 @@ fun OneGalleryApp(
                     viewModel = galleryViewModel,
                     galleryPreferences = galleryPreferences,
                     onOpenAlbum = {
+                        navController.navigate(MainTab.Gallery.route) {
+                            popUpTo(MainTab.Gallery.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onOpenMap = {
+                        navController.navigate(PLACES_MAP_ROUTE)
+                    },
+                )
+            }
+            composable(PLACES_MAP_ROUTE) {
+                PlacesMapScreen(
+                    viewModel = galleryViewModel,
+                    syncCoordinator = syncCoordinator,
+                    onBack = { navController.popBackStack() },
+                    onOpenItem = { encoded ->
+                        navController.navigate("media/$encoded")
+                    },
+                    onShowAllAtPlace = { placeLabel ->
+                        galleryViewModel.setPlaceFilter(placeLabel)
                         navController.navigate(MainTab.Gallery.route) {
                             popUpTo(MainTab.Gallery.route) { inclusive = true }
                             launchSingleTop = true

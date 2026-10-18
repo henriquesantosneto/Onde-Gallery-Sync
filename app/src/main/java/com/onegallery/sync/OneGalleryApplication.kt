@@ -19,6 +19,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaLocationResolver
+import org.maplibre.android.MapLibre
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.onedrive.GraphFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
@@ -79,6 +80,7 @@ class OneGalleryApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        MapLibre.getInstance(this)
         Coil.setImageLoader(
             ImageLoader.Builder(this)
                 .components {
