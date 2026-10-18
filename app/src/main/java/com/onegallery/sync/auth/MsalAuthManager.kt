@@ -279,13 +279,10 @@ class MsalAuthManager(
         }
     }
 
-    /** Token para Graph — usa cache MSAL ou último token interativo (evita race após login). */
+    /** Token para Graph — usa token do login interativo antes de chamar MSAL silencioso. */
     suspend fun accessTokenForGraph(): Result<String> {
-        val cached = _state.value.accessToken
-        val silent = acquireTokenSilent()
-        if (silent.isSuccess) return silent
-        if (!cached.isNullOrBlank()) return Result.success(cached)
-        return silent
+        _state.value.accessToken?.takeIf { it.isNotBlank() }?.let { return Result.success(it) }
+        return acquireTokenSilent()
     }
 
     suspend fun acquireTokenSilent(): Result<String> {
@@ -322,7 +319,7 @@ class MsalAuthManager(
                         }
                     })
                     .build()
-                msal.acquireTokenSilent(params)
+                msal.acquireTokenSilentAsync(params)
             }
         }
     }
