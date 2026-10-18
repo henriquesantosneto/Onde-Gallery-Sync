@@ -62,7 +62,8 @@ fun rememberGalleryGridZoom(initial: Float, onPersist: (Float) -> Unit): Gallery
     )
 }
 
+/** Escala maior → células maiores (menos colunas), como na galeria Samsung. */
 fun gridAdaptiveMinSize(baseMinDp: Float, zoomScale: Float): Dp {
-    val min = (baseMinDp / zoomScale).coerceIn(72f, 260f)
+    val min = (baseMinDp * zoomScale).coerceIn(72f, 260f)
     return min.dp
 }
