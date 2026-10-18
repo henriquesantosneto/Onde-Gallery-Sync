@@ -24,7 +24,7 @@ Pasta no OneDrive: **`OneGallerySync/`** (espelha caminhos relativos, ex. `Pictu
 ui (Compose) → gallery, álbuns, detalhe, sync, settings, MSAL gate
 sync → SyncCoordinator, SyncPolicy, SyncPaths, WorkManager
 data.local → MediaStore, cache de originais, Room
-data.onedrive → MS Graph (listagem recursiva, upload, download, delete)
+data.onedrive → MS Graph (listagem recursiva, upload simples ≤4 MiB, sessão resumável + Range no download)
 auth → MsalAuthManager
 ```
 

@@ -90,7 +90,7 @@ class OneGalleryApplication : Application() {
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
         graphFolderPreferences = GraphFolderPreferences(this)
-        oneDriveRepository = OneDriveRepository(authManager, graphFolderPreferences)
+        oneDriveRepository = OneDriveRepository(this, authManager, graphFolderPreferences)
         syncPreferences = SyncPreferences(this).also {
             it.migrateForAppVersion(BuildConfig.VERSION_CODE)
         }

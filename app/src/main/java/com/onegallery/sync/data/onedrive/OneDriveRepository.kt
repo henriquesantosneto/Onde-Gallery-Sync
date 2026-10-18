@@ -1,5 +1,6 @@
 package com.onegallery.sync.data.onedrive
 
+import android.content.Context
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
@@ -35,19 +36,28 @@ data class OneDriveBrowseEntry(
 )
 
 class OneDriveRepository(
+    context: Context,
     private val authManager: MsalAuthManager,
     private val graphFolderPreferences: GraphFolderPreferences,
 ) {
-    private val graphApi: GraphApiService by lazy {
+    private val uploadSessionStore = UploadSessionStore(context)
+    private val resumableTransfer by lazy {
+        GraphResumableTransfer(graphApi, uploadSessionStore, graphHttpClient)
+    }
+
+    private val graphHttpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         }
-        val client = OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .addInterceptor(logging)
             .build()
+    }
+
+    private val graphApi: GraphApiService by lazy {
         Retrofit.Builder()
             .baseUrl("https://graph.microsoft.com/")
-            .client(client)
+            .client(graphHttpClient)
             .addConverterFactory(
                 MoshiConverterFactory.create(
                     Moshi.Builder()
@@ -148,10 +158,15 @@ class OneDriveRepository(
         mimeType: String?,
     ): Result<DriveItem> {
         return runWithToken { token ->
+            val auth = "Bearer $token"
             val drivePath = encodeDrivePath(syncDrivePathFromCanonical(canonicalPath))
-            val mediaType = mimeType?.toMediaTypeOrNull()
-            val body = sourceFile.asRequestBody(mediaType)
-            graphApi.uploadSmallFile("Bearer $token", drivePath, body)
+            if (sourceFile.length() <= GraphResumableTransfer.SIMPLE_UPLOAD_MAX_BYTES) {
+                val mediaType = mimeType?.toMediaTypeOrNull()
+                val body = sourceFile.asRequestBody(mediaType)
+                graphApi.uploadSmallFile(auth, drivePath, body)
+            } else {
+                resumableTransfer.uploadFile(auth, drivePath, canonicalPath, sourceFile)
+            }
         }
     }
 
@@ -174,12 +189,9 @@ class OneDriveRepository(
 
     suspend fun downloadToFile(itemId: String, destination: File): Result<Unit> {
         return runWithToken { token ->
-            destination.parentFile?.mkdirs()
-            graphApi.downloadItemContent("Bearer $token", itemId).use { body ->
-                destination.outputStream().use { out ->
-                    body.byteStream().copyTo(out)
-                }
-            }
+            val part = File(destination.absolutePath + ".part")
+            val meta = File(destination.absolutePath + ".part.meta")
+            resumableTransfer.downloadToFile("Bearer $token", itemId, destination, part, meta)
         }
     }
 

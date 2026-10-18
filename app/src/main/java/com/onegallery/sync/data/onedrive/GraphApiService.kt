@@ -64,6 +64,19 @@ interface GraphApiService {
         @Body body: RequestBody,
     ): DriveItem
 
+    @POST("v1.0/me/drive/root:/{itemPath}:/createUploadSession")
+    suspend fun createUploadSession(
+        @Header("Authorization") authorization: String,
+        @Path(value = "itemPath", encoded = true) itemPath: String,
+        @Body body: CreateUploadSessionRequest = CreateUploadSessionRequest(),
+    ): UploadSessionResponse
+
+    @GET("v1.0/me/drive/items/{itemId}")
+    suspend fun getDriveItem(
+        @Header("Authorization") authorization: String,
+        @Path("itemId") itemId: String,
+    ): DriveItem
+
     @GET("v1.0/me/drive/items/{itemId}/content")
     @Streaming
     suspend fun downloadItemContent(
