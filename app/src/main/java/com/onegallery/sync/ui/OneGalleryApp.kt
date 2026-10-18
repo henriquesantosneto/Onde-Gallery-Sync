@@ -135,9 +135,11 @@ fun OneGalleryApp(
         OneDriveSafBrowserScreen(
             onFolderConfirmed = { uri ->
                 syncCoordinator.connectOneDriveFolder(uri)
-                showSafOneDriveBrowser = false
-                setupDone = true
-                scope.launch { syncCoordinator.runBidirectionalSync() }
+                    .onSuccess {
+                        showSafOneDriveBrowser = false
+                        setupDone = true
+                        scope.launch { syncCoordinator.runBidirectionalSync() }
+                    }
             },
             onBack = { showSafOneDriveBrowser = false },
         )

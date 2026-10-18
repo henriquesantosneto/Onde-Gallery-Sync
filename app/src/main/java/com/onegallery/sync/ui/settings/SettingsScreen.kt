@@ -56,7 +56,7 @@ fun SettingsScreen(
             val uri = result.data?.data
             if (uri != null) {
                 syncCoordinator.connectOneDriveFolder(uri)
-                scope.launch { syncCoordinator.runBidirectionalSync() }
+                    .onSuccess { scope.launch { syncCoordinator.runBidirectionalSync() } }
             }
         }
     }
@@ -95,16 +95,9 @@ fun SettingsScreen(
                 )
             }
             Button(onClick = {
-                val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
-                folderPicker.launch(OneDrivePickerHelper.openFullTreeIntent(context, initial))
+                folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context))
             }) {
-                Text(
-                    if (OneDrivePickerHelper.isSamsungDevice()) {
-                        "Escolher pasta (Meus Arquivos / OneDrive)"
-                    } else {
-                        "Escolher pasta (seletor completo)"
-                    },
-                )
+                Text("Tentar escolher pasta (experimental)")
             }
             Button(onClick = onBrowseOneDriveSaf, modifier = Modifier.padding(top = 8.dp)) {
                 Text("Navegar OneDrive dentro do app")

@@ -13,11 +13,15 @@ class SaOneDriveRepository(
 ) {
     fun isConnected(): Boolean = folderPreferences.treeUri != null
 
-    fun connectFolder(treeUri: Uri) {
+    fun connectFolder(uri: Uri): Result<Unit> {
+        val treeUri = FolderAccessUri.normalizeToTreeUri(uri)
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        context.contentResolver.takePersistableUriPermission(treeUri, flags)
-        folderPreferences.treeUri = treeUri
-        folderPreferences.displayName = DocumentFile.fromTreeUri(context, treeUri)?.name
+        return runCatching {
+            context.contentResolver.takePersistableUriPermission(treeUri, flags)
+            folderPreferences.treeUri = treeUri
+            folderPreferences.displayName = DocumentFile.fromTreeUri(context, treeUri)?.name
+                ?: DocumentFile.fromSingleUri(context, uri)?.name
+        }
     }
 
     fun disconnect() {

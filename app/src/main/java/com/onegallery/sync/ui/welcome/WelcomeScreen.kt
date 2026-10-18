@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.BuildConfig
 import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
+import com.onegallery.sync.data.onedrive.SyncSetupDiagnosticsFactory
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPolicy
 
@@ -34,10 +36,7 @@ fun WelcomeScreen(
     onBrowseOneDriveLikeFileManager: () -> Unit,
 ) {
     val context = LocalContext.current
-    val oneDriveInstalled = OneDrivePickerHelper.isOneDriveAppInstalled(context)
-    val pickerAvailable = OneDrivePickerHelper.isDocumentTreePickerAvailable(context)
-    val samsung = OneDrivePickerHelper.isSamsungDevice()
-    val cloudRoots = OneDrivePickerHelper.listCloudRelatedRoots(context)
+    val diagnostics = remember { SyncSetupDiagnosticsFactory.create(context) }
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -46,32 +45,16 @@ fun WelcomeScreen(
             val uri: Uri? = result.data?.data
             if (uri != null) {
                 syncCoordinator.connectOneDriveFolder(uri)
-                onFinished()
+                    .onSuccess { onFinished() }
+                    .onFailure {
+                        Toast.makeText(
+                            context,
+                            it.message ?: "Não foi possível usar essa pasta. Use Pictures/OneGallerySync.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
             }
         }
-    }
-
-    fun openSamsungStylePicker() {
-        if (!pickerAvailable) {
-            Toast.makeText(
-                context,
-                "Ative o app Arquivos / Meus Arquivos para escolher pastas.",
-                Toast.LENGTH_LONG,
-            ).show()
-            return
-        }
-        val initial = OneDrivePickerHelper.preferredLocalSyncPickerInitialUri(context)
-        folderPicker.launch(OneDrivePickerHelper.openFullTreeIntent(context, initial))
-    }
-
-    fun openInternalPicker() {
-        if (!pickerAvailable) return
-        folderPicker.launch(
-            OneDrivePickerHelper.openInternalStorageTreeIntent(
-                context,
-                OneDrivePickerHelper.picturesFolderUri(),
-            ),
-        )
     }
 
     Column(
@@ -86,82 +69,58 @@ fun WelcomeScreen(
             "Versão ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             modifier = Modifier.padding(bottom = 12.dp),
         )
-        if (samsung) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "OneDrive no seletor de pastas",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "No seu Samsung, o OneDrive aparece no Meus Arquivos, mas a Microsoft não libera " +
+                        "escolher essa pasta para outros apps (como a Galeria Samsung antiga fazia). " +
+                        "Por isso não aparece pasta do OneDrive aqui — não é bug do OneGallery.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    "Caminho que funciona sem Azure: gravar em Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} " +
+                        "e deixar o app OneDrive fazer o backup para a nuvem.",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                diagnostics.summaryLines().forEach { line ->
                     Text(
-                        "OneDrive no Meus Arquivos",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        OneDrivePickerHelper.SAMSUNG_ONEDRIVE_HINT,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
+                        line,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
                 }
             }
         }
-        if (!oneDriveInstalled) {
-            Text(
-                "Instale o app Microsoft OneDrive e faça login.",
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-        }
         Button(
-            onClick = { openSamsungStylePicker() },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = pickerAvailable,
-        ) {
-            Text(
-                if (samsung) {
-                    "Escolher pasta (Meus Arquivos / OneDrive)"
-                } else {
-                    "Escolher pasta (seletor completo / nuvem)"
-                },
-            )
-        }
-        Text(
-            if (cloudRoots.isNotEmpty()) {
-                "Raízes detectadas: ${cloudRoots.joinToString { it.title }}. " +
-                    "Se o seletor abrir no lugar certo, entre no OneDrive e toque em “Usar esta pasta”."
-            } else if (samsung) {
-                "Se ainda não aparecer OneDrive, use o menu lateral do Meus Arquivos dentro do seletor."
-            } else {
-                OneDrivePickerHelper.ONEDRIVE_NOT_IN_FOLDER_PICKER_REASON
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
-        )
-        OutlinedButton(
-            onClick = onBrowseOneDriveLikeFileManager,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Navegar pastas OneDrive dentro do app")
-        }
-        OutlinedButton(
             onClick = {
                 syncCoordinator.useOneDriveLocalMirrorMode()
                 onFinished()
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Sem seletor: Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT}")
+            Text("Ativar sync (Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT})")
         }
-        OutlinedButton(
-            onClick = { openInternalPicker() },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = pickerAvailable,
-        ) {
-            Text("Só armazenamento interno (Pictures)")
-        }
+        Text(
+            "1. Toque acima.\n" +
+                "2. Abra o app OneDrive → Configurações → backup/sincronização de fotos.\n" +
+                "3. Ative backup (Pictures/Câmera). Suas fotos sobem para a conta OneDrive.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+        )
         OutlinedButton(
             onClick = {
                 if (!OneDrivePickerHelper.openOneDriveApp(context)) {
@@ -169,9 +128,33 @@ fun WelcomeScreen(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = oneDriveInstalled,
+            enabled = diagnostics.oneDriveInstalled,
         ) {
-            Text("Abrir app OneDrive")
+            Text("Abrir app OneDrive (ativar backup)")
+        }
+        OutlinedButton(
+            onClick = {
+                if (!diagnostics.documentTreeAvailable) {
+                    Toast.makeText(context, "Seletor de pastas indisponível", Toast.LENGTH_SHORT).show()
+                    return@OutlinedButton
+                }
+                folderPicker.launch(OneDrivePickerHelper.openFolderPickerChooser(context))
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) {
+            Text("Tentar escolher pasta (experimental)")
+        }
+        Text(
+            "Pode mostrar só armazenamento interno. Se não houver OneDrive, ignore e use o botão principal.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+        )
+        OutlinedButton(
+            onClick = onBrowseOneDriveLikeFileManager,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Navegar provedor OneDrive no app (experimental)")
         }
         OutlinedButton(
             onClick = {

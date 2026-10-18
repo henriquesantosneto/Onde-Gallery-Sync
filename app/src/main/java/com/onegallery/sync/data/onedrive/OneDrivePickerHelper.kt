@@ -236,4 +236,37 @@ object OneDrivePickerHelper {
     fun displayName(context: Context, treeUri: Uri): String? {
         return DocumentFile.fromTreeUri(context, treeUri)?.name
     }
+
+    /**
+     * Alguns aparelhos listam OneDrive aqui (não no OPEN_DOCUMENT_TREE).
+     * Experimental — muitos Samsung ainda não devolvem pasta utilizável.
+     */
+    fun openDirectoryDocumentIntent(): Intent {
+        return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = DocumentsContract.Document.MIME_TYPE_DIR
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+        }
+    }
+
+    fun openFolderPickerChooser(context: Context): Intent {
+        val tree = openFullTreeIntent(context, preferredLocalSyncPickerInitialUri(context))
+        val dirDoc = openDirectoryDocumentIntent()
+        val extras = mutableListOf(dirDoc)
+        if (isSamsungDevice() && isSamsungMyFilesInstalled(context)) {
+            extras.add(
+                Intent("com.sec.android.app.myfiles.PICK_DATA").apply {
+                    putExtra("CONTENT_TYPE", "*/*")
+                    addCategory(Intent.CATEGORY_DEFAULT)
+                },
+            )
+        }
+        return Intent.createChooser(tree, "Escolher pasta").apply {
+            putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
+        }
+    }
 }

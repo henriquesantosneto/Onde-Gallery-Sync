@@ -34,10 +34,11 @@ class SyncCoordinator(
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
 ) {
-    fun connectOneDriveFolder(treeUri: Uri) {
-        saOneDriveRepository.connectFolder(treeUri)
-        syncPreferences.syncMode = SyncMode.ONEDRIVE_FOLDER
-        syncPreferences.hasCompletedSetup = true
+    fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
+        return saOneDriveRepository.connectFolder(treeUri).onSuccess {
+            syncPreferences.syncMode = SyncMode.ONEDRIVE_FOLDER
+            syncPreferences.hasCompletedSetup = true
+        }
     }
 
     fun useLocalOnlyMode() {
