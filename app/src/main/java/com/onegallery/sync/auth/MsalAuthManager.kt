@@ -279,6 +279,15 @@ class MsalAuthManager(
         }
     }
 
+    /** Token para Graph — usa cache MSAL ou último token interativo (evita race após login). */
+    suspend fun accessTokenForGraph(): Result<String> {
+        val cached = _state.value.accessToken
+        val silent = acquireTokenSilent()
+        if (silent.isSuccess) return silent
+        if (!cached.isNullOrBlank()) return Result.success(cached)
+        return silent
+    }
+
     suspend fun acquireTokenSilent(): Result<String> {
         val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
         val account = msal.currentAccount?.currentAccount

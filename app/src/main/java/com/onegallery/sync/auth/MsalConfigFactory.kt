@@ -32,7 +32,7 @@ object MsalConfigFactory {
         val json = """
             {
               "client_id": "$clientId",
-              "authorization_user_agent": "BROWSER",
+              "authorization_user_agent": "DEFAULT",
               "redirect_uri": "$redirectUri",
               "broker_redirect_uri_registered": false,
               "account_mode": "SINGLE",

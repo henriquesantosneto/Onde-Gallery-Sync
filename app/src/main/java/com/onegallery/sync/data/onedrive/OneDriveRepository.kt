@@ -60,7 +60,7 @@ class OneDriveRepository(
     }
 
     suspend fun accessToken(): Result<String> {
-        return authManager.acquireTokenSilent()
+        return authManager.accessTokenForGraph()
     }
 
     fun syncRootLabel(): String? = graphFolderPreferences.displayLabel

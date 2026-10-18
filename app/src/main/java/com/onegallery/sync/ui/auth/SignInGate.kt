@@ -229,8 +229,8 @@ fun SignInGate(
                             return@launch
                         }
                     authManager.signInInteractive(hostActivity)
-                        .onSuccess { onSignedIn() }
                         .onFailure { localError = it.message }
+                        .onSuccess { /* navegação via authState + LaunchedEffect no app */ }
                     busy = false
                 }
             },

@@ -62,15 +62,20 @@ fun OneDriveCloudBrowserScreen(
 
     LaunchedEffect(Unit) {
         loading = true
-        oneDriveRepository.getDriveRootId()
-            .onSuccess { rootId ->
-                crumbs.clear()
-                crumbs.add(FolderCrumb(rootId, "OneDrive", ""))
-            }
-            .onFailure {
-                error = it.message ?: "Faça login Microsoft primeiro"
-                loading = false
-            }
+        error = null
+        runCatching {
+            oneDriveRepository.getDriveRootId()
+                .onSuccess { rootId ->
+                    crumbs.clear()
+                    crumbs.add(FolderCrumb(rootId, "OneDrive", ""))
+                }
+                .onFailure {
+                    error = it.message ?: "Faça login Microsoft primeiro"
+                }
+        }.onFailure {
+            error = it.message ?: "Erro ao abrir OneDrive"
+        }
+        loading = false
     }
 
     LaunchedEffect(currentCrumb?.id) {

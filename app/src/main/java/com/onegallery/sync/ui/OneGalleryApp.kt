@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -82,8 +83,14 @@ fun OneGalleryApp(
     oneDriveFolderPreferences: OneDriveFolderPreferences,
     oneDriveRepository: OneDriveRepository,
 ) {
-    var setupDone by remember { mutableStateOf(syncPreferences.hasCompletedSetup) }
-    var cloudSetupStep by remember { mutableStateOf(CloudSetupStep.Hidden) }
+    var setupDone by rememberSaveable { mutableStateOf(syncPreferences.hasCompletedSetup) }
+    var cloudSetupStepOrdinal by rememberSaveable { mutableStateOf(CloudSetupStep.Hidden.ordinal) }
+    val cloudSetupStep = CloudSetupStep.entries[
+        cloudSetupStepOrdinal.coerceIn(CloudSetupStep.entries.indices)
+    ]
+    fun setCloudSetupStep(step: CloudSetupStep) {
+        cloudSetupStepOrdinal = step.ordinal
+    }
     val scope = rememberCoroutineScope()
 
     val authState by authManager.state.collectAsStateWithLifecycle()
@@ -120,20 +127,20 @@ fun OneGalleryApp(
 
     LaunchedEffect(authState.isSignedIn, cloudSetupStep) {
         if (cloudSetupStep == CloudSetupStep.SignIn && authState.isSignedIn) {
-            cloudSetupStep = CloudSetupStep.Browse
+            setCloudSetupStep(CloudSetupStep.Browse)
         }
     }
 
     fun openCloudFolderPicker() {
-        cloudSetupStep = CloudSetupStep.SignIn
+        setCloudSetupStep(CloudSetupStep.SignIn)
     }
 
     fun openLocalSafBrowser() {
-        cloudSetupStep = CloudSetupStep.LocalSafBrowse
+        setCloudSetupStep(CloudSetupStep.LocalSafBrowse)
     }
 
     val launchSystemFolderPicker = rememberConnectFolderLauncher(syncCoordinator) {
-        cloudSetupStep = CloudSetupStep.Hidden
+        setCloudSetupStep(CloudSetupStep.Hidden)
         setupDone = true
         scope.launch { syncCoordinator.runBidirectionalSync() }
     }
@@ -144,12 +151,12 @@ fun OneGalleryApp(
             onFolderConfirmed = { uri ->
                 syncCoordinator.connectOneDriveFolder(uri)
                     .onSuccess {
-                        cloudSetupStep = CloudSetupStep.Hidden
+                        setCloudSetupStep(CloudSetupStep.Hidden)
                         setupDone = true
                         scope.launch { syncCoordinator.runBidirectionalSync() }
                     }
             },
-            onBack = { cloudSetupStep = CloudSetupStep.Hidden },
+            onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
             onOpenSystemPicker = {
                 launchSystemFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(appContext))
             },
@@ -162,11 +169,11 @@ fun OneGalleryApp(
             oneDriveRepository = oneDriveRepository,
             onFolderSelected = { itemId, path, label ->
                 syncCoordinator.connectGraphSyncFolder(itemId, path, label)
-                cloudSetupStep = CloudSetupStep.Hidden
+                setCloudSetupStep(CloudSetupStep.Hidden)
                 setupDone = true
                 scope.launch { syncCoordinator.runBidirectionalSync() }
             },
-            onBack = { cloudSetupStep = CloudSetupStep.Hidden },
+            onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
         )
         return
     }
@@ -178,16 +185,14 @@ fun OneGalleryApp(
             onClientConfigured = {
                 scope.launch {
                     authManager.initialize().onSuccess {
-                        if (!authState.isSignedIn) {
-                            /* usuário toca em Entrar */
-                        } else {
-                            cloudSetupStep = CloudSetupStep.Browse
+                        if (authState.isSignedIn) {
+                            setCloudSetupStep(CloudSetupStep.Browse)
                         }
                     }
                 }
             },
-            onBack = { cloudSetupStep = CloudSetupStep.Hidden },
-            onSignedIn = { cloudSetupStep = CloudSetupStep.Browse },
+            onBack = { setCloudSetupStep(CloudSetupStep.Hidden) },
+            onSignedIn = { setCloudSetupStep(CloudSetupStep.Browse) },
         )
         return
     }
