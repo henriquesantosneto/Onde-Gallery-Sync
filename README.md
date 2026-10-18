@@ -1,60 +1,41 @@
 # OneGallery Sync
 
-App Android nativo (Kotlin + Jetpack Compose) para usar o OneDrive como espelho da galeria, independente da integração descontinuada da Galeria Samsung.
+Galeria Android nativa (Kotlin + Jetpack Compose) que substitui a integração descontinuada **Galeria Samsung ↔ OneDrive**.
 
-## O que esta alpha faz
+## Funcionalidades (alinhadas ao escopo definido)
 
-- Login com conta Microsoft (MSAL).
-- Leitura de fotos e vídeos via **MediaStore** (inclui pastas expostas ao sistema, ex.: WhatsApp, DCIM, Downloads).
-- Álbuns agrupados por bucket do sistema.
-- Indexação local em SQLite (Room) com estado `LOCAL_ONLY`.
-- UI de status de sync com aviso explícito: **sync bidirecional ainda não está habilitado**.
+- **Sincronização bidirecional** com Microsoft OneDrive (pasta `OneGallerySync/`).
+- **Todas as pastas de mídia** indexadas via MediaStore (incl. **WhatsApp**, DCIM, etc., conforme visibilidade no sistema).
+- **Galeria espelhada**: mesma grade para itens locais e só na nuvem.
+- **Originais sob demanda**: download ao abrir o item ou pelo botão “Baixar original”.
+- **Álbuns**, indicadores **nuvem / sync / offline**, aba de **status**.
+- **Lixeira** ignorada na indexação.
+- **Exclusões** só propagam após **confirmação** (diálogo ou aba Sync).
+- **APK privado** para instalação no seu Samsung.
 
-## O que ainda não faz
+## Antes de compilar
 
-- Upload/download de arquivos com o OneDrive.
-- Sincronização bidirecional, fila offline completa, resolução de conflitos.
-- Propagação de exclusões (há política documentada, UI de confirmação pendente).
+1. Registre o app no Microsoft Entra — [docs/MICROSOFT_APP_REGISTRATION.md](docs/MICROSOFT_APP_REGISTRATION.md).
+2. Atualize `auth_config.json`, `build.gradle.kts` (`MSAL_*`) e `AndroidManifest.xml` (redirect MSAL).
+3. Abra no **Android Studio**, sync Gradle, execute no aparelho.
 
-Veja [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/MICROSOFT_APP_REGISTRATION.md](docs/MICROSOFT_APP_REGISTRATION.md).
-
-## Requisitos
-
-- Android Studio Ladybug ou mais recente.
-- JDK 17.
-- Dispositivo Samsung (ou emulador) com **API 26+**.
-- Registro de app no Microsoft Entra / Azure com redirect Android configurado.
-
-## Configuração rápida
-
-1. Clone o repositório e abra a pasta raiz no Android Studio.
-2. Siga [docs/MICROSOFT_APP_REGISTRATION.md](docs/MICROSOFT_APP_REGISTRATION.md) e atualize:
-   - `app/src/main/res/raw/auth_config.json`
-   - `MSAL_*` em `app/build.gradle.kts`
-   - `BrowserTabActivity` no `AndroidManifest.xml`
-3. **Sync Project with Gradle Files**.
-4. Execute no dispositivo (`Run ▶`).
-
-## Build APK privado
+## Comandos
 
 ```bash
-./gradlew :app:assembleRelease
+./gradlew :app:assembleDebug    # debug
+./gradlew :app:assembleRelease  # APK release (assine o keystore)
 ```
 
-Assine com seu keystore de release antes de distribuir no seu Samsung.
+## Configurações no app
 
-## Estrutura de pacotes
+- **Sync só em Wi‑Fi** (padrão ligado) — Ajustes.
+- **Sincronizar agora** — aba Sync ou Ajustes.
+- Exclusões detectadas na sync aparecem em **Sync → aguardando confirmação**.
 
-```text
-com.onegallery.sync
-├── auth          MSAL
-├── data.local    MediaStore + Room
-├── data.onedrive Graph API (Retrofit)
-├── sync          políticas e coordenador
-├── ui            Compose
-└── worker        WorkManager (placeholder)
-```
+## Arquitetura
 
-## Licença
+Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Uso pessoal / projeto privado — ajuste conforme sua necessidade.
+## Nota importante
+
+A sincronização está **implementada no código**, mas depende do registro Microsoft, permissões de mídia no Android e testes reais no dispositivo. Não há garantia de paridade 100% com a antiga integração Samsung até você validar suas pastas e volume de arquivos.

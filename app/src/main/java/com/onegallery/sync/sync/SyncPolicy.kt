@@ -32,9 +32,9 @@ object SyncPolicy {
      * para o dispositivo ou para a nuvem.
      */
     fun requiresDeleteConfirmation(
-        origin: DeleteOrigin,
-        target: DeleteTarget,
-    ): Boolean = origin == DeleteOrigin.USER && target == DeleteTarget.REMOTE_AND_LOCAL
+        @Suppress("UNUSED_PARAMETER") origin: DeleteOrigin,
+        @Suppress("UNUSED_PARAMETER") target: DeleteTarget,
+    ): Boolean = true
 
     /** Raiz lógica no OneDrive para espelhar todas as pastas de mídia. */
     const val ONEDRIVE_MIRROR_ROOT = "OneGallerySync"

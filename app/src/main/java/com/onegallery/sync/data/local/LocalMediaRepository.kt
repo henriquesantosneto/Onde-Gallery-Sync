@@ -44,6 +44,31 @@ class LocalMediaRepository(private val context: Context) {
         }
     }
 
+    fun findById(mediaId: Long): LocalMediaItem? {
+        return loadAllMedia().firstOrNull { it.id == mediaId }
+    }
+
+    fun materializeToTempFile(item: LocalMediaItem): java.io.File? {
+        return runCatching {
+            val suffix = item.displayName.substringAfterLast('.', "bin")
+            val temp = java.io.File.createTempFile("ogs-local-", ".$suffix", context.cacheDir)
+            context.contentResolver.openInputStream(item.uri)?.use { input ->
+                temp.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+            temp
+        }.getOrNull()
+    }
+
+    fun deleteMediaItem(mediaId: Long): Boolean {
+        val item = findById(mediaId) ?: return false
+        val collection = when (item.kind) {
+            MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        }
+        val uri = ContentUris.withAppendedId(collection, mediaId)
+        return context.contentResolver.delete(uri, null, null) > 0
+    }
+
     private fun queryCollection(collection: Uri, kind: MediaKind): List<LocalMediaItem> {
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,

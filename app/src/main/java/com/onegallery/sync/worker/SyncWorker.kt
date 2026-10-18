@@ -4,26 +4,30 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.onegallery.sync.OneGalleryApplication
-import com.onegallery.sync.sync.SyncCapability
 
-/**
- * Worker reservado para sincronização periódica em segundo plano.
- * Ainda não agenda uploads/downloads — apenas indexação local quando habilitado.
- */
 class SyncWorker(
     appContext: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        if (!SyncCapability.bidirectionalSyncEnabled) {
-            return Result.success()
-        }
         val app = applicationContext as OneGalleryApplication
-        return app.syncCoordinator.indexLocalLibrary()
+        return app.syncCoordinator.runBidirectionalSync()
             .fold(
                 onSuccess = { Result.success() },
-                onFailure = { Result.retry() },
+                onFailure = {
+                    if (it.message?.contains("Offline", ignoreCase = true) == true ||
+                        it.message?.contains("Wi‑Fi", ignoreCase = true) == true
+                    ) {
+                        Result.success()
+                    } else {
+                        Result.retry()
+                    }
+                },
             )
+    }
+
+    companion object {
+        const val UNIQUE_NAME = "onegallery_bidirectional_sync"
     }
 }

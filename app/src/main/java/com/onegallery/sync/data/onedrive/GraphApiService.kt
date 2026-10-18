@@ -1,14 +1,18 @@
 package com.onegallery.sync.data.onedrive
 
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
+import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
+import retrofit2.http.Url
 
-/**
- * Microsoft Graph — endpoints usados quando a sincronização estiver implementada.
- * Documentação: https://learn.microsoft.com/graph/api/resources/onedrive
- */
 interface GraphApiService {
     @GET("v1.0/me/drive/root/children")
     suspend fun listDriveRootChildren(
@@ -22,4 +26,49 @@ interface GraphApiService {
         @Path("itemId") itemId: String,
         @Query("\$top") top: Int = 200,
     ): DriveItemCollection
+
+    @GET
+    suspend fun listDriveNext(
+        @Url url: String,
+        @Header("Authorization") authorization: String,
+    ): DriveItemCollection
+
+    @GET("v1.0/me/drive/root:/{itemPath}")
+    suspend fun getItemByDrivePath(
+        @Header("Authorization") authorization: String,
+        @Path(value = "itemPath", encoded = true) itemPath: String,
+    ): DriveItem
+
+    @POST("v1.0/me/drive/root/children")
+    suspend fun createFolderUnderDriveRoot(
+        @Header("Authorization") authorization: String,
+        @Body body: CreateFolderRequest,
+    ): DriveItem
+
+    @PUT("v1.0/me/drive/root:/{itemPath}:/content")
+    suspend fun uploadSmallFile(
+        @Header("Authorization") authorization: String,
+        @Path(value = "itemPath", encoded = true) itemPath: String,
+        @Body body: RequestBody,
+    ): DriveItem
+
+    @GET("v1.0/me/drive/items/{itemId}/content")
+    @Streaming
+    suspend fun downloadItemContent(
+        @Header("Authorization") authorization: String,
+        @Path("itemId") itemId: String,
+    ): ResponseBody
+
+    @DELETE("v1.0/me/drive/items/{itemId}")
+    suspend fun deleteItem(
+        @Header("Authorization") authorization: String,
+        @Path("itemId") itemId: String,
+    )
 }
+
+data class CreateFolderRequest(
+    val name: String,
+    val folder: DriveFolderFacet = DriveFolderFacet(),
+    @com.squareup.moshi.Json(name = "@microsoft.graph.conflictBehavior")
+    val conflictBehavior: String = "fail",
+)

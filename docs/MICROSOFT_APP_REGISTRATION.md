@@ -54,6 +54,5 @@ Conceda **consentimento de administrador** apenas se usar conta corporativa com 
 
 ## 5. Estado atual deste repositório
 
-- Login Microsoft e leitura da galeria local (**MediaStore**, incluindo pastas como WhatsApp quando visíveis ao sistema) estão preparados.
-- **Sincronização bidirecional completa não está ativa** (`SyncCapability.bidirectionalSyncEnabled = false`).
-- Não marque o produto como “sync completo” até implementar e testar upload, download sob demanda, exclusão com confirmação e resolução de conflitos.
+- Login Microsoft, galeria local (**MediaStore**, incl. WhatsApp quando visível), sync bidirecional, download sob demanda e exclusão com confirmação estão no código.
+- **Teste no seu Samsung** após configurar este registro: volume grande, dados móveis vs Wi‑Fi e permissões Android 13+ afetam o resultado real.

@@ -1,11 +1,21 @@
 package com.onegallery.sync
 
 import android.app.Application
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.onegallery.sync.auth.MsalAuthManager
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.onedrive.OneDriveRepository
+import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.worker.SyncWorker
+import java.util.concurrent.TimeUnit
 
 class OneGalleryApplication : Application() {
     lateinit var authManager: MsalAuthManager
@@ -23,16 +33,39 @@ class OneGalleryApplication : Application() {
     lateinit var syncCoordinator: SyncCoordinator
         private set
 
+    lateinit var syncPreferences: SyncPreferences
+        private set
+
     override fun onCreate() {
         super.onCreate()
         authManager = MsalAuthManager(this)
         database = AppDatabase.create(this)
         localMediaRepository = LocalMediaRepository(this)
         oneDriveRepository = OneDriveRepository(authManager)
+        syncPreferences = SyncPreferences(this)
+        val mediaCacheRepository = MediaCacheRepository(this)
         syncCoordinator = SyncCoordinator(
             localMediaRepository = localMediaRepository,
             oneDriveRepository = oneDriveRepository,
             syncMetadataDao = database.syncMetadataDao(),
+            mediaCacheRepository = mediaCacheRepository,
+            networkMonitor = NetworkMonitor(this),
+            syncPreferences = syncPreferences,
+        )
+        scheduleBackgroundSync()
+    }
+
+    private fun scheduleBackgroundSync() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            SyncWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
         )
     }
 }

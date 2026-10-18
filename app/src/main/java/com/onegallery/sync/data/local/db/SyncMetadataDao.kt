@@ -4,19 +4,40 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.onegallery.sync.sync.PendingDeleteTarget
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SyncMetadataDao {
-    @Query("SELECT * FROM sync_metadata ORDER BY localModifiedAt DESC")
+    @Query("SELECT * FROM sync_metadata ORDER BY COALESCE(localModifiedAt, remoteModifiedAt) DESC")
     fun observeAll(): Flow<List<SyncMetadataEntity>>
+
+    @Query("SELECT * FROM sync_metadata")
+    suspend fun getAll(): List<SyncMetadataEntity>
+
+    @Query("SELECT * FROM sync_metadata WHERE canonicalPath = :canonicalPath LIMIT 1")
+    suspend fun getByCanonicalPath(canonicalPath: String): SyncMetadataEntity?
 
     @Query("SELECT * FROM sync_metadata WHERE localMediaId = :localMediaId LIMIT 1")
     suspend fun getByLocalId(localMediaId: Long): SyncMetadataEntity?
 
+    @Query("SELECT * FROM sync_metadata WHERE oneDriveItemId = :itemId LIMIT 1")
+    suspend fun getByOneDriveId(itemId: String): SyncMetadataEntity?
+
+    @Query(
+        "SELECT COUNT(*) FROM sync_metadata WHERE cloudState IN ('PENDING_UPLOAD', 'PENDING_DOWNLOAD') OR pendingDeleteTarget != 'NONE'",
+    )
+    fun observePendingCount(): Flow<Int>
+
+    @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
+    fun observePendingDeletes(): Flow<List<SyncMetadataEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: SyncMetadataEntity)
 
-    @Query("DELETE FROM sync_metadata WHERE localMediaId = :localMediaId")
-    suspend fun deleteByLocalId(localMediaId: Long)
+    @Query("DELETE FROM sync_metadata WHERE canonicalPath = :canonicalPath")
+    suspend fun deleteByCanonicalPath(canonicalPath: String)
+
+    @Query("UPDATE sync_metadata SET pendingDeleteTarget = :target WHERE canonicalPath = :canonicalPath")
+    suspend fun updatePendingDelete(canonicalPath: String, target: PendingDeleteTarget)
 }

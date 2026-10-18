@@ -1,58 +1,44 @@
 # Arquitetura — OneGallery Sync
 
-## Objetivo
+## Objetivo (escopo do projeto)
 
-Substituir a integração descontinuada **Galeria Samsung ↔ OneDrive** por um app Android nativo que:
+Galeria Android **nativa**, independente da Galeria Samsung, com **OneDrive**:
 
-- Espelha a biblioteca local (fotos/vídeos, **todas as pastas** indexadas pelo MediaStore).
-- Planeja sync **bidirecional** com o OneDrive em `OneGallerySync/` na raiz do drive.
-- Oferece álbuns, indicadores de nuvem/offline e fila de sync (em evolução).
-- Respeita **lixeira/exclusões** e **confirmação** antes de propagar deletes.
+| Requisito | Implementação |
+|-----------|----------------|
+| Sync bidirecional | `SyncCoordinator.runBidirectionalSync()` — upload, diff por data, entradas só na nuvem |
+| Todas as pastas | `MediaStore` imagens + vídeos (DCIM, WhatsApp, Downloads, etc.) |
+| Galeria espelhada | UI única a partir de `sync_metadata` (local + nuvem) |
+| Originais sob demanda | `downloadOriginalOnDemand()` ao abrir item / botão manual |
+| Álbuns | Agrupamento por bucket/pasta |
+| Offline / status / nuvem | Badges na grade; cache em `cache/originals`; sync pausa offline |
+| Lixeira | Ignorada em `SyncPolicy.shouldIncludeLocalItem` |
+| Exclusões | `pendingDeleteTarget` + diálogo / aba Sync antes de propagar |
+| APK privado | `./gradlew :app:assembleRelease` |
+
+Pasta no OneDrive: **`OneGallerySync/`** (espelha caminhos relativos, ex. `Pictures/WhatsApp/…`).
 
 ## Camadas
 
 ```text
-ui (Compose)
-  ├── gallery / albums / sync status / settings
-  └── auth gate (MSAL)
-
-domain
-  ├── SyncCoordinator — orquestra indexação (hoje) e sync (futuro)
-  └── SyncPolicy — inclusão/exclusão de paths, confirmação de delete
-
-data
-  ├── LocalMediaRepository — MediaStore (imagens + vídeos)
-  ├── Room — sync_metadata (estado LOCAL_ONLY / PENDING / …)
-  └── OneDriveRepository — Retrofit + Graph API (probe; upload/download TBD)
-
-auth
-  └── MsalAuthManager — token para Graph
-
-worker
-  └── SyncWorker — placeholder WorkManager
+ui (Compose) → gallery, álbuns, detalhe, sync, settings, MSAL gate
+sync → SyncCoordinator, SyncPolicy, SyncPaths, WorkManager
+data.local → MediaStore, cache de originais, Room
+data.onedrive → MS Graph (listagem recursiva, upload, download, delete)
+auth → MsalAuthManager
 ```
 
-## Fluxo de exibição (espelho + sob demanda)
+## Fluxo de sync
 
-1. **Grade local imediata** via URIs do MediaStore (miniaturas com Coil).
-2. Metadados Room registram `cloudState` por item.
-3. **Fase futura**: originais ausentes no dispositivo serão baixados on-demand ao abrir/visualizar; uploads enfileirados com WorkManager e rede Wi‑Fi/carga configurável.
+1. Indexar mídia local → linhas Room (`LOCAL_ONLY` ou estado anterior).
+2. Garantir pasta `OneGallerySync` no drive.
+3. Listar arquivos remotos recursivamente.
+4. Para cada item local: upload se ausente/desatualizado; marcar `PENDING_DOWNLOAD` se remoto mais novo.
+5. Itens remotos sem par local → `CLOUD_ONLY`.
+6. Detecção de remoção → fila `pendingDeleteTarget` (confirmação obrigatória).
 
-## Sync bidirecional (roadmap)
+## Honestidade sobre “completo”
 
-| Etapa | Descrição |
-|-------|-----------|
-| 1 | Indexação local + auth Graph (**atual**) |
-| 2 | Listagem recursiva OneDrive + diff por path/etag |
-| 3 | Upload incremental (fila, retry, hash) |
-| 4 | Download sob demanda + cache |
-| 5 | Delete/trash com diálogo de confirmação |
-| 6 | Conflitos (last-write-wins ou prompt) |
-| 7 | Testes instrumentados + dogfooding no Samsung |
+O código implementa o pipeline descrito acima, mas **você** deve validar no Samsung (rede, permissões, conta Microsoft, pastas WhatsApp no Android 13+). Conflitos usam comparação simples de timestamp; casos extremos podem exigir ajustes.
 
-Flag central: `SyncCapability.bidirectionalSyncEnabled` — permanece `false` até a etapa 6–7.
-
-## Exclusões
-
-- Paths contendo lixeira (`.Trash`, `Lixeira`, etc.) são ignorados na indexação (`SyncPolicy.shouldIncludeLocalItem`).
-- Propagação de exclusão exige confirmação quando afeta nuvem e dispositivo (`requiresDeleteConfirmation`).
+Flag: `SyncCapability.bidirectionalSyncEnabled = true`.

@@ -18,6 +18,7 @@ class MainActivity : ComponentActivity() {
                     authManager = app.authManager,
                     localMediaRepository = app.localMediaRepository,
                     syncCoordinator = app.syncCoordinator,
+                    syncPreferences = app.syncPreferences,
                 )
             }
         }

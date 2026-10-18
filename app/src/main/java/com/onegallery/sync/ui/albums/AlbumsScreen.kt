@@ -25,7 +25,10 @@ import com.onegallery.sync.ui.gallery.GalleryViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlbumsScreen(viewModel: GalleryViewModel) {
+fun AlbumsScreen(
+    viewModel: GalleryViewModel,
+    onOpenAlbum: (String) -> Unit,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -40,7 +43,10 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { }
+                        .clickable {
+                            viewModel.setAlbumFilter(album.title)
+                            onOpenAlbum(album.title)
+                        }
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                 ) {
                     AsyncImage(
