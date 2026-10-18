@@ -91,7 +91,7 @@ fun SettingsScreen(
             ) {
                 Text(stringResource(R.string.auth_sign_out))
             }
-            Text("Alternativa local (Samsung)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
+            Text("OneDrive local (sem login)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
             Text(
                 "Modo: ${
                     when (syncPreferences.syncMode) {
@@ -117,10 +117,10 @@ fun SettingsScreen(
                 Text("Usar Pictures/OneGallerySync")
             }
             Button(
-                onClick = onOpenLocalSafBrowser,
+                onClick = { launchFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(context)) },
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                Text("Explorar OneDrive no app")
+                Text("Pasta local OneDrive (gerenciador)")
             }
             if (OneDrivePickerHelper.isSamsungDevice() && OneDrivePickerHelper.isSamsungMyFilesInstalled(context)) {
                 Button(
@@ -134,14 +134,22 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.padding(top = 8.dp),
                 ) {
-                    Text("Meus Arquivos (OneDrive)")
+                    Text("Só Meus Arquivos (árvore)")
+                }
+            }
+            OneDrivePickerHelper.openSamsungPickDataIntent()?.let { pickData ->
+                Button(
+                    onClick = { launchFolderPicker(pickData) },
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text("Meus Arquivos — PICK (OneDrive)")
                 }
             }
             Button(
-                onClick = { launchFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(context)) },
+                onClick = onOpenLocalSafBrowser,
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                Text("Outro seletor de pasta")
+                Text("Lista no app (experimental)")
             }
             Text("Sync apenas em Wi‑Fi", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
             Switch(

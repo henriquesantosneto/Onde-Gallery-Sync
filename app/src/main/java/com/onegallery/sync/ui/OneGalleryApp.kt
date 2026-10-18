@@ -151,9 +151,7 @@ fun OneGalleryApp(
             },
             onBack = { cloudSetupStep = CloudSetupStep.Hidden },
             onOpenSystemPicker = {
-                val intent = OneDrivePickerHelper.openSamsungMyFilesTreeIntent(appContext)
-                    ?: OneDrivePickerHelper.openFolderPickerChooser(appContext)
-                launchSystemFolderPicker(intent)
+                launchSystemFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(appContext))
             },
         )
         return

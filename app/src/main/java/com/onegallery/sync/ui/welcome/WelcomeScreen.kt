@@ -60,61 +60,35 @@ fun WelcomeScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Como ES File Explorer / Meus Arquivos",
+                    "OneDrive local (sem Azure)",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "Login Microsoft → navegar pastas do OneDrive na nuvem → escolher onde sincronizar. " +
-                        "Você não cria conta Azure; isso é igual aos gerenciadores de arquivos.",
+                    OneDrivePickerHelper.SAMSUNG_ONEDRIVE_HINT,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                if (!msalReady) {
-                    Text(
-                        "Login na nuvem: na próxima tela cole o Application (client) ID do seu app no Azure " +
-                            "(Registros de aplicativo → Visão geral). Não precisa recompilar o APK.",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
             }
         }
         Button(
-            onClick = onConnectOneDriveCloud,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Conectar OneDrive (login Microsoft)")
-        }
-        Text(
-            "Depois do login, escolha a pasta na nuvem (WhatsApp, álbuns, etc.).",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
-        )
-        OutlinedButton(
             onClick = {
-                syncCoordinator.useOneDriveLocalMirrorMode()
-                onFinished()
+                if (!diagnostics.documentTreeAvailable) {
+                    Toast.makeText(context, "Seletor indisponível", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                launchFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(context))
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Alternativa: Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} + backup OneDrive")
-        }
-        OutlinedButton(
-            onClick = onBrowseLocalOneDrive,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("Explorar OneDrive no app (gerenciador)")
+            Text("Pasta local OneDrive (gerenciador)")
         }
         Text(
-            "Lista pastas OneDrive/Meus Arquivos dentro do app — como antes. " +
-                "Sem login Microsoft; precisa do OneDrive instalado.",
+            "Abre o seletor completo (Meus Arquivos / árvore) — como quando OneDrive apareceu da primeira vez. " +
+                "Se não listar OneDrive, escolha Meus Arquivos no popup.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
         )
         if (OneDrivePickerHelper.isSamsungDevice() && diagnostics.myFilesInstalled) {
             OutlinedButton(
@@ -128,20 +102,51 @@ fun WelcomeScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Meus Arquivos (OneDrive)")
+                Text("Só Meus Arquivos (árvore de pastas)")
+            }
+        }
+        OneDrivePickerHelper.openSamsungPickDataIntent()?.let { pickData ->
+            OutlinedButton(
+                onClick = { launchFolderPicker(pickData) },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text("Meus Arquivos — modo PICK (OneDrive)")
             }
         }
         OutlinedButton(
-            onClick = {
-                if (!diagnostics.documentTreeAvailable) {
-                    Toast.makeText(context, "Seletor indisponível", Toast.LENGTH_SHORT).show()
-                    return@OutlinedButton
-                }
-                launchFolderPicker(OneDrivePickerHelper.openFolderPickerChooser(context))
-            },
+            onClick = onBrowseLocalOneDrive,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) {
-            Text("Outro seletor de pasta")
+            Text("Lista pastas dentro do app (experimental)")
+        }
+        OutlinedButton(
+            onClick = {
+                syncCoordinator.useOneDriveLocalMirrorMode()
+                onFinished()
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        ) {
+            Text("Pictures/${SyncPolicy.ONEDRIVE_MIRROR_ROOT} + backup OneDrive")
+        }
+        Text(
+            "Login na nuvem (Azure / Microsoft)",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
+        )
+        OutlinedButton(
+            onClick = onConnectOneDriveCloud,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Conectar OneDrive (login Microsoft)")
+        }
+        if (!msalReady) {
+            Text(
+                "Cole o Client ID do Azure na próxima tela.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
         OutlinedButton(
             onClick = {
