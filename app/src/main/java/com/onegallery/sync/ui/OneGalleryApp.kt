@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -70,6 +72,53 @@ private fun albumsTabSelected(route: String?): Boolean =
 
 private fun showsMainBottomBar(route: String?): Boolean =
     route in MainTab.entries.map { it.route } || route == ALBUMS_BROWSE_ROUTE
+
+private fun NavHostController.openGalleryTab(clearBrowseFilters: () -> Unit) {
+    clearBrowseFilters()
+    if (!popBackStack(MainTab.Gallery.route, inclusive = false)) {
+        navigate(MainTab.Gallery.route) {
+            popUpTo(graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+}
+
+private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
+    clearBrowseFilters()
+    when (currentBackStackEntry?.destination?.route) {
+        ALBUMS_BROWSE_ROUTE -> popBackStack(MainTab.Albums.route, inclusive = false)
+        MainTab.Albums.route -> Unit
+        else -> {
+            navigate(MainTab.Albums.route) {
+                popUpTo(graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+}
+
+private fun NavHostController.openMainTab(tab: MainTab, clearBrowseFilters: () -> Unit) {
+    when (tab) {
+        MainTab.Gallery -> openGalleryTab(clearBrowseFilters)
+        MainTab.Albums -> openAlbumsTab(clearBrowseFilters)
+        MainTab.Sync, MainTab.Settings -> {
+            clearBrowseFilters()
+            navigate(tab.route) {
+                popUpTo(graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+}
 
 private enum class MainTab(val route: String) {
     Gallery("gallery"),
@@ -221,25 +270,8 @@ fun OneGalleryApp(
                                 else -> currentRoute == tab.route
                             },
                             onClick = {
-                                when (tab) {
-                                    MainTab.Gallery, MainTab.Albums -> galleryViewModel.clearBrowseFilters()
-                                    else -> Unit
-                                }
-                                when (tab) {
-                                    MainTab.Albums -> {
-                                        navController.navigate(MainTab.Albums.route) {
-                                            popUpTo(MainTab.Albums.route) { inclusive = false }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
-                                    else -> {
-                                        navController.navigate(tab.route) {
-                                            popUpTo(MainTab.Gallery.route) { saveState = true }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
+                                navController.openMainTab(tab) {
+                                    galleryViewModel.clearBrowseFilters()
                                 }
                             },
                             icon = {

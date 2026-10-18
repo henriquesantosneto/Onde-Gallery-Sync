@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,9 @@ fun rememberGalleryGridZoom(initial: Float, onPersist: (Float) -> Unit): Gallery
         mutableFloatStateOf(initial.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE))
     }
     var multiTouch by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        onDispose { multiTouch = false }
+    }
     val nestedScrollConnection = remember(multiTouch) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
