@@ -24,7 +24,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +57,13 @@ fun SyncStatusScreen(
     val syncTasks = remember { SyncTaskLauncher.from(app) }
 
     val stats = remember(metadata) { computeSyncStats(metadata) }
+    val problemCount = remember(metadata) {
+        metadata.count {
+            it.cloudState == CloudSyncState.ERROR ||
+                it.cloudState == CloudSyncState.CONFLICT ||
+                !it.lastError.isNullOrBlank()
+        }
+    }
     val problemItems = remember(metadata) {
         metadata.filter {
             it.cloudState == CloudSyncState.ERROR ||
@@ -60,6 +71,8 @@ fun SyncStatusScreen(
                 !it.lastError.isNullOrBlank()
         }.take(25)
     }
+    val scope = rememberCoroutineScope()
+    var clearingErrors by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         syncTasks.indexLocalLibrary()
@@ -144,9 +157,39 @@ fun SyncStatusScreen(
                 StatsCard(stats, pendingOps)
             }
 
-            if (problemItems.isNotEmpty()) {
+            if (problemCount > 0) {
                 item {
-                    SectionTitle("Atenção (${problemItems.size})")
+                    SectionTitle(
+                        if (problemCount > problemItems.size) {
+                            "Atenção ($problemCount, mostrando ${problemItems.size})"
+                        } else {
+                            "Atenção ($problemCount)"
+                        },
+                    )
+                }
+                item {
+                    OutlinedButton(
+                        onClick = {
+                            clearingErrors = true
+                            scope.launch {
+                                syncCoordinator.clearStoredItemErrors()
+                                clearingErrors = false
+                            }
+                        },
+                        enabled = !clearingErrors && !coordinatorState.isRunning,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (clearingErrors) "Limpando…" else "Limpar avisos antigos",
+                        )
+                    }
+                    Text(
+                        "Só remove mensagens da lista. Fotos e fila de sync não são apagadas. " +
+                            "Depois, use Sincronizar agora com internet estável.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                    )
                 }
                 items(
                     problemItems,

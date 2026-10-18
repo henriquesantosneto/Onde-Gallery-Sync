@@ -90,6 +90,34 @@ class SyncCoordinator(
         syncCancelRequested.set(true)
     }
 
+    /** Remove mensagens de erro gravadas por item (lista Atenção). Não apaga fotos nem fila de sync. */
+    suspend fun clearStoredItemErrors(): Int {
+        var cleared = 0
+        syncMetadataDao.getAll().forEach { row ->
+            val flagged = row.cloudState == CloudSyncState.ERROR ||
+                row.cloudState == CloudSyncState.CONFLICT ||
+                !row.lastError.isNullOrBlank()
+            if (!flagged) return@forEach
+            val state = when (row.cloudState) {
+                CloudSyncState.ERROR, CloudSyncState.CONFLICT ->
+                    if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) {
+                        row.cloudState
+                    } else {
+                        restoredCloudState(row)
+                    }
+                else -> row.cloudState
+            }
+            syncMetadataDao.upsert(row.copy(cloudState = state, lastError = null))
+            cleared++
+        }
+        if (cleared > 0) {
+            _state.value = _state.value.copy(
+                lastMessage = "Avisos limpos em $cleared item(ns). Sincronize de novo se ainda faltar envio.",
+            )
+        }
+        return cleared
+    }
+
     private fun resetSyncCancel() {
         syncCancelRequested.set(false)
     }
@@ -302,6 +330,7 @@ class SyncCoordinator(
                         lastMessage = "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
                             "$cloudOnly só na nuvem$freeMsg.",
                     )
+                    sweepTransientErrorsAfterSuccessfulSync()
                     SyncSummary(uploaded, markedPendingDownload, cloudOnly)
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
@@ -781,7 +810,7 @@ class SyncCoordinator(
             },
             cachedFilePath = existing?.cachedFilePath,
             pendingDeleteTarget = existing?.pendingDeleteTarget ?: PendingDeleteTarget.NONE,
-            lastError = existing?.lastError,
+            lastError = existing?.lastError?.takeUnless { isTransientNetworkMessage(it) },
         )
     }
 
@@ -791,6 +820,36 @@ class SyncCoordinator(
             row.oneDriveItemId != null -> CloudSyncState.CLOUD_ONLY
             else -> CloudSyncState.LOCAL_ONLY
         }
+    }
+
+    private suspend fun sweepTransientErrorsAfterSuccessfulSync() {
+        syncMetadataDao.getAll().forEach { row ->
+            val msg = row.lastError ?: return@forEach
+            if (!isTransientNetworkMessage(msg)) return@forEach
+            syncMetadataDao.upsert(
+                row.copy(
+                    lastError = null,
+                    cloudState = if (row.cloudState == CloudSyncState.ERROR) {
+                        restoredCloudState(row)
+                    } else {
+                        row.cloudState
+                    },
+                ),
+            )
+        }
+    }
+
+    private fun isTransientNetworkMessage(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("unable to resolve host") ||
+            lower.contains("graph.microsoft.com") ||
+            lower.contains("failed to connect") ||
+            lower.contains("network is unreachable") ||
+            lower.contains("timeout") ||
+            lower.contains("offline") ||
+            lower.contains("sem conexão") ||
+            lower.contains("wi‑fi") ||
+            lower.contains("wifi")
     }
 
     private fun parseGraphTime(value: String): Long? {
