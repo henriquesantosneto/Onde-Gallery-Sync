@@ -65,6 +65,13 @@ class MsalAuthManager(
     private fun enrichMsalError(message: String?): String {
         val base = message?.trim().orEmpty()
         val lower = base.lowercase()
+        val duplicateRedirectHint = if (lower.contains("more than one app") && lower.contains("browsertab")) {
+            "\n\n— Conflito msauth —\n" +
+                "Desinstale versões antigas do OneGallery Sync e instale só o APK mais recente. " +
+                "O app não pode ter dois handlers msauth:// (erro corrigido na 0.5.10+)."
+        } else {
+            ""
+        }
         val scopeHint = if (
             (lower.contains("scope") && lower.contains("declin")) ||
             lower.contains("invalid_scope") ||
@@ -92,7 +99,7 @@ class MsalAuthManager(
         } else {
             ""
         }
-        return base + scopeHint + redirectHint
+        return base + duplicateRedirectHint + scopeHint + redirectHint
     }
 
     private val scopes: Array<String> = BuildConfig.GRAPH_SCOPES
