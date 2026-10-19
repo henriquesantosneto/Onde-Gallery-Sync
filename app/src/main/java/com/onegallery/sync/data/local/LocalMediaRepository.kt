@@ -1,9 +1,12 @@
 package com.onegallery.sync.data.local
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
+import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import kotlin.math.abs
 
@@ -93,6 +96,87 @@ class LocalMediaRepository(private val context: Context) {
     }
 
     /** Substitui o conteúdo de um item da galeria (mesmo nome/caminho, versão mais nova na nuvem). */
+    /**
+     * Coloca um arquivo baixado de volta na galeria do Android (recall após liberar espaço).
+     * Usa a pasta do [canonicalPath] (ex.: DCIM/Camera/).
+     */
+    fun importIntoMediaStore(
+        canonicalPath: String,
+        displayName: String,
+        kind: MediaKind,
+        sourceFile: java.io.File,
+    ): Result<LocalMediaItem> {
+        if (!sourceFile.isFile || sourceFile.length() <= 0L) {
+            return Result.failure(IllegalArgumentException("Arquivo inválido para importar."))
+        }
+        val collection = when (kind) {
+            MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        }
+        val folder = SyncPaths.albumFromCanonical(canonicalPath)
+        val relativePath = when {
+            folder.equals("Raiz", ignoreCase = true) -> "Pictures/OneGallerySync/"
+            else -> "${folder.trim('/')}/"
+        }
+        val mime = guessMimeType(displayName, kind)
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+        val uri = context.contentResolver.insert(collection, values)
+            ?: return Result.failure(IllegalStateException("Não foi possível criar entrada na galeria."))
+        return runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                sourceFile.inputStream().use { input -> input.copyTo(output) }
+            } ?: error("Não foi possível gravar na galeria.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val done = ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }
+                context.contentResolver.update(uri, done, null, null)
+            }
+            val id = ContentUris.parseId(uri)
+            val modified = sourceFile.lastModified().takeIf { it > 0L }?.div(1000L)
+                ?: (System.currentTimeMillis() / 1000L)
+            LocalMediaItem(
+                id = id,
+                uri = uri,
+                displayName = displayName,
+                bucketDisplayName = SyncPaths.albumListDisplayName(folder),
+                relativePath = relativePath,
+                dateAddedSeconds = System.currentTimeMillis() / 1000L,
+                dateModifiedSeconds = modified,
+                sizeBytes = sourceFile.length(),
+                kind = kind,
+                mimeType = mime,
+            )
+        }.onFailure {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
+    private fun guessMimeType(displayName: String, kind: MediaKind): String {
+        val ext = displayName.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "heic", "heif" -> "image/heic"
+            "mp4" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "mov" -> "video/quicktime"
+            "3gp" -> "video/3gpp"
+            else -> when (kind) {
+                MediaKind.VIDEO -> "video/mp4"
+                MediaKind.IMAGE -> "image/jpeg"
+            }
+        }
+    }
+
     fun overwriteMediaContent(mediaId: Long, sourceFile: java.io.File): Boolean {
         if (!sourceFile.exists() || sourceFile.length() <= 0L) return false
         val item = findById(mediaId) ?: return false

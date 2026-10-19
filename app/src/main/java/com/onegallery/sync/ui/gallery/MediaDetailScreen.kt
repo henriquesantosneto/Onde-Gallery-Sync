@@ -320,7 +320,13 @@ private fun MediaDetailPage(
         syncCoordinator.ensureThumbnailCached(canonicalPath)
         refreshDisplayItem()
         loading = false
-        if (item?.needsCloudOriginalRecall() == true) {
+        val snapshot = syncCoordinator.getMetadata(canonicalPath)?.let {
+            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
+        }
+        if (snapshot != null) {
+            item = snapshot
+        }
+        if (snapshot?.needsCloudOriginalRecall() == true) {
             loadFullOriginalForViewing()
         }
     }

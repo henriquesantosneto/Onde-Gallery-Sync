@@ -42,12 +42,16 @@ data class GalleryDisplayItem(
     val showSyncedBadge: Boolean
         get() = cloudState == CloudSyncState.SYNCED
 
-    /** Original completo ainda não está no aparelho (só miniatura / placeholder). */
+    /** Precisa recall: há cópia na nuvem e ainda não há original na galeria do aparelho. */
     fun needsCloudOriginalRecall(): Boolean {
-        val hasLocalOriginal = localUri != null &&
-            cloudState != CloudSyncState.PENDING_DOWNLOAD
-        if (hasLocalOriginal) return false
-        if (cachedOriginal?.exists() == true) return false
-        return oneDriveItemId != null
+        if (oneDriveItemId == null) return false
+        if (cloudState == CloudSyncState.PENDING_DOWNLOAD) return true
+        if (localUri != null && cloudState != CloudSyncState.CLOUD_ONLY) return false
+        if (localMediaId != null && cloudState == CloudSyncState.SYNCED && localUri != null) {
+            return false
+        }
+        return cloudState == CloudSyncState.CLOUD_ONLY ||
+            localUri == null ||
+            localMediaId == null
     }
 }

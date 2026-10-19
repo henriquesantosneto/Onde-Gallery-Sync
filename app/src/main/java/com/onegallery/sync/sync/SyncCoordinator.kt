@@ -384,6 +384,12 @@ class SyncCoordinator(
         }
     }
 
+    /** Só interrompe transferências do job de sync longo — recall/visualização não é afetado. */
+    private fun shouldCancelActiveSyncTransfer(job: Job?): Boolean {
+        if (job == null || !syncCancelRequested.get()) return false
+        return activeLongTaskJob.get() == job
+    }
+
     private fun ensureSyncMayContinue() {
         ensureNotCancelled()
         if (violatesWifiOnlyPolicy()) {
@@ -1035,58 +1041,113 @@ class SyncCoordinator(
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
 
-        val cloudCopyPending = row.cloudState == CloudSyncState.PENDING_DOWNLOAD
-        row.localContentUri?.let {
-            if (!cloudCopyPending) {
-                return Result.failure(IllegalStateException("Original já está no dispositivo"))
-            }
-        }
-        row.cachedFilePath?.let { path ->
-            val cached = File(path)
-            if (cached.exists()) return Result.success(cached)
+        if (hasLocalOriginalOnDevice(row)) {
+            return Result.failure(IllegalStateException("Original já está no dispositivo"))
         }
 
         val itemId = row.oneDriveItemId
             ?: return Result.failure(IllegalStateException("Sem referência OneDrive"))
-        if (!networkMonitor.isOnline()) {
-            return Result.failure(IllegalStateException("Offline — conecte-se para baixar o original"))
+
+        if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+            oneDriveRepository.ensureGraphSession().getOrElse { return Result.failure(it) }
         }
 
-        val target = mediaCacheRepository.originalFile(canonicalPath)
-        setActiveSyncItem(
-            ActiveSyncItem(
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Recuperando da nuvem…",
-            ),
-        )
-        return try {
-            downloadRemoteFile(
-                remoteId = itemId,
-                target = target,
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Recuperando da nuvem…",
-            ).map {
-                val location = mediaLocationResolver.resolveFromFile(target)
-                syncMetadataDao.upsert(
-                    row.copy(
-                        cachedFilePath = target.absolutePath,
-                        cloudState = if (row.localMediaId != null) {
-                            CloudSyncState.PENDING_DOWNLOAD
-                        } else {
-                            CloudSyncState.CLOUD_ONLY
-                        },
-                        locationLabel = location?.label ?: row.locationLabel,
-                        latitude = location?.latitude ?: row.latitude,
-                        longitude = location?.longitude ?: row.longitude,
-                    ),
-                )
-                target
+        val cachedOnDisk = row.cachedFilePath
+            ?.let { path -> File(path).takeIf { it.isFile && it.length() > 0L } }
+        val sourceFile = if (cachedOnDisk != null) {
+            cachedOnDisk
+        } else {
+            if (!networkMonitor.isOnline()) {
+                return Result.failure(IllegalStateException("Offline — conecte-se para baixar o original"))
             }
-        } finally {
-            setActiveSyncItem(null)
+            val target = mediaCacheRepository.originalFile(canonicalPath)
+            setActiveSyncItem(
+                ActiveSyncItem(
+                    canonicalPath = row.canonicalPath,
+                    displayName = row.displayName,
+                    operationLabel = "Recuperando da nuvem…",
+                ),
+            )
+            try {
+                downloadRemoteFile(
+                    remoteId = itemId,
+                    target = target,
+                    canonicalPath = row.canonicalPath,
+                    displayName = row.displayName,
+                    operationLabel = "Recuperando da nuvem…",
+                    honorSyncCancel = false,
+                ).getOrElse { error ->
+                    propagateCancellation(error)
+                    return Result.failure(error)
+                }
+            } finally {
+                setActiveSyncItem(null)
+            }
+            if (!target.isFile || target.length() <= 0L) {
+                return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
+            }
+            target
         }
+
+        return restoreRecalledOriginalToDevice(row, sourceFile)
+    }
+
+    private fun hasLocalOriginalOnDevice(row: SyncMetadataEntity): Boolean {
+        if (row.cloudState == CloudSyncState.PENDING_DOWNLOAD) return false
+        row.localMediaId?.let { id ->
+            if (localMediaRepository.contentUriForMediaId(id) != null) return true
+        }
+        row.localContentUri?.let { parsed ->
+            val uri = Uri.parse(parsed)
+            if (mediaDeleteRequestRouter.uriExists(appContext, uri)) return true
+        }
+        return false
+    }
+
+    private suspend fun restoreRecalledOriginalToDevice(
+        row: SyncMetadataEntity,
+        sourceFile: File,
+    ): Result<File> {
+        val location = mediaLocationResolver.resolveFromFile(sourceFile)
+        val kind = if (GalleryMapper.isVideoFileName(row.displayName)) {
+            com.onegallery.sync.data.local.MediaKind.VIDEO
+        } else {
+            com.onegallery.sync.data.local.MediaKind.IMAGE
+        }
+        var updated = row.copy(
+            cachedFilePath = sourceFile.absolutePath,
+            locationLabel = location?.label ?: row.locationLabel,
+            latitude = location?.latitude ?: row.latitude,
+            longitude = location?.longitude ?: row.longitude,
+            lastError = null,
+        )
+        if (!hasLocalOriginalOnDevice(updated)) {
+            val imported = localMediaRepository.importIntoMediaStore(
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                kind = kind,
+                sourceFile = sourceFile,
+            ).getOrElse { error ->
+                propagateCancellation(error)
+                return Result.failure(error)
+            }
+            updated = updated.copy(
+                localMediaId = imported.id,
+                localContentUri = imported.uri.toString(),
+                localModifiedAt = imported.dateModifiedSeconds,
+                localReleasedForSpace = false,
+                cloudState = CloudSyncState.SYNCED,
+            )
+        } else {
+            updated = updated.copy(
+                cloudState = when (updated.cloudState) {
+                    CloudSyncState.CLOUD_ONLY, CloudSyncState.PENDING_DOWNLOAD -> CloudSyncState.SYNCED
+                    else -> updated.cloudState
+                },
+            )
+        }
+        syncMetadataDao.upsert(updated)
+        return Result.success(sourceFile)
     }
 
     suspend fun resolvePendingDelete(
@@ -2123,7 +2184,7 @@ class SyncCoordinator(
             if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
                 val job = coroutineContext[Job]
                 { done, total ->
-                    if (syncCancelRequested.get()) {
+                    if (shouldCancelActiveSyncTransfer(job)) {
                         job?.cancel(CancellationException("Sincronismo cancelado."))
                     } else {
                         setActiveSyncItem(
@@ -2159,12 +2220,13 @@ class SyncCoordinator(
         canonicalPath: String,
         displayName: String,
         operationLabel: String,
+        honorSyncCancel: Boolean = true,
     ): Result<Unit> {
         val onProgress: ((Long, Long?) -> Unit)? =
             if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
                 val job = coroutineContext[Job]
                 { done, total ->
-                    if (syncCancelRequested.get()) {
+                    if (honorSyncCancel && shouldCancelActiveSyncTransfer(job)) {
                         job?.cancel(CancellationException("Sincronismo cancelado."))
                     } else {
                         setActiveSyncItem(
