@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import kotlin.math.max
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -237,16 +238,21 @@ fun MediaDetailScreen(
         }
         val detailsVisible = detailsDisplayFraction > 0.02f
         val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
+        val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
+        gestureBaseFraction.floatValue = max(
+            detailsSettleFraction,
+            max(detailsDisplayFraction, if (detailsDragging) detailsDragFraction else 0f),
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .draggableDetailPanelHeight(
                     enabled = swipeUpForDetails && pagerScrollEnabled,
                     screenHeightPx = screenHeightPx,
-                    fractionAtDragStart = { detailsDisplayFraction },
+                    fractionBaseState = gestureBaseFraction,
                     onDragStart = {
                         detailsDragging = true
-                        detailsDragFraction = detailsDisplayFraction
+                        detailsDragFraction = gestureBaseFraction.floatValue
                     },
                     onDragFraction = { fraction ->
                         detailsDragging = true

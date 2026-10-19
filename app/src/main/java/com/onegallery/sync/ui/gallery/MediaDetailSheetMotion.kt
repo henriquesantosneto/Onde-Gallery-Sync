@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -67,10 +68,13 @@ fun rememberMediaDetailSheetFraction(
     dragging: Boolean,
 ): Float {
     val animatable = remember { Animatable(0f) }
-    LaunchedEffect(dragging, dragFraction, settleTarget) {
+    LaunchedEffect(dragging, dragFraction) {
         if (dragging) {
             animatable.snapTo(dragFraction)
-        } else {
+        }
+    }
+    LaunchedEffect(dragging, settleTarget) {
+        if (!dragging) {
             animatable.animateTo(settleTarget, tween(durationMillis = 220))
         }
     }
@@ -81,12 +85,13 @@ private const val VERTICAL_DOMINANCE_RATIO = 1.15f
 
 /**
  * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
- * [fractionAtDragStart] é lido só no início do gesto — não entra na chave do [pointerInput].
+ * [fractionBaseState] é atualizado a cada frame na UI; o gesto lê [.floatValue] ao tocar
+ * (evita closure obsoleta dentro do [pointerInput]).
  */
 fun Modifier.draggableDetailPanelHeight(
     enabled: Boolean,
     screenHeightPx: Float,
-    fractionAtDragStart: () -> Float,
+    fractionBaseState: MutableFloatState,
     onDragStart: () -> Unit,
     onDragFraction: (Float) -> Unit,
     onDragEnd: (velocityYPxPerSec: Float) -> Unit,
@@ -102,7 +107,7 @@ fun Modifier.draggableDetailPanelHeight(
             var lockedVertical = false
             var passedToChildren = false
             var dragging = false
-            var baseFraction = 0f
+            var baseFraction = fractionBaseState.floatValue.coerceIn(0f, maxFraction)
             val velocityTracker = VelocityTracker()
 
             while (true) {
@@ -122,7 +127,6 @@ fun Modifier.draggableDetailPanelHeight(
                     val ay = abs(sumY)
                     if (ax < touchSlop && ay < touchSlop) continue
 
-                    baseFraction = fractionAtDragStart().coerceIn(0f, maxFraction)
                     when {
                         ay > ax * VERTICAL_DOMINANCE_RATIO -> {
                             lockedVertical = true
@@ -149,20 +153,3 @@ fun Modifier.draggableDetailPanelHeight(
         }
     }
 }
-
-/** @see draggableDetailPanelHeight */
-fun Modifier.draggableDetailsFromPhoto(
-    enabled: Boolean,
-    startFraction: Float,
-    screenHeightPx: Float,
-    onDragStart: () -> Unit,
-    onDragFraction: (Float) -> Unit,
-    onDragEnd: () -> Unit,
-): Modifier = draggableDetailPanelHeight(
-    enabled = enabled,
-    screenHeightPx = screenHeightPx,
-    fractionAtDragStart = { startFraction },
-    onDragStart = onDragStart,
-    onDragFraction = onDragFraction,
-    onDragEnd = { _ -> onDragEnd() },
-)

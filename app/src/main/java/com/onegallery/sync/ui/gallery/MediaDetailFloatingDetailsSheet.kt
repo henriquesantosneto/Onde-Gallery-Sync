@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +54,8 @@ fun MediaDetailPushDetailsSheet(
     }
     val scroll = rememberScrollState()
     val multiSelect = canonicalPaths.size > 1
+    val gestureBaseFraction = remember { mutableFloatStateOf(panelFraction) }
+    gestureBaseFraction.floatValue = panelFraction
 
     Box(
         modifier = modifier
@@ -69,8 +72,8 @@ fun MediaDetailPushDetailsSheet(
                 .draggableDetailPanelHeight(
                     enabled = true,
                     screenHeightPx = screenHeightPx,
-                    fractionAtDragStart = { panelFraction },
-                    onDragStart = { onPanelFractionChange(panelFraction) },
+                    fractionBaseState = gestureBaseFraction,
+                    onDragStart = { onPanelFractionChange(gestureBaseFraction.floatValue) },
                     onDragFraction = onPanelFractionChange,
                     onDragEnd = onPanelDragEnd,
                 )
