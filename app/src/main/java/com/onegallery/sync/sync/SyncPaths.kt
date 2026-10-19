@@ -88,4 +88,22 @@ object SyncPaths {
             "Raiz"
         }
     }
+
+    /**
+     * Nome de pasta/álbum para agrupamento: usa [relativePath] (ex.: DCIM/Camera),
+     * não [bucketDisplayName] do MediaStore (ex.: Camera), que duplicaria o mesmo álbum.
+     */
+    fun folderAlbumName(
+        canonicalPath: String,
+        relativePath: String? = null,
+        bucketDisplayName: String = "",
+    ): String {
+        val rel = relativePath?.trim('/')?.replace('\\', '/').orEmpty()
+        if (rel.isNotEmpty()) {
+            return shortenWhatsAppPath(rel)
+        }
+        val fromCanonical = albumFromCanonical(canonicalPath)
+        if (fromCanonical != "Raiz") return fromCanonical
+        return bucketDisplayName.ifBlank { "Raiz" }
+    }
 }

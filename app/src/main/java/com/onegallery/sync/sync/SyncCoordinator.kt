@@ -1596,7 +1596,11 @@ class SyncCoordinator(
         return SyncMetadataEntity(
             canonicalPath = canonical,
             displayName = item.displayName,
-            albumName = item.bucketDisplayName.ifBlank { SyncPaths.albumFromCanonical(canonical) },
+            albumName = SyncPaths.folderAlbumName(
+                canonicalPath = canonical,
+                relativePath = item.relativePath,
+                bucketDisplayName = item.bucketDisplayName,
+            ),
             userAlbumName = existing?.userAlbumName,
             localMediaId = item.id,
             localContentUri = item.uri.toString(),

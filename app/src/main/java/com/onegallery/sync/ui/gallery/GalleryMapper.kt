@@ -5,6 +5,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
+import com.onegallery.sync.sync.SyncPaths
 import java.io.File
 
 object GalleryMapper {
@@ -28,7 +29,7 @@ object GalleryMapper {
         return GalleryDisplayItem(
             canonicalPath = entity.canonicalPath,
             displayName = entity.displayName,
-            albumName = entity.userAlbumName?.takeIf { it.isNotBlank() } ?: entity.albumName,
+            albumName = resolveDisplayAlbumName(entity),
             kind = kind,
             cloudState = entity.cloudState,
             localMediaId = entity.localMediaId,
@@ -43,5 +44,13 @@ object GalleryMapper {
             longitude = entity.longitude,
             videoDurationMs = entity.videoDurationMs,
         )
+    }
+
+    /** Álbum virtual do usuário; senão pasta no caminho canônico (DCIM/Camera, não só "Camera"). */
+    private fun resolveDisplayAlbumName(entity: SyncMetadataEntity): String {
+        entity.userAlbumName?.takeIf { it.isNotBlank() }?.let { return it }
+        val fromCanonical = SyncPaths.albumFromCanonical(entity.canonicalPath)
+        if (fromCanonical != "Raiz") return fromCanonical
+        return entity.albumName.ifBlank { "Raiz" }
     }
 }
