@@ -4,6 +4,9 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -26,6 +29,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -339,10 +344,19 @@ fun OneGalleryApp(
             }
         },
     ) { padding ->
+        val layoutDirection = LocalLayoutDirection.current
+        val navHostPadding = if (currentRoute?.startsWith("media/") == true) {
+            PaddingValues(
+                start = padding.calculateStartPadding(layoutDirection),
+                end = padding.calculateEndPadding(layoutDirection),
+            )
+        } else {
+            padding
+        }
         NavHost(
             navController = navController,
             startDestination = MainTab.Gallery.route,
-            modifier = Modifier.padding(padding),
+            modifier = Modifier.padding(navHostPadding),
         ) {
             composable(MainTab.Gallery.route) {
                 GalleryScreen(
