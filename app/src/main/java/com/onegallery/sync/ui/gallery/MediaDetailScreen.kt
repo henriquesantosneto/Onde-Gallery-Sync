@@ -1,7 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,7 +14,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Fullscreen
-import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,7 +63,8 @@ fun MediaDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
     var showDetailsSheet by remember { mutableStateOf(false) }
-    var immersive by remember { mutableStateOf(false) }
+    /** true = foto em tela cheia (padrão); false = barra superior e gestos de detalhe (toque na imagem). */
+    var immersive by remember { mutableStateOf(true) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -74,6 +73,10 @@ fun MediaDetailScreen(
     val pagerScope = rememberCoroutineScope()
 
     ImmersiveSystemBarsEffect(immersive)
+
+    LaunchedEffect(state.selectionMode) {
+        if (state.selectionMode) immersive = false
+    }
 
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
@@ -159,7 +162,7 @@ fun MediaDetailScreen(
         val pool = liveItems.ifEmpty { contextItems }
         pagerPaths.mapNotNull { path -> pool.find { it.canonicalPath == path } }
     }
-    val showFilmstrip = chromeVisible && !state.selectionMode && filmstripItems.size > 1
+    val showFilmstrip = !state.selectionMode && filmstripItems.size > 1
 
     val topBar: @Composable () -> Unit = {
         if (chromeVisible) {
@@ -274,31 +277,6 @@ fun MediaDetailScreen(
                     )
                 }
 
-                if (immersive) {
-                    IconButton(
-                        onClick = { immersive = false },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.45f)),
-                    ) {
-                        Icon(
-                            Icons.Outlined.FullscreenExit,
-                            contentDescription = "Sair da tela cheia",
-                            tint = Color.White,
-                        )
-                    }
-                    Text(
-                        "Deslize para a esquerda ou direita · pinça com dois dedos para zoom",
-                        color = Color.White.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 16.dp)
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
             }
             if (showFilmstrip) {
                 MediaDetailFilmstrip(
