@@ -24,7 +24,11 @@ data class GalleryDisplayItem(
     val longitude: Double? = null,
 ) {
     val thumbnailModel: Any?
-        get() = localUri ?: cachedOriginal ?: cachedPlaceholderThumb
+        get() = when (cloudState) {
+            CloudSyncState.CLOUD_ONLY, CloudSyncState.PENDING_DOWNLOAD ->
+                cachedPlaceholderThumb ?: localUri ?: cachedOriginal
+            else -> localUri ?: cachedOriginal ?: cachedPlaceholderThumb
+        }
 
     val isOfflineAvailable: Boolean
         get() = localUri != null || (cachedOriginal?.exists() == true)

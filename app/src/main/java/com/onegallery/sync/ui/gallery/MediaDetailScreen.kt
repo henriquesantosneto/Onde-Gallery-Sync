@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
 import kotlinx.coroutines.launch
 
@@ -304,7 +305,9 @@ private fun MediaDetailPage(
 
     suspend fun loadFullOriginalForViewing() {
         val current = item ?: return
-        if (current.localUri != null || current.cachedOriginal?.exists() == true) return
+        val hasLocalOriginal = current.localUri != null &&
+            current.cloudState != CloudSyncState.PENDING_DOWNLOAD
+        if (hasLocalOriginal || current.cachedOriginal?.exists() == true) return
         loadingFull = true
         error = null
         syncCoordinator.downloadOriginalOnDemand(canonicalPath)

@@ -51,6 +51,7 @@ class SyncPreferences(context: Context) {
 
     /**
      * Após backup no OneDrive, remove a cópia local e mantém miniatura + placeholder na nuvem.
+     * Downloads da nuvem no sync nunca trazem o original completo — só miniatura até você abrir o item.
      */
     var autoFreeLocalSpaceWhenSynced: Boolean
         get() = prefs.getBoolean(KEY_AUTO_FREE_LOCAL, true)

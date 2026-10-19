@@ -553,7 +553,7 @@ class SyncCoordinator(
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
 
                     var uploaded = 0
-                    var downloaded = 0
+                    var pendingDownloadPlaceholders = 0
                     var cloudOnly = 0
 
                     val allRows = syncMetadataDao.getAll()
@@ -586,16 +586,14 @@ class SyncCoordinator(
                                 when (merged.cloudState) {
                                     CloudSyncState.PENDING_UPLOAD -> uploaded += uploadLocalRow(merged)
                                     CloudSyncState.PENDING_DOWNLOAD ->
-                                        downloaded += downloadLocalRow(merged, remote)
+                                        pendingDownloadPlaceholders += registerCloudDownloadPlaceholder(merged)
                                     else -> Unit
                                 }
                             }
                         }
                     }
 
-                    val retryTransfers = applyPendingBidirectionalTransfers(remoteByPath)
-                    uploaded += retryTransfers.first
-                    downloaded += retryTransfers.second
+                    uploaded += applyPendingUploadRetries(remoteByPath)
 
                     remoteByPath.forEach { (path, remote) ->
                         ensureSyncMayContinue()
@@ -655,8 +653,8 @@ class SyncCoordinator(
                         pendingOperations = pendingCount,
                         lastMessage = buildString {
                             append(
-                                "Sync: $uploaded enviados, $downloaded baixados (nuvem→local), " +
-                                    "$cloudOnly só na nuvem$freeMsg.",
+                                "Sync: $uploaded enviados, $pendingDownloadPlaceholders download(s) " +
+                                    "só miniatura (nuvem), $cloudOnly só na nuvem$freeMsg.",
                             )
                             if (sanitized.removedRows > 0) {
                                 append("\nManutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s).")
@@ -668,7 +666,7 @@ class SyncCoordinator(
                         },
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
-                    SyncSummary(uploaded, downloaded, cloudOnly)
+                    SyncSummary(uploaded, pendingDownloadPlaceholders, cloudOnly)
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
                     _state.value = _state.value.copy(
@@ -776,8 +774,11 @@ class SyncCoordinator(
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
 
+        val cloudCopyPending = row.cloudState == CloudSyncState.PENDING_DOWNLOAD
         row.localContentUri?.let {
-            return Result.failure(IllegalStateException("Original já está no dispositivo"))
+            if (!cloudCopyPending) {
+                return Result.failure(IllegalStateException("Original já está no dispositivo"))
+            }
         }
         row.cachedFilePath?.let { path ->
             val cached = File(path)
@@ -810,7 +811,11 @@ class SyncCoordinator(
                 syncMetadataDao.upsert(
                     row.copy(
                         cachedFilePath = target.absolutePath,
-                        cloudState = CloudSyncState.CLOUD_ONLY,
+                        cloudState = if (row.localMediaId != null) {
+                            CloudSyncState.PENDING_DOWNLOAD
+                        } else {
+                            CloudSyncState.CLOUD_ONLY
+                        },
                         locationLabel = location?.label ?: row.locationLabel,
                         latitude = location?.latitude ?: row.latitude,
                         longitude = location?.longitude ?: row.longitude,
@@ -1200,57 +1205,11 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun downloadLocalRow(row: SyncMetadataEntity, remote: RemoteDriveFile): Int {
-        ensureSyncMayContinue()
-        val localId = row.localMediaId ?: return 0
-        setActiveSyncItem(
-            ActiveSyncItem(
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Baixando da nuvem (substituir local)…",
-            ),
-        )
-        val suffix = row.displayName.substringAfterLast('.', "bin")
-        val temp = File.createTempFile("ogs-cloud-overwrite-", ".$suffix", appContext.cacheDir)
-        return runCatching {
-            downloadRemoteFile(
-                remoteId = remote.itemId,
-                target = temp,
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Baixando da nuvem (substituir local)…",
-            ).getOrThrow()
-            if (!localMediaRepository.overwriteMediaContent(localId, temp)) {
-                error("Não foi possível substituir o arquivo local.")
-            }
-            val refreshed = localMediaRepository.findById(localId)
-            syncMetadataDao.upsert(
-                row.copy(
-                    oneDriveItemId = remote.itemId,
-                    remoteModifiedAt = remote.modifiedAtEpoch,
-                    localModifiedAt = refreshed?.dateModifiedSeconds ?: remote.modifiedAtEpoch,
-                    localContentUri = refreshed?.uri?.toString() ?: row.localContentUri,
-                    cloudState = CloudSyncState.SYNCED,
-                    cachedFilePath = null,
-                    lastError = null,
-                ),
-            )
-            mediaCacheRepository.deleteCached(row.canonicalPath)
-            ensureThumbnailCached(row.canonicalPath).getOrNull()
-            1
-        }.getOrElse {
-            syncMetadataDao.upsert(
-                row.copy(
-                    cloudState = CloudSyncState.PENDING_DOWNLOAD,
-                    lastError = it.message,
-                ),
-            )
-            0
-        }.also {
-            temp.delete()
-            setActiveSyncItem(null)
-            removeFromRunQueue(row.canonicalPath)
-        }
+    /** Nuvem mais nova: só miniatura no cache — original completo sob demanda na visualização. */
+    private suspend fun registerCloudDownloadPlaceholder(row: SyncMetadataEntity): Int {
+        ensureThumbnailCached(row.canonicalPath).getOrNull()
+        removeFromRunQueue(row.canonicalPath)
+        return 1
     }
 
     private fun reconcileWithRemote(row: SyncMetadataEntity, remote: RemoteDriveFile): SyncMetadataEntity {
@@ -1277,47 +1236,32 @@ class SyncCoordinator(
         }
     }
 
-    /** Reaplica fila pendente após o merge principal (ex.: falha de rede na mesma execução). */
-    private suspend fun applyPendingBidirectionalTransfers(
+    /** Reaplica envios pendentes após o merge principal (ex.: falha de rede na mesma execução). */
+    private suspend fun applyPendingUploadRetries(
         remoteByPath: Map<String, RemoteDriveFile>,
-    ): Pair<Int, Int> {
+    ): Int {
         var uploaded = 0
-        var downloaded = 0
         val pending = syncMetadataDao.getAll().filter { row ->
             row.localMediaId != null &&
                 row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
-                (
-                    row.cloudState == CloudSyncState.PENDING_UPLOAD ||
-                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD
-                    )
+                row.cloudState == CloudSyncState.PENDING_UPLOAD
         }
         for (row in pending) {
             ensureSyncMayContinue()
             val remote = remoteByPath[row.canonicalPath]
-            when (row.cloudState) {
-                CloudSyncState.PENDING_UPLOAD ->
-                    uploaded += if (remote == null) uploadLocalRow(row) else {
-                        val merged = reconcileWithRemote(row, remote)
-                        syncMetadataDao.upsert(merged)
-                        if (merged.cloudState == CloudSyncState.PENDING_UPLOAD) {
-                            uploadLocalRow(merged)
-                        } else {
-                            0
-                        }
-                    }
-                CloudSyncState.PENDING_DOWNLOAD -> if (remote != null) {
-                    val merged = reconcileWithRemote(row, remote)
-                    syncMetadataDao.upsert(merged)
-                    if (merged.cloudState == CloudSyncState.PENDING_DOWNLOAD) {
-                        downloaded += downloadLocalRow(merged, remote)
-                    }
+            uploaded += if (remote == null) {
+                uploadLocalRow(row)
+            } else {
+                val merged = reconcileWithRemote(row, remote)
+                syncMetadataDao.upsert(merged)
+                if (merged.cloudState == CloudSyncState.PENDING_UPLOAD) {
+                    uploadLocalRow(merged)
                 } else {
-                    Unit
+                    0
                 }
-                else -> Unit
             }
         }
-        return uploaded to downloaded
+        return uploaded
     }
 
     private suspend fun reconcileMissingLocalItems(seenPaths: Set<String>) {
@@ -1844,6 +1788,6 @@ class SyncCoordinator(
 
 data class SyncSummary(
     val uploaded: Int,
-    val downloaded: Int,
+    val pendingDownloadPlaceholders: Int,
     val cloudOnly: Int,
 )
