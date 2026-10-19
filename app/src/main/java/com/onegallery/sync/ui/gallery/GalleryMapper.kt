@@ -25,7 +25,9 @@ object GalleryMapper {
         val cached = entity.cachedFilePath?.let { path -> File(path) }
         val placeholderThumb = mediaCacheRepository.thumbnailIfCached(entity.canonicalPath)
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
-            ?: maxOf(entity.localModifiedAt ?: 0L, entity.remoteModifiedAt ?: 0L)
+            ?: entity.remoteModifiedAt?.takeIf { it > 0L }
+            ?: entity.localModifiedAt?.takeIf { it > 0L }
+            ?: 0L
         return GalleryDisplayItem(
             canonicalPath = entity.canonicalPath,
             displayName = entity.displayName,

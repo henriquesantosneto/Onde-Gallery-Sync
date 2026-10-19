@@ -1174,21 +1174,27 @@ class SyncCoordinator(
             lastError = null,
         )
         if (!hasLocalOriginalOnDevice(updated)) {
+            val captureSeconds = row.capturedAtSeconds?.takeIf { it > 0L }
+                ?: mediaCaptureTimeResolver.resolveFromFile(sourceFile)
+                ?: row.remoteModifiedAt?.takeIf { it > 0L }
             val imported = localMediaRepository.importIntoMediaStore(
                 canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
                 kind = kind,
                 sourceFile = sourceFile,
+                takenAtEpochSeconds = captureSeconds,
             ).getOrElse { error ->
                 return Result.failure(
                     error.takeUnless { it is CancellationException }
                         ?: IllegalStateException("Importação cancelada."),
                 )
             }
+            val stableModified = captureSeconds ?: imported.dateModifiedSeconds
             updated = updated.copy(
                 localMediaId = imported.id,
                 localContentUri = imported.uri.toString(),
-                localModifiedAt = imported.dateModifiedSeconds,
+                localModifiedAt = stableModified,
+                capturedAtSeconds = captureSeconds ?: row.capturedAtSeconds,
                 localReleasedForSpace = false,
                 cloudState = CloudSyncState.SYNCED,
             )
@@ -1800,12 +1806,7 @@ class SyncCoordinator(
         item: LocalMediaItem,
         existing: SyncMetadataEntity?,
     ): Long? {
-        if (existing?.localMediaId == item.id &&
-            existing.capturedAtSeconds != null &&
-            existing.capturedAtSeconds > 0L
-        ) {
-            return existing.capturedAtSeconds
-        }
+        existing?.capturedAtSeconds?.takeIf { it > 0L }?.let { return it }
         return mediaCaptureTimeResolver.resolveFromLocalItem(item)
     }
 
@@ -1813,12 +1814,7 @@ class SyncCoordinator(
         item: LocalMediaItem,
         existing: SyncMetadataEntity?,
     ): Long? {
-        if (existing?.localMediaId == item.id &&
-            existing.capturedAtSeconds != null &&
-            existing.capturedAtSeconds > 0L
-        ) {
-            return existing.capturedAtSeconds
-        }
+        existing?.capturedAtSeconds?.takeIf { it > 0L }?.let { return it }
         return item.dateTakenSeconds?.takeIf { it > 0L }
     }
 

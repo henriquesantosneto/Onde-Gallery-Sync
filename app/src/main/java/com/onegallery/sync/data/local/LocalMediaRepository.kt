@@ -108,6 +108,7 @@ class LocalMediaRepository(private val context: Context) {
         displayName: String,
         kind: MediaKind,
         sourceFile: java.io.File,
+        takenAtEpochSeconds: Long? = null,
     ): Result<LocalMediaItem> = withContext(Dispatchers.IO) {
         if (!sourceFile.isFile || sourceFile.length() <= 0L) {
             return@withContext Result.failure(IllegalArgumentException("Arquivo inválido para importar."))
@@ -116,9 +117,14 @@ class LocalMediaRepository(private val context: Context) {
         val folder = SyncPaths.albumFromCanonical(canonicalPath)
         val relativePath = SyncPaths.mediaStoreRelativePathForImport(canonicalPath, kind)
         val mime = guessMimeType(displayName, kind)
+        val takenSec = takenAtEpochSeconds?.takeIf { it > 0L }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            takenSec?.let { seconds ->
+                put(MediaStore.MediaColumns.DATE_TAKEN, seconds * 1000L)
+                put(MediaStore.MediaColumns.DATE_MODIFIED, seconds)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -139,7 +145,8 @@ class LocalMediaRepository(private val context: Context) {
                 context.contentResolver.update(uri, done, null, null)
             }
             val id = ContentUris.parseId(uri)
-            val modified = sourceFile.lastModified().takeIf { it > 0L }?.div(1000L)
+            val modified = takenSec
+                ?: sourceFile.lastModified().takeIf { it > 0L }?.div(1000L)
                 ?: (System.currentTimeMillis() / 1000L)
             LocalMediaItem(
                 id = id,
@@ -148,6 +155,7 @@ class LocalMediaRepository(private val context: Context) {
                 bucketDisplayName = SyncPaths.albumListDisplayName(folder),
                 relativePath = relativePath,
                 dateAddedSeconds = System.currentTimeMillis() / 1000L,
+                dateTakenSeconds = takenSec,
                 dateModifiedSeconds = modified,
                 sizeBytes = sourceFile.length(),
                 kind = kind,
