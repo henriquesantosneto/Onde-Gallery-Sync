@@ -78,9 +78,6 @@ fun MediaDetailsBottomSheet(
                     error = null,
                     showAdvanced = showAdvanced,
                     onToggleAdvanced = { showAdvanced = !showAdvanced },
-                    onDelete = onDismiss,
-                    onFreeSpace = onDismiss,
-                    showActions = false,
                     showExpandedContent = true,
                 )
             }

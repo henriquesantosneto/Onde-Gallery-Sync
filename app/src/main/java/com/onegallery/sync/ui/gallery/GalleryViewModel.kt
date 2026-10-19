@@ -379,7 +379,11 @@ class GalleryViewModel(
     fun releaseSingle(canonicalPath: String, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             syncCoordinator.releaseLocalSpace(listOf(canonicalPath))
-                .onSuccess { onDone() }
+                .onSuccess {
+                    actionMessage.value =
+                        "Cópia local removida; miniatura no app e arquivo no OneDrive mantidos."
+                    onDone()
+                }
                 .onFailure { actionMessage.value = it.message }
         }
     }

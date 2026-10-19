@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -18,11 +17,13 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,6 +76,8 @@ fun MediaDetailScreen(
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
     var showAdvancedDetails by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var detailInfo by remember { mutableStateOf<MediaDetailInfo?>(null) }
     var detailLoading by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -222,25 +225,6 @@ fun MediaDetailScreen(
                     }
                 },
                 actions = {
-                    if (detailPaths.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                if (embeddedDetailsSheet) {
-                                    sheetScope.launch {
-                                        if (bottomSheetState.currentValue == SheetValue.Expanded) {
-                                            bottomSheetState.partialExpand()
-                                        } else {
-                                            bottomSheetState.expand()
-                                        }
-                                    }
-                                } else {
-                                    showMediaDetailsModal = true
-                                }
-                            },
-                        ) {
-                            Icon(Icons.Outlined.Info, contentDescription = "Detalhes")
-                        }
-                    }
                     if (!state.selectionMode && currentItem != null) {
                         IconButton(onClick = { immersive = true }) {
                             Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
@@ -266,6 +250,45 @@ fun MediaDetailScreen(
                                 else Icons.Outlined.RadioButtonUnchecked,
                                 contentDescription = "Selecionar",
                             )
+                        }
+                        Box {
+                            IconButton(onClick = { showOverflowMenu = true }) {
+                                Icon(Icons.Outlined.MoreVert, contentDescription = "Mais opções")
+                            }
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false },
+                            ) {
+                                if (detailPaths.isNotEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Detalhes") },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            if (embeddedDetailsSheet) {
+                                                sheetScope.launch {
+                                                    bottomSheetState.expand()
+                                                }
+                                            } else {
+                                                showMediaDetailsModal = true
+                                            }
+                                        },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Liberar espaço") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        viewModel.releaseSingle(currentPath)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Excluir") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showDeleteConfirm = true
+                                    },
+                                )
+                            }
                         }
                     }
                 },
@@ -345,13 +368,6 @@ fun MediaDetailScreen(
                     error = activePageError,
                     showAdvanced = showAdvancedDetails,
                     onToggleAdvanced = { showAdvancedDetails = !showAdvancedDetails },
-                    onDelete = {
-                        currentPath?.let { path -> viewModel.deleteSingle(path, onBack) }
-                    },
-                    onFreeSpace = {
-                        currentPath?.let(viewModel::releaseSingle)
-                    },
-                    showActions = true,
                     showExpandedContent = detailsSheetExpanded,
                 )
             },
@@ -376,6 +392,17 @@ fun MediaDetailScreen(
             syncCoordinator = syncCoordinator,
             mediaCacheRepository = mediaCacheRepository,
             onDismiss = { showMediaDetailsModal = false },
+        )
+    }
+
+    if (showDeleteConfirm && currentPath != null) {
+        DeleteSelectionDialog(
+            count = 1,
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                viewModel.deleteSingle(currentPath, onBack)
+            },
         )
     }
 

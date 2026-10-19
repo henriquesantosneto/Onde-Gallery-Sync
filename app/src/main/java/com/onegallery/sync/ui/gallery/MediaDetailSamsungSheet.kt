@@ -1,15 +1,11 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,9 +31,6 @@ fun MediaDetailSamsungSheet(
     error: String?,
     showAdvanced: Boolean,
     onToggleAdvanced: () -> Unit,
-    onDelete: () -> Unit,
-    onFreeSpace: () -> Unit,
-    showActions: Boolean = true,
     showExpandedContent: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -124,24 +117,6 @@ fun MediaDetailSamsungSheet(
                         locationLabel = info.locationLabel,
                         modifier = Modifier.padding(top = 12.dp),
                     )
-                }
-
-                if (showActions) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        TextButton(onClick = onFreeSpace) {
-                            Icon(Icons.Outlined.CloudOff, contentDescription = null)
-                            Text(" Liberar espaço")
-                        }
-                        TextButton(onClick = onDelete) {
-                            Icon(Icons.Outlined.Delete, contentDescription = null)
-                            Text(" Excluir")
-                        }
-                    }
                 }
 
                 TextButton(
