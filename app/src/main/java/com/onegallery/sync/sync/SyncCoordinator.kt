@@ -495,6 +495,22 @@ class SyncCoordinator(
         }
     }
 
+    /** Item já refletido no índice — evita upsert em todo sync quando nada mudou no aparelho. */
+    private fun isLocalIndexRowUnchanged(
+        existing: SyncMetadataEntity?,
+        item: LocalMediaItem,
+        canonical: String,
+    ): Boolean {
+        if (existing == null) return false
+        if (existing.localMediaId != item.id) return false
+        if (existing.canonicalPath != canonical) return false
+        if (existing.localModifiedAt != item.dateModifiedSeconds) return false
+        if (existing.localContentUri != item.uri.toString()) return false
+        if (existing.displayName != item.displayName) return false
+        if (existing.pendingDeleteTarget != PendingDeleteTarget.NONE) return false
+        return true
+    }
+
     /** Atualiza SQLite a partir do MediaStore; retorna caminhos canônicos vistos no aparelho. */
     private suspend fun applyLocalIndexPass(
         items: List<LocalMediaItem>,
@@ -522,6 +538,8 @@ class SyncCoordinator(
             if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
                 seenPaths.add(existingByLocal.canonicalPath)
                 pathsToDelete.add(existingByLocal.canonicalPath)
+            } else if (isLocalIndexRowUnchanged(existing, item, canonical)) {
+                return@forEachIndexed
             }
             pendingUpserts.add(
                 mergeLocalIntoEntity(
