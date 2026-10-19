@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -39,22 +40,22 @@ import com.onegallery.sync.R
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
-import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
-import kotlinx.coroutines.launch
+import com.onegallery.sync.sync.SyncTaskLauncher
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     authManager: MsalAuthManager,
-    syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
     onOpenCloudFolderPicker: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as OneGalleryApplication
-    val authState by authManager.state.collectAsStateWithLifecycle()
+    val syncCoordinator = app.syncCoordinator
+    val syncTasks = remember { SyncTaskLauncher.from(app) }
     val scope = rememberCoroutineScope()
+    val authState by authManager.state.collectAsStateWithLifecycle()
     val syncState by syncCoordinator.state.collectAsStateWithLifecycle()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
@@ -206,7 +207,7 @@ fun SettingsScreen(
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     OutlinedButton(
                         onClick = {
-                            scope.launch { syncCoordinator.runIndexSanitation(userInitiated = true) }
+                            syncTasks.runIndexSanitation(userInitiated = true)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !syncState.isRunning,

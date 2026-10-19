@@ -33,6 +33,10 @@ class SyncTaskLauncher(
         scope.launch { coordinator.refreshPhotoLocations(userInitiated = userInitiated) }
     }
 
+    fun runIndexSanitation(userInitiated: Boolean = true) {
+        scope.launch { coordinator.runIndexSanitation(userInitiated = userInitiated) }
+    }
+
     fun clearStoredItemErrors(onDone: (Int) -> Unit = {}) {
         scope.launch {
             val count = coordinator.clearStoredItemErrors()

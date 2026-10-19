@@ -281,11 +281,16 @@ class SyncCoordinator(
                     sanitized.copy(fullRebuild = rebuilt || sanitized.fullRebuild)
                 }.onFailure { error ->
                     indexPassLocalItemsById = emptyMap()
+                    val cancelled = error is CancellationException || isComposeScopeCancellation(error)
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItem = null,
-                        lastMessage = error.message ?: "Falha na manutenção do índice.",
+                        lastMessage = when {
+                            cancelled -> cancellationResultMessage()
+                            else -> error.message ?: "Falha na manutenção do índice."
+                        },
                     )
+                    if (cancelled) resetSyncCancel()
                 }
             }
         }
@@ -1806,6 +1811,11 @@ class SyncCoordinator(
                 ),
             )
         }
+    }
+
+    private fun isComposeScopeCancellation(error: Throwable): Boolean {
+        val msg = error.message?.lowercase().orEmpty()
+        return msg.contains("left the composition") || msg.contains("scope left")
     }
 
     private fun isTransientNetworkMessage(message: String): Boolean {

@@ -389,7 +389,6 @@ fun OneGalleryApp(
             composable(MainTab.Settings.route) {
                 SettingsScreen(
                     authManager = authManager,
-                    syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
                     onOpenCloudFolderPicker = { openCloudFolderPicker() },
                 )
