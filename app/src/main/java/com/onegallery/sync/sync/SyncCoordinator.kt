@@ -58,6 +58,11 @@ data class SyncUiState(
     val lastMessage: String = "Pronto para sincronizar.",
     val isRunning: Boolean = false,
     val isOffline: Boolean = false,
+    val progressPhase: SyncProgressPhase = SyncProgressPhase.IDLE,
+    /** Linha principal do que está acontecendo agora (spinner). */
+    val activityHeadline: String = "",
+    /** Detalhes numéricos / sub-etapa (ex.: 1200/2943 itens). */
+    val activityDetail: String = "",
     /** Arquivo em transferência agora (upload/download). */
     val activeItem: ActiveSyncItem? = null,
     /** Fila prevista/em andamento nesta execução (uploads reais, não só PENDING_* no Room). */
@@ -136,6 +141,34 @@ class SyncCoordinator(
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
     private val longTaskMutex = Mutex()
     private val foregroundGuard = SyncForegroundGuard(appContext)
+
+    private fun setSyncProgress(
+        phase: SyncProgressPhase,
+        headline: String,
+        detail: String = "",
+        alsoUpdateLastMessage: Boolean = true,
+    ) {
+        _state.value = _state.value.copy(
+            progressPhase = phase,
+            activityHeadline = headline,
+            activityDetail = detail,
+            lastMessage = if (alsoUpdateLastMessage && detail.isNotBlank()) {
+                "$headline\n$detail"
+            } else if (alsoUpdateLastMessage) {
+                headline
+            } else {
+                _state.value.lastMessage
+            },
+        )
+    }
+
+    private fun clearSyncProgressActivity() {
+        _state.value = _state.value.copy(
+            progressPhase = SyncProgressPhase.IDLE,
+            activityHeadline = "",
+            activityDetail = "",
+        )
+    }
 
     fun requestCancelSync() {
         cancelActiveSync(SyncCancelReason.USER, applyUserCooldown = true, inProgressMessage = "Cancelando…")
@@ -541,6 +574,15 @@ class SyncCoordinator(
                 coroutineContext.ensureActive()
                 yield()
             }
+            if (_state.value.isRunning && (index == 0 || index % 400 == 0)) {
+                setSyncProgress(
+                    SyncProgressPhase.INDEXING_LOCAL,
+                    "Indexando biblioteca do aparelho…",
+                    "${index.coerceAtLeast(1)}/${items.size} arquivos · " +
+                        "${pendingUpserts.size} alteração(ões) pendentes no índice.",
+                    alsoUpdateLastMessage = false,
+                )
+            }
             val canonical = SyncPaths.canonicalFromLocal(item)
             seenPaths.add(canonical)
             val existingByPath = existingByCanonical[canonical]
@@ -632,19 +674,44 @@ class SyncCoordinator(
                     runQueue = emptyList(),
                     activeItem = null,
                     lastMessage = "Sincronizando com OneDrive…",
+                    progressPhase = SyncProgressPhase.PREPARING,
+                    activityHeadline = "Preparando sincronismo…",
+                    activityDetail = "Conta Microsoft, pendências e índice local.",
                 )
                 runCatching {
                     ensureNotCancelled()
+                    setSyncProgress(
+                        SyncProgressPhase.PREPARING,
+                        "Verificando pendências antigas…",
+                        "Exclusões legadas e rebuild de índice, se necessário.",
+                    )
                     flushLegacyPendingDeletes()
                     applyPendingIndexRebuildIfNeeded()
-                    _state.value = _state.value.copy(
-                        lastMessage = "Indexando biblioteca local…",
+                    setSyncProgress(
+                        SyncProgressPhase.INDEXING_LOCAL,
+                        "Indexando biblioteca do aparelho…",
+                        "Lendo MediaStore (fotos, vídeos, pastas).",
                     )
-                    indexLocalLibrary(manageRunningState = false).getOrThrow()
-                    _state.value = _state.value.copy(lastMessage = "Sincronizando com OneDrive…")
+                    val localCount = indexLocalLibrary(manageRunningState = false).getOrThrow()
+                    setSyncProgress(
+                        SyncProgressPhase.INDEXING_LOCAL,
+                        "Indexação local concluída",
+                        "$localCount item(ns) vistos no aparelho nesta passagem.",
+                    )
                     ensureSyncMayContinue()
+                    setSyncProgress(
+                        SyncProgressPhase.LISTING_REMOTE,
+                        "Listando pasta no OneDrive…",
+                        oneDriveRepository.syncRootLabel()?.let { "Pasta: $it" }
+                            ?: "Aguarde — pode demorar com bibliotecas grandes.",
+                    )
                     val remoteFiles = listRemoteFiles().getOrThrow()
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
+                    setSyncProgress(
+                        SyncProgressPhase.LISTING_REMOTE,
+                        "Listagem na nuvem concluída",
+                        "${remoteFiles.size} arquivo(s) na pasta de sync.",
+                    )
 
                     var uploaded = 0
                     var pendingDownloadPlaceholders = 0
@@ -652,13 +719,39 @@ class SyncCoordinator(
 
                     val allRows = syncMetadataDao.getAll()
                     val rows = allRows.filter { it.localMediaId != null }
+                    setSyncProgress(
+                        SyncProgressPhase.RECONCILING_LOCAL,
+                        "Montando fila de sincronismo…",
+                        "${allRows.size} no índice · ${rows.size} com cópia local · " +
+                            "${remoteFiles.size} na nuvem.",
+                    )
                     val plannedUploads = planUploadsForSync(rows, remoteByPath)
-                    setRunQueueFromEntities(buildSyncRunQueueEntities(plannedUploads, allRows))
+                    val queueEntities = buildSyncRunQueueEntities(plannedUploads, allRows)
+                    setRunQueueFromEntities(queueEntities)
+                    setSyncProgress(
+                        SyncProgressPhase.RECONCILING_LOCAL,
+                        "Fila pronta",
+                        "${queueEntities.size} operação(ões) nesta execução " +
+                            "(${plannedUploads.size} envio(s) planejado(s)).",
+                    )
 
                     val knownPaths = mutableSetOf<String>()
+                    var localPassIndex = 0
+                    val localPassTotal = rows.size
 
                     for (row in rows) {
                         ensureSyncMayContinue()
+                        localPassIndex++
+                        if (localPassIndex == 1 || localPassIndex % 24 == 0 || localPassIndex == localPassTotal) {
+                            setSyncProgress(
+                                SyncProgressPhase.RECONCILING_LOCAL,
+                                "Comparando itens locais com a nuvem…",
+                                "Progresso $localPassIndex/$localPassTotal · " +
+                                    "$uploaded enviado(s) · " +
+                                    "$pendingDownloadPlaceholders miniatura(s) de download.",
+                                alsoUpdateLastMessage = false,
+                            )
+                        }
                         knownPaths.add(row.canonicalPath)
                         if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
                         val remote = remoteByPath[row.canonicalPath]
@@ -689,9 +782,21 @@ class SyncCoordinator(
 
                     uploaded += applyPendingUploadRetries(remoteByPath)
 
+                    val cloudOnlyCandidates = remoteByPath.keys.count { it !in knownPaths }
+                    var cloudOnlyProcessed = 0
                     remoteByPath.forEach { (path, remote) ->
                         ensureSyncMayContinue()
                         if (path in knownPaths) return@forEach
+                        cloudOnlyProcessed++
+                        if (cloudOnlyProcessed == 1 || cloudOnlyProcessed % 128 == 0) {
+                            setSyncProgress(
+                                SyncProgressPhase.REGISTERING_CLOUD_ONLY,
+                                "Registrando fotos/vídeos só na nuvem…",
+                                "$cloudOnlyProcessed / $cloudOnlyCandidates novos no índice · " +
+                                    "$cloudOnly já gravados nesta passagem.",
+                                alsoUpdateLastMessage = false,
+                            )
+                        }
                         val existing = syncMetadataDao.getByCanonicalPath(path)
                         if (existing == null) {
                             syncMetadataDao.upsert(
@@ -726,13 +831,30 @@ class SyncCoordinator(
                         )
                     }
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
-                    _state.value = _state.value.copy(
-                        lastMessage = "Indexando localização GPS (incl. nuvem)…",
+                    setSyncProgress(
+                        SyncProgressPhase.BACKFILL_GPS,
+                        "Indexando localização (GPS)…",
+                        "EXIF local e trechos na nuvem (limite por passagem).",
                     )
                     backfillMissingGpsLocations()
+                    setSyncProgress(
+                        SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+                        "Indexando data de captura…",
+                        "Ordenação por data na galeria; nuvem limitada por sync.",
+                    )
                     backfillMissingCaptureTimes()
                     indexPassLocalItemsById = emptyMap()
+                    setSyncProgress(
+                        SyncProgressPhase.PREFETCH_THUMBNAILS,
+                        "Baixando miniaturas da nuvem…",
+                        "Só previews — originais continuam sob demanda.",
+                    )
                     prefetchCloudThumbnails()
+                    setSyncProgress(
+                        SyncProgressPhase.SANITIZING_INDEX,
+                        "Verificando consistência do índice…",
+                        "Remove entradas obsoletas e alinha com aparelho/nuvem.",
+                    )
                     val seenLocalIds = indexPassLocalItemsById.keys
                     val seenLocalPaths = indexPassLocalItemsById.values.map {
                         SyncPaths.canonicalFromLocal(it)
@@ -746,12 +868,21 @@ class SyncCoordinator(
                     val gpsNote = _state.value.lastMessage.takeIf {
                         it.startsWith("Localização GPS:") || it.startsWith("Data de captura:")
                     }
+                    setSyncProgress(
+                        SyncProgressPhase.FINISHING,
+                        "Finalizando sincronismo…",
+                        "",
+                        alsoUpdateLastMessage = false,
+                    )
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItem = null,
                         runQueue = emptyList(),
                         isOffline = false,
                         pendingOperations = pendingCount,
+                        progressPhase = SyncProgressPhase.IDLE,
+                        activityHeadline = "",
+                        activityDetail = "",
                         lastMessage = buildString {
                             append(
                                 "Sync: $uploaded enviados, $pendingDownloadPlaceholders download(s) " +
@@ -774,6 +905,9 @@ class SyncCoordinator(
                         isRunning = false,
                         activeItem = null,
                         runQueue = emptyList(),
+                        progressPhase = SyncProgressPhase.IDLE,
+                        activityHeadline = "",
+                        activityDetail = "",
                         lastMessage = when {
                             cancelled -> cancellationResultMessage()
                             else -> error.message ?: "Erro na sincronização."
@@ -1659,12 +1793,22 @@ class SyncCoordinator(
             if (honorSyncCancel && index % 12 == 0) {
                 ensureNotCancelled()
             }
+            if (_state.value.isRunning && (index == 0 || index % 16 == 0)) {
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Baixando miniaturas da nuvem…",
+                    "${index + 1}/${rows.size} nesta passagem · $cached salvas em cache.",
+                    alsoUpdateLastMessage = false,
+                )
+            }
             coroutineContext.ensureActive()
             ensureThumbnailCached(row.canonicalPath).getOrNull()?.let { cached++ }
         }
         if (cached > 0 && honorSyncCancel) {
-            _state.value = _state.value.copy(
-                lastMessage = "Miniaturas na nuvem: $cached de ${rows.size} nesta passagem.",
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas da nuvem",
+                "$cached de ${rows.size} nesta passagem (originais não baixados).",
             )
         }
         return cached
@@ -1684,11 +1828,22 @@ class SyncCoordinator(
         val maxCloudProbesPerRun = 200
         val maxLocalProbesPerRun = 400
         var indexed = 0
+        val candidates = rows.size
         rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
             .forEachIndexed { index, row ->
                 if (index % 16 == 0) {
                     ensureNotCancelled()
                     coroutineContext.ensureActive()
+                    if (_state.value.isRunning) {
+                        setSyncProgress(
+                            SyncProgressPhase.BACKFILL_GPS,
+                            "Indexando localização (GPS)…",
+                            "Analisados $index/$candidates · $indexed com GPS · " +
+                                "local $localProbes/${maxLocalProbesPerRun} · " +
+                                "nuvem $cloudProbes/${maxCloudProbesPerRun}.",
+                            alsoUpdateLastMessage = false,
+                        )
+                    }
                 }
                 val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
                 val resolved = when {
@@ -1722,8 +1877,10 @@ class SyncCoordinator(
                     append(" (limite nesta passagem; sincronize de novo para o restante)")
                 }
             }
-            _state.value = _state.value.copy(
-                lastMessage = "Localização GPS: $indexed item(ns) indexado(s)$suffix",
+            setSyncProgress(
+                SyncProgressPhase.BACKFILL_GPS,
+                "Localização GPS",
+                "$indexed item(ns) indexado(s)$suffix",
             )
         }
     }
@@ -1776,11 +1933,21 @@ class SyncCoordinator(
         var cloudProbes = 0
         val maxCloudProbesPerRun = 200
         var indexed = 0
+        val candidates = rows.size
         rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
             .forEachIndexed { index, row ->
                 if (index % 16 == 0) {
                     ensureNotCancelled()
                     coroutineContext.ensureActive()
+                    if (_state.value.isRunning) {
+                        setSyncProgress(
+                            SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+                            "Indexando data de captura…",
+                            "Analisados $index/$candidates · $indexed datas encontradas · " +
+                                "nuvem $cloudProbes/${maxCloudProbesPerRun}.",
+                            alsoUpdateLastMessage = false,
+                        )
+                    }
                 }
                 val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
                 val resolved = when {
@@ -1806,8 +1973,10 @@ class SyncCoordinator(
             } else {
                 ""
             }
-            _state.value = _state.value.copy(
-                lastMessage = "Data de captura: $indexed item(ns) indexado(s)$suffix",
+            setSyncProgress(
+                SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+                "Data de captura",
+                "$indexed item(ns) indexado(s)$suffix",
             )
         }
     }

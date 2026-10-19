@@ -41,6 +41,8 @@ import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.sync.ActiveSyncItem
 import com.onegallery.sync.sync.SyncQueueDisplayRow
+import com.onegallery.sync.sync.SyncProgressPhase
+import com.onegallery.sync.sync.runningHeadlineFallback
 import androidx.compose.ui.platform.LocalContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,11 +99,33 @@ fun SyncStatusScreen(
                             modifier = Modifier.padding(top = 6.dp),
                             fontWeight = FontWeight.Medium,
                         )
-                        Text(
-                            coordinatorState.lastMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
+                        if (coordinatorState.isRunning) {
+                            val detail = coordinatorState.activityDetail.ifBlank {
+                                coordinatorState.lastMessage.lineSequence().drop(1).joinToString("\n")
+                            }
+                            Text(
+                                coordinatorState.activityHeadline.ifBlank {
+                                    coordinatorState.progressPhase.runningHeadlineFallback()
+                                },
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 12.dp),
+                            )
+                            if (detail.isNotBlank()) {
+                                Text(
+                                    detail,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
+                        } else {
+                            Text(
+                                coordinatorState.lastMessage,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(top = 12.dp),
+                            )
+                        }
                         if (coordinatorState.isOffline) {
                             Text(
                                 "Sem internet — leitura local e cache.",
@@ -123,12 +147,15 @@ fun SyncStatusScreen(
                                 CircularProgressIndicator(strokeWidth = 2.dp)
                                 Text(
                                     coordinatorState.activeItem?.operationLabel
-                                        ?: when {
-                                            coordinatorState.lastMessage.contains("Cancelando", ignoreCase = true) ->
-                                                "Cancelando…"
-                                            coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
-                                                "Indexando biblioteca local…"
-                                            else -> "Sincronizando com OneDrive…"
+                                        ?: coordinatorState.activityHeadline.ifBlank {
+                                            when {
+                                                coordinatorState.lastMessage.contains(
+                                                    "Cancelando",
+                                                    ignoreCase = true,
+                                                ) -> "Cancelando…"
+                                                else ->
+                                                    coordinatorState.progressPhase.runningHeadlineFallback()
+                                            }
                                         },
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
@@ -166,18 +193,34 @@ fun SyncStatusScreen(
                                 }
                             }
                         } else if (coordinatorState.isRunning) {
-                            Text(
-                                when {
-                                    coordinatorState.lastMessage.contains("Indexando", ignoreCase = true) ->
-                                        "Indexando biblioteca local…"
-                                    coordinatorState.lastMessage.contains("Localização GPS", ignoreCase = true) ->
-                                        "Atualizando localização das fotos…"
-                                    else -> "Preparando fila de sincronismo…"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 12.dp),
-                            )
+                            val phaseHint = when (coordinatorState.progressPhase) {
+                                SyncProgressPhase.RECONCILING_LOCAL ->
+                                    "Comparando cada item local com a nuvem e gerando miniaturas quando necessário."
+                                SyncProgressPhase.REGISTERING_CLOUD_ONLY ->
+                                    "Incluindo no índice arquivos que existem só no OneDrive."
+                                SyncProgressPhase.LISTING_REMOTE ->
+                                    "Varrendo subpastas via Microsoft Graph (pode levar vários minutos)."
+                                SyncProgressPhase.BACKFILL_GPS,
+                                SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+                                ->
+                                    "Metadados extras para mapa e ordenação; há limite por passagem na nuvem."
+                                SyncProgressPhase.PREFETCH_THUMBNAILS ->
+                                    "Grava previews no aparelho — não baixa fotos/vídeos completos."
+                                SyncProgressPhase.SANITIZING_INDEX ->
+                                    "Última checagem de entradas duplicadas ou órfãs."
+                                else ->
+                                    coordinatorState.activityDetail.ifBlank {
+                                        "Aguarde — etapa em andamento."
+                                    }
+                            }
+                            if (phaseHint.isNotBlank()) {
+                                Text(
+                                    phaseHint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 12.dp),
+                                )
+                            }
                         }
                         Button(
                             onClick = { syncTasks.runBidirectionalSync(userInitiated = true) },
