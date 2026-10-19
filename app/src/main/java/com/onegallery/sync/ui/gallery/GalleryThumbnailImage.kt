@@ -2,7 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -94,7 +94,7 @@ fun MediaThumbnailPlaceholder(
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (showCloudIcon) {
-            Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+            Icon(Icons.Outlined.Cloud, contentDescription = null)
         }
     }
 }

@@ -446,9 +446,9 @@ private fun MediaThumbnail(
                     .size(overlayIconSize),
             )
         }
-        if (item.showCloudBadge) {
+        galleryCloudOverlayState(item)?.let { cloudState ->
             GalleryCloudBadge(
-                state = cloudBadgeState(item),
+                state = cloudState,
                 iconSize = overlayIconSize,
                 modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
             )
