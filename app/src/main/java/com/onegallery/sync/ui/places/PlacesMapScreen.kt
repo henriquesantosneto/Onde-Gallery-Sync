@@ -26,10 +26,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,14 +65,13 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.location.LocationComponentActivationOptions
-import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -110,8 +112,11 @@ fun PlacesMapScreen(
     val pins = remember(state.geoItems) { buildPhotoMapPins(state.geoItems) }
     var selectedPin by remember { mutableStateOf<PhotoMapPin?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -208,6 +213,13 @@ fun PlacesMapScreen(
                         onRequestDeviceLocationPermission = {
                             pendingLocateAfterPermission = true
                             deviceLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        },
+                        onLocateFailed = {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    "Não foi possível obter sua localização. Ative o GPS e tente de novo.",
+                                )
+                            }
                         },
                     )
                     SmallFloatingActionButton(
@@ -329,6 +341,7 @@ private fun PlacesMapView(
     locateUserRequest: Int,
     onPinSelected: (PhotoMapPin) -> Unit,
     onRequestDeviceLocationPermission: () -> Unit,
+    onLocateFailed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -342,7 +355,6 @@ private fun PlacesMapView(
     val markerToPin = remember { mutableStateMapOf<Marker, PhotoMapPin>() }
     var mapInitialized by remember { mutableStateOf(false) }
     var initialCameraApplied by remember { mutableStateOf(false) }
-    var locationComponentReady by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -375,27 +387,6 @@ private fun PlacesMapView(
         }
     }
 
-    LaunchedEffect(mapRef, styleReady, deviceLocationGranted) {
-        val map = mapRef ?: return@LaunchedEffect
-        if (!styleReady) return@LaunchedEffect
-        if (deviceLocationGranted && !locationComponentReady) {
-            runCatching {
-                val style = map.style ?: return@LaunchedEffect
-                val component = map.locationComponent
-                if (!component.isLocationComponentEnabled) {
-                    component.activateLocationComponent(
-                        LocationComponentActivationOptions.builder(context, style)
-                            .useDefaultLocationEngine(true)
-                            .build(),
-                    )
-                    component.isLocationComponentEnabled = true
-                    component.cameraMode = CameraMode.NONE
-                }
-                locationComponentReady = true
-            }
-        }
-    }
-
     LaunchedEffect(mapRef, styleReady, pins, initialCameraApplied) {
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady || initialCameraApplied || pins.isEmpty()) return@LaunchedEffect
@@ -403,7 +394,7 @@ private fun PlacesMapView(
         animateCameraToPhotoPins(map, pins)
     }
 
-    LaunchedEffect(locateUserRequest, mapRef, styleReady, deviceLocationGranted, locationComponentReady) {
+    LaunchedEffect(locateUserRequest, mapRef, styleReady, deviceLocationGranted) {
         if (locateUserRequest == 0) return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
@@ -411,16 +402,13 @@ private fun PlacesMapView(
             onRequestDeviceLocationPermission()
             return@LaunchedEffect
         }
-        val component = map.locationComponent
-        if (!component.isLocationComponentEnabled) return@LaunchedEffect
-        component.cameraMode = CameraMode.NONE
-        val fromEngine = component.lastKnownLocation
-        val target = when {
-            fromEngine != null -> LatLng(fromEngine.latitude, fromEngine.longitude)
-            else -> lastKnownDeviceLatLng(context)
-        }
+        val target = withContext(Dispatchers.IO) { fetchDeviceLatLng(context) }
         if (target != null) {
-            map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 15.0))
+            runCatching {
+                map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 15.0))
+            }.onFailure { onLocateFailed() }
+        } else {
+            onLocateFailed()
         }
     }
 
