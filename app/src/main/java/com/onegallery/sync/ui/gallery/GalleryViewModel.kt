@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 data class GalleryUiState(
@@ -224,6 +226,7 @@ class GalleryViewModel(
 
     fun refresh() {
         viewModelScope.launch {
+            coroutineContext[Job]?.let { syncCoordinator.registerManagedSyncJob(it) }
             loading.value = true
             errorState.value = null
             syncCoordinator.runBidirectionalSync(userInitiated = false)

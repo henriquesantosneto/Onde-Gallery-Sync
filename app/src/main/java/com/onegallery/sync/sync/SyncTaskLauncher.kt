@@ -9,8 +9,13 @@ class SyncTaskLauncher(
     private val scope: CoroutineScope,
     private val coordinator: SyncCoordinator,
 ) {
+    private fun launchManaged(block: suspend () -> Unit) {
+        val job = scope.launch { block() }
+        coordinator.registerManagedSyncJob(job)
+    }
+
     fun runBidirectionalSync(userInitiated: Boolean = false) {
-        scope.launch { coordinator.runBidirectionalSync(userInitiated = userInitiated) }
+        launchManaged { coordinator.runBidirectionalSync(userInitiated = userInitiated) }
     }
 
     fun connectGraphSyncFolderAndSync(
@@ -19,22 +24,22 @@ class SyncTaskLauncher(
         label: String,
         userInitiated: Boolean = true,
     ) {
-        scope.launch {
+        launchManaged {
             coordinator.connectGraphSyncFolder(itemId, driveRelativePath, label)
             coordinator.runBidirectionalSync(userInitiated = userInitiated)
         }
     }
 
     fun indexLocalLibrary(userInitiated: Boolean = false) {
-        scope.launch { coordinator.indexLocalLibrary(userInitiated = userInitiated) }
+        launchManaged { coordinator.indexLocalLibrary(userInitiated = userInitiated) }
     }
 
     fun refreshPhotoLocations(userInitiated: Boolean = true) {
-        scope.launch { coordinator.refreshPhotoLocations(userInitiated = userInitiated) }
+        launchManaged { coordinator.refreshPhotoLocations(userInitiated = userInitiated) }
     }
 
     fun runIndexSanitation(userInitiated: Boolean = true) {
-        scope.launch { coordinator.runIndexSanitation(userInitiated = userInitiated) }
+        launchManaged { coordinator.runIndexSanitation(userInitiated = userInitiated) }
     }
 
     fun clearStoredItemErrors(onDone: (Int) -> Unit = {}) {

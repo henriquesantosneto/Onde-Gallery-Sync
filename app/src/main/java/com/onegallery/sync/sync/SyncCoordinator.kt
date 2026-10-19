@@ -139,6 +139,7 @@ class SyncCoordinator(
     private val syncCancelRequested = AtomicBoolean(false)
     private val syncCancelReason = AtomicReference(SyncCancelReason.NONE)
     private val activeLongTaskJob = AtomicReference<Job?>(null)
+    private val managedSyncJobs = ConcurrentHashMap.newKeySet<Job>()
     private val pendingIndexRebuild = AtomicBoolean(false)
     /** Cache da passagem atual de indexação (evita re-varrer MediaStore no backfill). */
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
@@ -167,7 +168,17 @@ class SyncCoordinator(
     }
 
     fun requestCancelSync() {
-        cancelActiveSync(SyncCancelReason.USER, applyUserCooldown = true, inProgressMessage = "Cancelando…")
+        cancelActiveSync(
+            SyncCancelReason.USER,
+            applyUserCooldown = true,
+            inProgressMessage = "Cancelando todas as tarefas…",
+        )
+    }
+
+    /** Jobs de sync/index lançados fora do mutex (fila, galeria, WorkManager). */
+    fun registerManagedSyncJob(job: Job) {
+        managedSyncJobs.add(job)
+        job.invokeOnCompletion { managedSyncJobs.remove(job) }
     }
 
     /** Interrompe sync em andamento quando a política “apenas Wi‑Fi” não permite a rede atual. */
@@ -210,6 +221,7 @@ class SyncCoordinator(
             runQueue = emptyList(),
             activeItem = null,
         )
+        cancelAllManagedSyncJobs(inProgressMessage)
         val job = activeLongTaskJob.get()
         if (job != null) {
             job.cancel(CancellationException(inProgressMessage))
@@ -220,7 +232,20 @@ class SyncCoordinator(
                 runQueue = emptyList(),
                 lastMessage = completedMessageForCancelReason(reason),
             )
-            resetSyncCancel()
+            if (reason != SyncCancelReason.USER) {
+                resetSyncCancel()
+            }
+        }
+    }
+
+    private fun cancelAllManagedSyncJobs(message: String) {
+        val pending = managedSyncJobs.toList()
+        managedSyncJobs.clear()
+        val cancelError = CancellationException(message)
+        pending.forEach { job ->
+            if (job.isActive) {
+                job.cancel(cancelError)
+            }
         }
     }
 
@@ -262,8 +287,20 @@ class SyncCoordinator(
     private suspend fun bindActiveLongTaskJob() {
         val job = coroutineContext[Job] ?: return
         activeLongTaskJob.set(job)
+        registerManagedSyncJob(job)
         job.invokeOnCompletion { activeLongTaskJob.compareAndSet(job, null) }
     }
+
+    private fun prepareSyncSession(userInitiated: Boolean) {
+        if (userInitiated) {
+            resetSyncCancel()
+        } else {
+            ensureNotCancelled()
+        }
+    }
+
+    private fun isUserCancellation(): Boolean =
+        syncCancelReason.get() == SyncCancelReason.USER
 
     /**
      * Verifica o índice contra aparelho + pasta na nuvem e remove entradas órfãs.
@@ -276,7 +313,7 @@ class SyncCoordinator(
         return longTaskMutex.withLock {
             withContext(Dispatchers.Default) {
                 runCatching {
-                    resetSyncCancel()
+                    prepareSyncSession(userInitiated)
                     bindActiveLongTaskJob()
                     _state.value = _state.value.copy(
                         isRunning = true,
@@ -320,6 +357,7 @@ class SyncCoordinator(
                 }.onFailure { error ->
                     indexPassLocalItemsById = emptyMap()
                     val cancelled = error is CancellationException || isComposeScopeCancellation(error)
+                    val userCancelled = cancelled && isUserCancellation()
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItem = null,
@@ -328,7 +366,9 @@ class SyncCoordinator(
                             else -> error.message ?: "Falha na manutenção do índice."
                         },
                     )
-                    if (cancelled) resetSyncCancel()
+                    if (cancelled && !userCancelled) {
+                        resetSyncCancel()
+                    }
                 }
             }
         }
@@ -474,6 +514,7 @@ class SyncCoordinator(
             ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
             return longTaskMutex.withLock {
                 foregroundGuard.runWithForeground {
+                    prepareSyncSession(userInitiated)
                     indexLocalLibraryBody(manageRunningState)
                 }
             }
@@ -483,7 +524,6 @@ class SyncCoordinator(
 
     private suspend fun indexLocalLibraryBody(manageRunningState: Boolean): Result<Int> {
         if (manageRunningState) {
-            resetSyncCancel()
             bindActiveLongTaskJob()
             _state.value = _state.value.copy(
                 isRunning = true,
@@ -539,11 +579,9 @@ class SyncCoordinator(
                         error.message ?: "Falha ao indexar mídia local."
                     },
                 )
-                if (cancelled) {
+                if (cancelled && !userCancelled) {
                     resetSyncCancel()
-                    if (!userCancelled) {
-                        scheduleThumbnailPrefetchAfterInterrupt()
-                    }
+                    scheduleThumbnailPrefetchAfterInterrupt()
                 }
             } else if (cancelled) {
                 throw error
@@ -689,7 +727,7 @@ class SyncCoordinator(
 
         return longTaskMutex.withLock {
             foregroundGuard.runWithForeground {
-                resetSyncCancel()
+                prepareSyncSession(userInitiated)
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,
@@ -936,11 +974,9 @@ class SyncCoordinator(
                             else -> error.message ?: "Erro na sincronização."
                         },
                     )
-                    if (cancelled) {
+                    if (cancelled && !userCancelled) {
                         resetSyncCancel()
-                        if (!userCancelled) {
-                            scheduleThumbnailPrefetchAfterInterrupt()
-                        }
+                        scheduleThumbnailPrefetchAfterInterrupt()
                     }
                 }
             }
@@ -954,7 +990,7 @@ class SyncCoordinator(
         }
         return longTaskMutex.withLock {
             foregroundGuard.runWithForeground {
-                resetSyncCancel()
+                prepareSyncSession(userInitiated)
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,
@@ -983,6 +1019,7 @@ class SyncCoordinator(
                     )
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
+                    val userCancelled = cancelled && isUserCancellation()
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItem = null,
@@ -992,7 +1029,9 @@ class SyncCoordinator(
                             error.message ?: "Erro ao indexar GPS."
                         },
                     )
-                    if (cancelled) resetSyncCancel()
+                    if (cancelled && !userCancelled) {
+                        resetSyncCancel()
+                    }
                 }
                 result
             }
@@ -1924,9 +1963,11 @@ class SyncCoordinator(
     /** Após cancelar sync/index, completa miniaturas pendentes sem refazer upload/download. */
     private fun scheduleThumbnailPrefetchAfterInterrupt() {
         val scope = backgroundScope ?: return
-        scope.launch {
+        val job = scope.launch {
+            if (syncCancelRequested.get()) return@launch
             if (!longTaskMutex.tryLock()) return@launch
             try {
+                if (syncCancelRequested.get()) return@launch
                 val cached = runCloudThumbnailPrefetch(maxPerRun = 96, honorSyncCancel = false)
                 if (cached > 0) {
                     val prefix = _state.value.lastMessage.substringBefore("\n")
@@ -1938,6 +1979,7 @@ class SyncCoordinator(
                 longTaskMutex.unlock()
             }
         }
+        registerManagedSyncJob(job)
     }
 
     /** Miniaturas da nuvem para grade/mapa/álbuns — sem baixar originais. */
