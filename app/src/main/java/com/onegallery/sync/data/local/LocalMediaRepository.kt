@@ -111,10 +111,7 @@ class LocalMediaRepository(private val context: Context) {
         }
         val collection = mediaCollectionUri(kind)
         val folder = SyncPaths.albumFromCanonical(canonicalPath)
-        val relativePath = when {
-            folder.equals("Raiz", ignoreCase = true) -> "Pictures/OneGallerySync/"
-            else -> "${folder.trim('/')}/"
-        }
+        val relativePath = SyncPaths.mediaStoreRelativePathForImport(canonicalPath, kind)
         val mime = guessMimeType(displayName, kind)
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)

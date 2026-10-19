@@ -84,9 +84,16 @@ interface GraphApiService {
         @Path("itemId") itemId: String,
     ): ResponseBody
 
+    @GET("v1.0/me/drive/items/{itemId}/thumbnails/0/large/content")
+    @Streaming
+    suspend fun downloadItemThumbnailLarge(
+        @Header("Authorization") authorization: String,
+        @Path("itemId") itemId: String,
+    ): ResponseBody
+
     @GET("v1.0/me/drive/items/{itemId}/thumbnails/0/medium/content")
     @Streaming
-    suspend fun downloadItemThumbnail(
+    suspend fun downloadItemThumbnailMedium(
         @Header("Authorization") authorization: String,
         @Path("itemId") itemId: String,
     ): ResponseBody

@@ -270,7 +270,17 @@ class OneDriveRepository(
     suspend fun downloadThumbnailToFile(itemId: String, destination: File): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()
-            graphApi.downloadItemThumbnail("Bearer $token", itemId).use { body ->
+            val auth = "Bearer $token"
+            val large = runCatching {
+                graphApi.downloadItemThumbnailLarge(auth, itemId).use { body ->
+                    destination.outputStream().use { out ->
+                        body.byteStream().copyTo(out)
+                    }
+                }
+            }
+            if (large.isSuccess && destination.length() > 0L) return@runWithToken
+            destination.delete()
+            graphApi.downloadItemThumbnailMedium(auth, itemId).use { body ->
                 destination.outputStream().use { out ->
                     body.byteStream().copyTo(out)
                 }

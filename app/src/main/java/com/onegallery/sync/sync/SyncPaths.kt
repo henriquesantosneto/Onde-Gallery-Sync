@@ -1,6 +1,7 @@
 package com.onegallery.sync.sync
 
 import com.onegallery.sync.data.local.LocalMediaItem
+import com.onegallery.sync.data.local.MediaKind
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
@@ -86,6 +87,51 @@ object SyncPaths {
             parts.dropLast(1).joinToString("/")
         } else {
             "Raiz"
+        }
+    }
+
+    /**
+     * Caminho válido para [MediaStore.MediaColumns.RELATIVE_PATH] (Android 10+).
+     * Pastas como "Imagens" (PT) não são raiz permitida — só DCIM/Pictures (fotos) ou DCIM/Movies/Pictures (vídeos).
+     */
+    fun mediaStoreRelativePathForImport(canonicalPath: String, kind: MediaKind): String {
+        val folder = albumFromCanonical(canonicalPath).trim('/').replace('\\', '/')
+        if (folder.isBlank() || folder.equals("Raiz", ignoreCase = true)) {
+            return when (kind) {
+                MediaKind.VIDEO -> "Movies/OneGallerySync/"
+                MediaKind.IMAGE -> "Pictures/OneGallerySync/"
+            }
+        }
+        val allowedImagePrimaries = setOf("DCIM", "Pictures")
+        val allowedVideoPrimaries = setOf("DCIM", "Movies", "Pictures")
+        val allowed = when (kind) {
+            MediaKind.VIDEO -> allowedVideoPrimaries
+            MediaKind.IMAGE -> allowedImagePrimaries
+        }
+        val segments = folder.split('/').filter { it.isNotBlank() }
+        if (segments.isEmpty()) {
+            return when (kind) {
+                MediaKind.VIDEO -> "Movies/OneGallerySync/"
+                MediaKind.IMAGE -> "Pictures/OneGallerySync/"
+            }
+        }
+        val primary = segments.first()
+        val tail = segments.drop(1)
+        val primaryAllowed = allowed.any { primary.equals(it, ignoreCase = true) }
+        val normalizedPrimary = when {
+            primary.equals("DCIM", ignoreCase = true) -> "DCIM"
+            primary.equals("Pictures", ignoreCase = true) -> "Pictures"
+            primary.equals("Movies", ignoreCase = true) -> "Movies"
+            else -> primary
+        }
+        return if (primaryAllowed) {
+            (listOf(normalizedPrimary) + tail).joinToString("/") + "/"
+        } else {
+            val root = when (kind) {
+                MediaKind.VIDEO -> "Movies"
+                MediaKind.IMAGE -> "Pictures"
+            }
+            (listOf(root) + segments).joinToString("/") + "/"
         }
     }
 

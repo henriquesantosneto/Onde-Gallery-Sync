@@ -1,6 +1,8 @@
 package com.onegallery.sync.sync
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.LocalMediaRepository
@@ -1180,6 +1182,8 @@ class SyncCoordinator(
             )
         }
         syncMetadataDao.upsert(updated)
+        mediaCacheRepository.thumbFile(row.canonicalPath).delete()
+        ensureThumbnailCachedOnIo(row.canonicalPath)
         return Result.success(sourceFile)
     }
 
@@ -1687,13 +1691,39 @@ class SyncCoordinator(
         }
     }
 
-    private fun cacheImageThumbnailFromUri(uri: Uri, target: File): Boolean {
+    private fun cacheImageThumbnailFromUri(uri: Uri, target: File, maxSidePx: Int = THUMB_CACHE_MAX_SIDE_PX): Boolean {
         return runCatching {
-            appContext.contentResolver.openInputStream(uri)?.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+            target.parentFile?.mkdirs()
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            appContext.contentResolver.openInputStream(uri)?.use { probe ->
+                BitmapFactory.decodeStream(probe, null, bounds)
+            } ?: return false
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+            val sample = thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, maxSidePx)
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
             }
-            target.length() > 0L
+            val bitmap = appContext.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, decodeOpts)
+            } ?: return false
+            try {
+                target.outputStream().use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_CACHE_JPEG_QUALITY, out)
+                }
+                target.length() > 0L
+            } finally {
+                bitmap.recycle()
+            }
         }.getOrDefault(false)
+    }
+
+    private fun thumbnailInSampleSize(width: Int, height: Int, maxSidePx: Int): Int {
+        var sample = 1
+        while (width / sample > maxSidePx || height / sample > maxSidePx) {
+            sample *= 2
+        }
+        return sample.coerceAtLeast(1)
     }
 
     private fun mergeLocalIntoEntity(
@@ -2297,6 +2327,11 @@ class SyncCoordinator(
             SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.deleteRemoteItem(remoteId)
             SyncMode.LOCAL_ONLY -> Result.success(Unit)
         }
+    }
+
+    private companion object {
+        const val THUMB_CACHE_MAX_SIDE_PX = 1280
+        const val THUMB_CACHE_JPEG_QUALITY = 88
     }
 }
 
