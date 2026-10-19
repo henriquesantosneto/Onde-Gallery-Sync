@@ -201,7 +201,13 @@ class SyncCoordinator(
         if (applyUserCooldown) {
             syncPreferences.pauseAutoSyncAfterUserCancel()
         }
-        _state.value = _state.value.copy(lastMessage = inProgressMessage)
+        _state.value = _state.value.copy(
+            lastMessage = inProgressMessage,
+            activityHeadline = inProgressMessage,
+            activityDetail = "",
+            runQueue = emptyList(),
+            activeItem = null,
+        )
         val job = activeLongTaskJob.get()
         if (job != null) {
             job.cancel(CancellationException(inProgressMessage))
@@ -362,6 +368,16 @@ class SyncCoordinator(
         syncCancelReason.set(SyncCancelReason.NONE)
     }
 
+    private fun propagateCancellation(error: Throwable): Nothing? {
+        if (error is CancellationException) throw error
+        var cause = error.cause
+        while (cause != null) {
+            if (cause is CancellationException) throw cause
+            cause = cause.cause
+        }
+        return null
+    }
+
     private fun ensureNotCancelled() {
         if (syncCancelRequested.get()) {
             throw CancellationException("Sincronismo cancelado.")
@@ -504,6 +520,7 @@ class SyncCoordinator(
             items.size
         }.onFailure { error ->
             val cancelled = error is CancellationException
+            val userCancelled = cancelled && syncCancelReason.get() == SyncCancelReason.USER
             if (manageRunningState) {
                 _state.value = _state.value.copy(
                     isRunning = false,
@@ -515,7 +532,10 @@ class SyncCoordinator(
                     },
                 )
                 if (cancelled) {
-                    scheduleThumbnailPrefetchAfterInterrupt()
+                    resetSyncCancel()
+                    if (!userCancelled) {
+                        scheduleThumbnailPrefetchAfterInterrupt()
+                    }
                 }
             } else if (cancelled) {
                 throw error
@@ -895,6 +915,7 @@ class SyncCoordinator(
                     SyncSummary(uploaded, pendingDownloadPlaceholders, cloudOnly)
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
+                    val userCancelled = cancelled && syncCancelReason.get() == SyncCancelReason.USER
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItem = null,
@@ -909,7 +930,9 @@ class SyncCoordinator(
                     )
                     if (cancelled) {
                         resetSyncCancel()
-                        scheduleThumbnailPrefetchAfterInterrupt()
+                        if (!userCancelled) {
+                            scheduleThumbnailPrefetchAfterInterrupt()
+                        }
                     }
                 }
             }
@@ -1237,6 +1260,7 @@ class SyncCoordinator(
     }
 
     private suspend fun autoReleaseSyncedLocalCopies(allowSystemDialog: Boolean): Int {
+        ensureSyncMayContinue()
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
         val rows = syncMetadataDao.getAll().filter { row ->
             row.localMediaId != null &&
@@ -1433,8 +1457,9 @@ class SyncCoordinator(
                 )
             }
             1
-        }.getOrElse {
-            syncMetadataDao.upsert(row.copy(cloudState = CloudSyncState.ERROR, lastError = it.message))
+        }.getOrElse { error ->
+            propagateCancellation(error)
+            syncMetadataDao.upsert(row.copy(cloudState = CloudSyncState.ERROR, lastError = error.message))
             0
         }.also {
             temp.delete()
@@ -2096,16 +2121,21 @@ class SyncCoordinator(
     ): Result<String> {
         val onProgress: ((Long, Long?) -> Unit)? =
             if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                val job = coroutineContext[Job]
                 { done, total ->
-                    setActiveSyncItem(
-                        ActiveSyncItem(
-                            canonicalPath = canonicalPath,
-                            displayName = displayName,
-                            operationLabel = operationLabel,
-                            bytesCompleted = done,
-                            totalBytes = total,
-                        ),
-                    )
+                    if (syncCancelRequested.get()) {
+                        job?.cancel(CancellationException("Sincronismo cancelado."))
+                    } else {
+                        setActiveSyncItem(
+                            ActiveSyncItem(
+                                canonicalPath = canonicalPath,
+                                displayName = displayName,
+                                operationLabel = operationLabel,
+                                bytesCompleted = done,
+                                totalBytes = total,
+                            ),
+                        )
+                    }
                 }
             } else {
                 null
@@ -2132,16 +2162,21 @@ class SyncCoordinator(
     ): Result<Unit> {
         val onProgress: ((Long, Long?) -> Unit)? =
             if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                val job = coroutineContext[Job]
                 { done, total ->
-                    setActiveSyncItem(
-                        ActiveSyncItem(
-                            canonicalPath = canonicalPath,
-                            displayName = displayName,
-                            operationLabel = operationLabel,
-                            bytesCompleted = done,
-                            totalBytes = total,
-                        ),
-                    )
+                    if (syncCancelRequested.get()) {
+                        job?.cancel(CancellationException("Sincronismo cancelado."))
+                    } else {
+                        setActiveSyncItem(
+                            ActiveSyncItem(
+                                canonicalPath = canonicalPath,
+                                displayName = displayName,
+                                operationLabel = operationLabel,
+                                bytesCompleted = done,
+                                totalBytes = total,
+                            ),
+                        )
+                    }
                 }
             } else {
                 null
