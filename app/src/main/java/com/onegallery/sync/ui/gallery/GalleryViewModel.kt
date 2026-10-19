@@ -400,9 +400,7 @@ private fun buildAlbums(
             itemCount = items.size,
             photoCount = photoCount,
             videoCount = videoCount,
-            coverUri = items.firstOrNull()?.localUri ?: items.firstOrNull()?.cachedOriginal?.let {
-                android.net.Uri.fromFile(it)
-            },
+            coverModel = resolveAlbumCoverModel(items),
             sortTimestamp = latest,
             isUserManaged = userMeta != null,
             userAlbumId = userMeta?.id,
@@ -450,8 +448,7 @@ private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> 
                 itemCount = group.size,
                 photoCount = photoCount,
                 videoCount = videoCount,
-                coverUri = group.maxByOrNull { it.sortTimestamp }?.localUri
-                    ?: group.firstNotNullOfOrNull { it.cachedOriginal?.let(android.net.Uri::fromFile) },
+                coverModel = resolveAlbumCoverModel(group),
                 sortTimestamp = latest,
             )
         }

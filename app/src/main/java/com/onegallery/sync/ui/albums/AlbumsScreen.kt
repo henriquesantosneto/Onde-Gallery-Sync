@@ -458,9 +458,9 @@ private fun AlbumGridTile(
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center,
         ) {
-            if (album.coverUri != null) {
+            if (album.coverModel != null) {
                 AsyncImage(
-                    model = album.coverUri,
+                    model = album.coverModel,
                     contentDescription = album.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,

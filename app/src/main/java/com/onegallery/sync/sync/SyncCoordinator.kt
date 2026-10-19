@@ -22,8 +22,10 @@ import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
@@ -77,6 +79,7 @@ class SyncCoordinator(
     private val syncPreferences: SyncPreferences,
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
     private val appForegroundState: AppForegroundState,
+    private val backgroundScope: CoroutineScope? = null,
 ) {
     suspend fun connectOneDriveFolder(treeUri: Uri): Result<Unit> {
         val previousTree = saOneDriveRepository.persistedTreeUriString()
@@ -484,6 +487,9 @@ class SyncCoordinator(
                         error.message ?: "Falha ao indexar mídia local."
                     },
                 )
+                if (cancelled) {
+                    scheduleThumbnailPrefetchAfterInterrupt()
+                }
             } else if (cancelled) {
                 throw error
             }
@@ -768,6 +774,7 @@ class SyncCoordinator(
                     )
                     if (cancelled) {
                         resetSyncCancel()
+                        scheduleThumbnailPrefetchAfterInterrupt()
                     }
                 }
             }
@@ -1605,28 +1612,55 @@ class SyncCoordinator(
             .getOrNull()
     }
 
-    /** Miniaturas da nuvem para grade/mapa — sem baixar originais. */
+    /** Após cancelar sync/index, completa miniaturas pendentes sem refazer upload/download. */
+    private fun scheduleThumbnailPrefetchAfterInterrupt() {
+        val scope = backgroundScope ?: return
+        scope.launch {
+            if (!longTaskMutex.tryLock()) return@launch
+            try {
+                val cached = runCloudThumbnailPrefetch(maxPerRun = 96, honorSyncCancel = false)
+                if (cached > 0) {
+                    val prefix = _state.value.lastMessage.substringBefore("\n")
+                    _state.value = _state.value.copy(
+                        lastMessage = "$prefix\nMiniaturas: +$cached após interrupção.",
+                    )
+                }
+            } finally {
+                longTaskMutex.unlock()
+            }
+        }
+    }
+
+    /** Miniaturas da nuvem para grade/mapa/álbuns — sem baixar originais. */
     private suspend fun prefetchCloudThumbnails(maxPerRun: Int = 200) {
-        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return
-        if (!networkMonitor.isOnline()) return
+        runCloudThumbnailPrefetch(maxPerRun = maxPerRun, honorSyncCancel = true)
+    }
+
+    private suspend fun runCloudThumbnailPrefetch(
+        maxPerRun: Int,
+        honorSyncCancel: Boolean,
+    ): Int {
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return 0
+        if (!networkMonitor.isOnline()) return 0
         val rows = syncMetadataDao.getAll().filter { row ->
             row.oneDriveItemId != null &&
                 mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null
         }.take(maxPerRun)
-        if (rows.isEmpty()) return
+        if (rows.isEmpty()) return 0
         var cached = 0
         rows.forEachIndexed { index, row ->
-            if (index % 12 == 0) {
+            if (honorSyncCancel && index % 12 == 0) {
                 ensureNotCancelled()
-                coroutineContext.ensureActive()
             }
+            coroutineContext.ensureActive()
             ensureThumbnailCached(row.canonicalPath).getOrNull()?.let { cached++ }
         }
-        if (cached > 0) {
+        if (cached > 0 && honorSyncCancel) {
             _state.value = _state.value.copy(
                 lastMessage = "Miniaturas na nuvem: $cached de ${rows.size} nesta passagem.",
             )
         }
+        return cached
     }
 
     private suspend fun backfillMissingGpsLocations() {

@@ -34,7 +34,8 @@ data class MediaAlbum(
     val itemCount: Int,
     val photoCount: Int = itemCount,
     val videoCount: Int = 0,
-    val coverUri: Uri?,
+    /** URI local, arquivo ou miniatura em cache para a capa. */
+    val coverModel: Any? = null,
     val sortTimestamp: Long = 0L,
     /** Álbum criado pelo usuário (pode renomear/excluir a organização). */
     val isUserManaged: Boolean = false,

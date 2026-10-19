@@ -124,6 +124,7 @@ class OneGalleryApplication : Application() {
             syncPreferences = syncPreferences,
             mediaDeleteRequestRouter = mediaDeleteRequestRouter,
             appForegroundState = appForegroundState,
+            backgroundScope = applicationScope,
         )
         syncTaskLauncher = SyncTaskLauncher(applicationScope, syncCoordinator)
         registerWifiSyncNetworkGuard()

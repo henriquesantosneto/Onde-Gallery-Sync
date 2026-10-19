@@ -22,7 +22,7 @@ class LocalMediaRepository(private val context: Context) {
                 itemCount = items.size,
                 photoCount = items.count { it.kind == MediaKind.IMAGE },
                 videoCount = items.count { it.kind == MediaKind.VIDEO },
-                coverUri = items.maxByOrNull { it.dateAddedSeconds }?.uri,
+                coverModel = items.maxByOrNull { it.dateAddedSeconds }?.uri,
             )
         }.sortedByDescending { it.itemCount }
     }
