@@ -22,8 +22,11 @@ import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
@@ -233,44 +236,57 @@ class SyncCoordinator(
             return Result.failure(denied.exceptionOrNull() ?: IllegalStateException("Sync pausado"))
         }
         return longTaskMutex.withLock {
-            runCatching {
-                resetSyncCancel()
-                bindActiveLongTaskJob()
-                _state.value = _state.value.copy(
-                    isRunning = true,
-                    lastMessage = "Verificando índice da galeria…",
-                    runQueue = emptyList(),
-                    activeItem = null,
-                )
-                val rebuilt = applyPendingIndexRebuildIfNeeded()
-                indexLocalLibrary(manageRunningState = false, userInitiated = userInitiated).getOrThrow()
-                val remoteListingAvailable: Boolean
-                val remotePaths: Set<String> = when (syncPreferences.syncMode) {
-                    SyncMode.LOCAL_ONLY -> {
-                        remoteListingAvailable = true
-                        emptySet()
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    resetSyncCancel()
+                    bindActiveLongTaskJob()
+                    _state.value = _state.value.copy(
+                        isRunning = true,
+                        lastMessage = "Verificando índice da galeria…",
+                        runQueue = emptyList(),
+                        activeItem = null,
+                    )
+                    val rebuilt = applyPendingIndexRebuildIfNeeded()
+                    val items = localMediaRepository.loadAllMedia()
+                    indexPassLocalItemsById = items.associateBy { it.id }
+                    val seenLocalIds = items.map { it.id }.toSet()
+                    val seenPaths = applyLocalIndexPass(items, lightMetadataOnly = true)
+                    reconcileMissingLocalItems(seenPaths)
+                    val remoteListingAvailable: Boolean
+                    val remotePaths: Set<String> = when (syncPreferences.syncMode) {
+                        SyncMode.LOCAL_ONLY -> {
+                            remoteListingAvailable = true
+                            emptySet()
+                        }
+                        else -> if (networkMonitor.isOnline()) {
+                            remoteListingAvailable = true
+                            listRemoteFiles().getOrThrow().associateBy { it.canonicalPath }.keys
+                        } else {
+                            remoteListingAvailable = false
+                            emptySet()
+                        }
                     }
-                    else -> if (networkMonitor.isOnline()) {
-                        remoteListingAvailable = true
-                        listRemoteFiles().getOrThrow().associateBy { it.canonicalPath }.keys
-                    } else {
-                        remoteListingAvailable = false
-                        emptySet()
-                    }
+                    val sanitized = runIndexSanitizePass(
+                        seenLocalCanonicalPaths = seenPaths,
+                        seenLocalMediaIds = seenLocalIds,
+                        remoteCanonicalPaths = remotePaths,
+                        remoteListingAvailable = remoteListingAvailable,
+                    )
+                    indexPassLocalItemsById = emptyMap()
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        activeItem = null,
+                        lastMessage = buildSanitizeMessage(rebuilt, sanitized),
+                    )
+                    sanitized.copy(fullRebuild = rebuilt || sanitized.fullRebuild)
+                }.onFailure { error ->
+                    indexPassLocalItemsById = emptyMap()
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        activeItem = null,
+                        lastMessage = error.message ?: "Falha na manutenção do índice.",
+                    )
                 }
-                val sanitized = runIndexSanitizePass(remotePaths, remoteListingAvailable)
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    activeItem = null,
-                    lastMessage = buildSanitizeMessage(rebuilt, sanitized),
-                )
-                sanitized.copy(fullRebuild = rebuilt || sanitized.fullRebuild)
-            }.onFailure { error ->
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    activeItem = null,
-                    lastMessage = error.message ?: "Falha na manutenção do índice.",
-                )
             }
         }
     }
@@ -415,45 +431,21 @@ class SyncCoordinator(
                 lastMessage = "Indexando biblioteca local…",
             )
         }
-        return runCatching {
+        return withContext(Dispatchers.Default) {
+            runCatching {
             ensureNotCancelled()
             coroutineContext.ensureActive()
             val items = localMediaRepository.loadAllMedia()
             indexPassLocalItemsById = items.associateBy { it.id }
+            val seenLocalIds = items.map { it.id }.toSet()
             ensureNotCancelled()
-            val existingRows = syncMetadataDao.getAll()
-            val existingByCanonical = existingRows.associateBy { it.canonicalPath }
-            val existingByLocalId = existingRows.mapNotNull { row ->
-                row.localMediaId?.let { id -> id to row }
-            }.toMap()
-            val seenPaths = mutableSetOf<String>()
-            val pendingUpserts = ArrayList<SyncMetadataEntity>(items.size)
-            val pathsToDelete = mutableListOf<String>()
-            items.forEachIndexed { index, item ->
-                if (index % 64 == 0) {
-                    ensureNotCancelled()
-                    coroutineContext.ensureActive()
-                }
-                val canonical = SyncPaths.canonicalFromLocal(item)
-                seenPaths.add(canonical)
-                val existingByPath = existingByCanonical[canonical]
-                val existingByLocal = existingByLocalId[item.id]
-                val existing = existingByPath ?: existingByLocal
-                if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
-                    seenPaths.add(existingByLocal.canonicalPath)
-                    pathsToDelete.add(existingByLocal.canonicalPath)
-                }
-                pendingUpserts.add(mergeLocalIntoEntity(item, canonical, existing))
-            }
-            pendingUpserts.chunked(256).forEach { batch ->
-                ensureNotCancelled()
-                syncMetadataDao.upsertAll(batch)
-            }
-            pathsToDelete.forEach { syncMetadataDao.deleteByCanonicalPath(it) }
+            val seenPaths = applyLocalIndexPass(items, lightMetadataOnly = false)
             ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)
             if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) {
                 val sanitized = runIndexSanitizePass(
+                    seenLocalCanonicalPaths = seenPaths,
+                    seenLocalMediaIds = seenLocalIds,
                     remoteCanonicalPaths = emptySet(),
                     remoteListingAvailable = true,
                 )
@@ -495,6 +487,52 @@ class SyncCoordinator(
                 indexPassLocalItemsById = emptyMap()
             }
         }
+        }
+    }
+
+    /** Atualiza SQLite a partir do MediaStore; retorna caminhos canônicos vistos no aparelho. */
+    private suspend fun applyLocalIndexPass(
+        items: List<LocalMediaItem>,
+        lightMetadataOnly: Boolean,
+    ): Set<String> {
+        val existingRows = syncMetadataDao.getAll()
+        val existingByCanonical = existingRows.associateBy { it.canonicalPath }
+        val existingByLocalId = existingRows.mapNotNull { row ->
+            row.localMediaId?.let { id -> id to row }
+        }.toMap()
+        val seenPaths = mutableSetOf<String>()
+        val pendingUpserts = ArrayList<SyncMetadataEntity>(items.size)
+        val pathsToDelete = mutableListOf<String>()
+        items.forEachIndexed { index, item ->
+            if (index % 64 == 0) {
+                ensureNotCancelled()
+                coroutineContext.ensureActive()
+                yield()
+            }
+            val canonical = SyncPaths.canonicalFromLocal(item)
+            seenPaths.add(canonical)
+            val existingByPath = existingByCanonical[canonical]
+            val existingByLocal = existingByLocalId[item.id]
+            val existing = existingByPath ?: existingByLocal
+            if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
+                seenPaths.add(existingByLocal.canonicalPath)
+                pathsToDelete.add(existingByLocal.canonicalPath)
+            }
+            pendingUpserts.add(
+                mergeLocalIntoEntity(
+                    item = item,
+                    canonical = canonical,
+                    existing = existing,
+                    lightMetadataOnly = lightMetadataOnly,
+                ),
+            )
+        }
+        pendingUpserts.chunked(256).forEach { batch ->
+            ensureNotCancelled()
+            syncMetadataDao.upsertAll(batch)
+        }
+        pathsToDelete.forEach { syncMetadataDao.deleteByCanonicalPath(it) }
+        return seenPaths
     }
 
     suspend fun runBidirectionalSync(userInitiated: Boolean = false): Result<SyncSummary> {
@@ -654,7 +692,13 @@ class SyncCoordinator(
                     backfillMissingCaptureTimes()
                     indexPassLocalItemsById = emptyMap()
                     prefetchCloudThumbnails()
+                    val seenLocalIds = indexPassLocalItemsById.keys
+                    val seenLocalPaths = indexPassLocalItemsById.values.map {
+                        SyncPaths.canonicalFromLocal(it)
+                    }.toSet()
                     val sanitized = runIndexSanitizePass(
+                        seenLocalCanonicalPaths = seenLocalPaths,
+                        seenLocalMediaIds = seenLocalIds,
                         remoteCanonicalPaths = remoteByPath.keys,
                         remoteListingAvailable = true,
                     )
@@ -1360,9 +1404,18 @@ class SyncCoordinator(
         item: LocalMediaItem,
         canonical: String,
         existing: SyncMetadataEntity?,
+        lightMetadataOnly: Boolean = false,
     ): SyncMetadataEntity {
-        val location = resolveLocationForItem(item, existing)
-        val capturedAt = resolveCaptureTimeForItem(item, existing)
+        val location = if (lightMetadataOnly) {
+            resolveLocationForItemLight(item, existing)
+        } else {
+            resolveLocationForItem(item, existing)
+        }
+        val capturedAt = if (lightMetadataOnly) {
+            resolveCaptureTimeForItemLight(item, existing)
+        } else {
+            resolveCaptureTimeForItem(item, existing)
+        }
         return SyncMetadataEntity(
             canonicalPath = canonical,
             displayName = item.displayName,
@@ -1403,6 +1456,19 @@ class SyncCoordinator(
         return mediaCaptureTimeResolver.resolveFromLocalItem(item)
     }
 
+    private fun resolveCaptureTimeForItemLight(
+        item: LocalMediaItem,
+        existing: SyncMetadataEntity?,
+    ): Long? {
+        if (existing?.localMediaId == item.id &&
+            existing.capturedAtSeconds != null &&
+            existing.capturedAtSeconds > 0L
+        ) {
+            return existing.capturedAtSeconds
+        }
+        return item.dateTakenSeconds?.takeIf { it > 0L }
+    }
+
     private fun resolveLocationForItem(
         item: LocalMediaItem,
         existing: SyncMetadataEntity?,
@@ -1428,6 +1494,29 @@ class SyncCoordinator(
         )
         if (resolved != null) {
             return Triple(resolved.label, resolved.latitude, resolved.longitude)
+        }
+        return Triple(null, null, null)
+    }
+
+    /** Manutenção de índice: só MediaStore / índice existente — sem EXIF nem Geocoder. */
+    private fun resolveLocationForItemLight(
+        item: LocalMediaItem,
+        existing: SyncMetadataEntity?,
+    ): Triple<String?, Double?, Double?> {
+        if (existing?.localMediaId == item.id &&
+            existing.latitude != null &&
+            existing.longitude != null
+        ) {
+            return Triple(
+                existing.locationLabel ?: formatCoordLabel(existing.latitude, existing.longitude),
+                existing.latitude,
+                existing.longitude,
+            )
+        }
+        item.latitude?.let { lat ->
+            item.longitude?.let { lon ->
+                return Triple(formatCoordLabel(lat, lon), lat, lon)
+            }
         }
         return Triple(null, null, null)
     }
@@ -1663,18 +1752,17 @@ class SyncCoordinator(
     }
 
     private suspend fun runIndexSanitizePass(
+        seenLocalCanonicalPaths: Set<String>,
+        seenLocalMediaIds: Set<Long>,
         remoteCanonicalPaths: Set<String>,
         remoteListingAvailable: Boolean,
     ): IndexSanitizeResult {
-        val localPaths = syncMetadataDao.getAll()
-            .filter { it.localMediaId != null }
-            .map { it.canonicalPath }
-            .toSet()
         return sanitizeSyncMetadataIndex(
             syncMode = syncPreferences.syncMode,
             dao = syncMetadataDao,
             mediaCacheRepository = mediaCacheRepository,
-            seenLocalCanonicalPaths = localPaths,
+            seenLocalCanonicalPaths = seenLocalCanonicalPaths,
+            seenLocalMediaIds = seenLocalMediaIds,
             remoteCanonicalPaths = remoteCanonicalPaths,
             remoteListingAvailable = remoteListingAvailable,
         )

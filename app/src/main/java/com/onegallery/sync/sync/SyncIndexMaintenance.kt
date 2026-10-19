@@ -17,16 +17,19 @@ suspend fun sanitizeSyncMetadataIndex(
     dao: SyncMetadataDao,
     mediaCacheRepository: MediaCacheRepository,
     seenLocalCanonicalPaths: Set<String>,
+    seenLocalMediaIds: Set<Long>,
     remoteCanonicalPaths: Set<String>,
     remoteListingAvailable: Boolean,
 ): IndexSanitizeResult {
+    fun rowStillOnDevice(row: SyncMetadataEntity): Boolean {
+        val id = row.localMediaId ?: return false
+        return row.canonicalPath in seenLocalCanonicalPaths || id in seenLocalMediaIds
+    }
     if (syncMode == SyncMode.LOCAL_ONLY) {
         return purgeOrphans(
             dao = dao,
             mediaCacheRepository = mediaCacheRepository,
-            keep = { row, _ ->
-                row.localMediaId != null && row.canonicalPath in seenLocalCanonicalPaths
-            },
+            keep = { row, _ -> rowStillOnDevice(row) },
         )
     }
     if (!remoteListingAvailable) {
@@ -36,9 +39,7 @@ suspend fun sanitizeSyncMetadataIndex(
         dao = dao,
         mediaCacheRepository = mediaCacheRepository,
         keep = { row, _ ->
-            val onDevice = row.localMediaId != null && row.canonicalPath in seenLocalCanonicalPaths
-            val onRemote = row.canonicalPath in remoteCanonicalPaths
-            onDevice || onRemote
+            rowStillOnDevice(row) || row.canonicalPath in remoteCanonicalPaths
         },
     )
 }
@@ -50,8 +51,11 @@ private suspend fun purgeOrphans(
 ): IndexSanitizeResult {
     val rows = dao.getAll()
     var removed = 0
-    rows.forEach { row ->
-        if (keep(row, emptySet())) return@forEach
+    rows.forEachIndexed { index, row ->
+        if (index % 48 == 0) {
+            kotlinx.coroutines.yield()
+        }
+        if (keep(row, emptySet())) return@forEachIndexed
         dao.deleteByCanonicalPath(row.canonicalPath)
         mediaCacheRepository.deleteCached(row.canonicalPath)
         removed++
