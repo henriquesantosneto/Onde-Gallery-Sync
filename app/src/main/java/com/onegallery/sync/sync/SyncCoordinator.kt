@@ -510,6 +510,10 @@ class SyncCoordinator(
         return syncMetadataDao.getByCanonicalPath(canonicalPath)
     }
 
+    /** Remove linhas duplicadas no SQLite (mesmo id local, nuvem ou content URI). */
+    suspend fun compactDuplicateIndexRows(): Int =
+        removeDuplicateMetadataRows(syncMetadataDao, mediaCacheRepository)
+
     suspend fun indexLocalLibrary(
         manageRunningState: Boolean = true,
         userInitiated: Boolean = false,

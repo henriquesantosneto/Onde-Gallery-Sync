@@ -183,6 +183,9 @@ class GalleryViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { syncCoordinator.compactDuplicateIndexRows() }
+        }
         refresh()
     }
 

@@ -58,6 +58,7 @@ suspend fun removeDuplicateMetadataRows(
     if (rows.size <= 1) return 0
     val localSeen = mutableSetOf<Long>()
     val cloudSeen = mutableSetOf<String>()
+    val uriSeen = mutableSetOf<String>()
     val pathSeen = mutableSetOf<String>()
     fun score(row: SyncMetadataEntity): Long {
         var s = 0L
@@ -72,10 +73,12 @@ suspend fun removeDuplicateMetadataRows(
     for (row in sorted) {
         val duplicate = row.localMediaId?.let { it in localSeen } == true ||
             row.oneDriveItemId?.let { it in cloudSeen } == true ||
+            row.localContentUri?.takeIf { it.isNotBlank() }?.let { it in uriSeen } == true ||
             row.canonicalPath in pathSeen
         if (duplicate) continue
         row.localMediaId?.let { localSeen.add(it) }
         row.oneDriveItemId?.let { cloudSeen.add(it) }
+        row.localContentUri?.takeIf { it.isNotBlank() }?.let { uriSeen.add(it) }
         pathSeen.add(row.canonicalPath)
         keep.add(row.canonicalPath)
     }

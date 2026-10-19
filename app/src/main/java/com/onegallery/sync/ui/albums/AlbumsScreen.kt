@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumListSort
@@ -86,6 +87,7 @@ private enum class AlbumsBrowseTab {
 fun AlbumsScreen(
     viewModel: GalleryViewModel,
     galleryPreferences: GalleryPreferences,
+    albumsBackStackEntry: NavBackStackEntry? = null,
     onOpenAlbum: (String) -> Unit,
     onOpenMap: () -> Unit,
 ) {
@@ -115,6 +117,12 @@ fun AlbumsScreen(
     LaunchedEffect(selectedTab) {
         if (selectedTab == AlbumsBrowseTab.PLACES) {
             viewModel.clearAlbumSelection()
+        }
+    }
+
+    LaunchedEffect(albumsBackStackEntry) {
+        if (albumsBackStackEntry?.savedStateHandle?.remove<Boolean>("resetAlbumsSubTab") == true) {
+            selectedTab = AlbumsBrowseTab.ALBUMS
         }
     }
 

@@ -77,6 +77,9 @@ private fun showsMainBottomBar(route: String?): Boolean =
 
 private fun NavHostController.openGalleryTab(clearBrowseFilters: () -> Unit) {
     clearBrowseFilters()
+    if (currentBackStackEntry?.destination?.route == ALBUMS_BROWSE_ROUTE) {
+        popBackStack()
+    }
     navigate(MainTab.Gallery.route) {
         popUpTo(MainTab.Gallery.route) {
             inclusive = false
@@ -91,6 +94,7 @@ private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
     clearBrowseFilters()
     if (currentBackStackEntry?.destination?.route == ALBUMS_BROWSE_ROUTE) {
         popBackStack(MainTab.Albums.route, inclusive = false)
+        getBackStackEntry(MainTab.Albums.route).savedStateHandle["resetAlbumsSubTab"] = true
         return
     }
     navigate(MainTab.Albums.route) {
@@ -100,6 +104,7 @@ private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
         launchSingleTop = true
         restoreState = true
     }
+    getBackStackEntry(MainTab.Albums.route).savedStateHandle["resetAlbumsSubTab"] = true
 }
 
 private fun NavHostController.openMainTab(tab: MainTab, clearBrowseFilters: () -> Unit) {
@@ -368,10 +373,11 @@ fun OneGalleryApp(
                     },
                 )
             }
-            composable(MainTab.Albums.route) {
+            composable(MainTab.Albums.route) { entry ->
                 AlbumsScreen(
                     viewModel = galleryViewModel,
                     galleryPreferences = galleryPreferences,
+                    albumsBackStackEntry = entry,
                     onOpenAlbum = {
                         navController.navigate(ALBUMS_BROWSE_ROUTE) {
                             launchSingleTop = true
@@ -406,12 +412,13 @@ fun OneGalleryApp(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     galleryPreferences = galleryPreferences,
+                    requiresActiveBrowseFilter = true,
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
                     },
                     onExitAlbumFilter = {
                         galleryViewModel.clearBrowseFilters()
-                        navController.popBackStack()
+                        navController.popBackStack(MainTab.Albums.route, inclusive = false)
                     },
                 )
             }

@@ -71,6 +71,8 @@ fun GalleryScreen(
     galleryPreferences: GalleryPreferences,
     onOpenItem: (String) -> Unit,
     onExitAlbumFilter: () -> Unit = {},
+    /** Na rota albums/browse: sem filtro ativo, volta à lista de álbuns (evita “Fotos” com aba Álbuns). */
+    requiresActiveBrowseFilter: Boolean = false,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val gridPinch = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
@@ -93,6 +95,12 @@ fun GalleryScreen(
         state.actionMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
             viewModel.clearActionMessage()
+        }
+    }
+
+    LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
+        if (requiresActiveBrowseFilter && state.albumFilter == null && state.locationFilter == null) {
+            onExitAlbumFilter()
         }
     }
 

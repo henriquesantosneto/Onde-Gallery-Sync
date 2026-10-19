@@ -14,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DriveFileMove
-import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
@@ -325,11 +324,6 @@ fun MediaDetailScreen(
                         }
                     },
                     actions = {
-                        if (!state.selectionMode && currentItem != null) {
-                            IconButton(onClick = { immersive = true }) {
-                                Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
-                            }
-                        }
                         if (state.selectionMode) {
                             IconButton(onClick = { showMoveDialog = true }) {
                                 Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
