@@ -46,6 +46,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -396,47 +397,49 @@ private fun MediaDetailPage(
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
 
-    suspend fun refreshDisplayItem() {
-        item = withContext(Dispatchers.Default) {
-            syncCoordinator.getMetadata(canonicalPath)?.let {
-                GalleryMapper.toDisplayItem(it, mediaCacheRepository)
-            }
-        }
-    }
-
-    suspend fun loadFullOriginalForViewing() {
-        if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
-        withContext(Dispatchers.Main.immediate) {
-            loadingFull = true
-            error = null
-        }
-        val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
-        if (result.isSuccess) {
-            val file = result.getOrNull()
-            withContext(Dispatchers.Main.immediate) {
-                refreshDisplayItem()
-                if (file != null) {
-                    item = item?.copy(cachedOriginal = file)
-                        ?: syncCoordinator.getMetadata(canonicalPath)?.let {
-                            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
-                                .copy(cachedOriginal = file)
-                        }
+    suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
+        withContext(Dispatchers.Default) {
+            syncCoordinator.getMetadata(canonicalPath)?.let { entity ->
+                val mapped = GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
+                if (includeOriginalFile != null) {
+                    mapped.copy(cachedOriginal = includeOriginalFile)
+                } else {
+                    mapped
                 }
             }
         }
-        withContext(Dispatchers.Main.immediate) {
-            result.onFailure { err -> error = err.message }
+
+    suspend fun loadFullOriginalForViewing() {
+        if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
+        loadingFull = true
+        error = null
+        try {
+            val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
+            if (result.isSuccess) {
+                val file = result.getOrNull()
+                item = loadDisplayItem(includeOriginalFile = file)
+            } else {
+                error = result.exceptionOrNull()?.message
+            }
+        } finally {
             loadingFull = false
         }
     }
 
-    LaunchedEffect(canonicalPath) {
+    LaunchedEffect(canonicalPath, isActivePage, liveItem?.cachedPlaceholderThumb) {
+        if (!isActivePage) {
+            if (liveItem != null && item == null) {
+                item = liveItem
+                loading = false
+            }
+            return@LaunchedEffect
+        }
         try {
             if (item == null) loading = true
             error = null
-            refreshDisplayItem()
+            item = loadDisplayItem() ?: liveItem
             syncCoordinator.ensureThumbnailCached(canonicalPath)
-            refreshDisplayItem()
+            item = loadDisplayItem() ?: item
             loading = false
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -456,10 +459,8 @@ private fun MediaDetailPage(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
-            withContext(Dispatchers.Main.immediate) {
-                error = failure.message ?: failure.javaClass.simpleName
-                loadingFull = false
-            }
+            error = failure.message ?: failure.javaClass.simpleName
+            loadingFull = false
         }
     }
 

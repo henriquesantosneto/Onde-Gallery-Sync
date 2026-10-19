@@ -2,10 +2,12 @@ package com.onegallery.sync.data.local
 
 import android.content.Context
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 class MediaCacheRepository(context: Context) {
     private val originalsDir = File(context.cacheDir, "originals").apply { mkdirs() }
     private val thumbsDir = File(context.cacheDir, "thumbs").apply { mkdirs() }
+    private val thumbExistsCache = ConcurrentHashMap<String, Boolean>()
 
     fun originalFile(canonicalPath: String): File {
         val safe = safeFileName(canonicalPath)
@@ -54,7 +56,11 @@ class MediaCacheRepository(context: Context) {
             }
             stagingFile.delete()
         }
-        return dest.takeIf { it.isFile && it.length() > 0L }
+        val committed = dest.takeIf { it.isFile && it.length() > 0L }
+        if (committed != null) {
+            thumbExistsCache[canonicalPath] = true
+        }
+        return committed
     }
 
     fun hasOriginal(canonicalPath: String): Boolean = originalFile(canonicalPath).exists()
@@ -62,6 +68,7 @@ class MediaCacheRepository(context: Context) {
     fun deleteCached(canonicalPath: String) {
         deleteOriginalTransferArtifacts(canonicalPath)
         thumbFile(canonicalPath).delete()
+        thumbExistsCache.remove(canonicalPath)
     }
 
     fun deleteOriginalOnly(canonicalPath: String) {
@@ -74,12 +81,25 @@ class MediaCacheRepository(context: Context) {
         originalPartMetaFile(canonicalPath).delete()
     }
 
-    fun thumbnailIfCached(canonicalPath: String): File? =
-        thumbFile(canonicalPath).takeIf { it.exists() && it.length() > 0L }
+    fun thumbnailIfCached(canonicalPath: String): File? {
+        thumbExistsCache[canonicalPath]?.let { known ->
+            if (!known) return null
+            val file = thumbFile(canonicalPath)
+            return if (file.isFile && file.length() > 0L) file else {
+                thumbExistsCache.remove(canonicalPath)
+                null
+            }
+        }
+        val file = thumbFile(canonicalPath)
+        val ok = file.isFile && file.length() > 0L
+        thumbExistsCache[canonicalPath] = ok
+        return file.takeIf { ok }
+    }
 
     /** Após recriar o índice (ex.: troca de pasta na nuvem). */
     fun clearAll() {
         originalsDir.listFiles()?.forEach { it.delete() }
         thumbsDir.listFiles()?.forEach { it.delete() }
+        thumbExistsCache.clear()
     }
 }
