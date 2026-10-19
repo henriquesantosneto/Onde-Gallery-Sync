@@ -143,6 +143,9 @@ fun OneGalleryApp(
 ) {
     var setupDone by rememberSaveable { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var cloudSetupStepOrdinal by rememberSaveable { mutableStateOf(CloudSetupStep.Hidden.ordinal) }
+    var postSignInStepOrdinal by rememberSaveable {
+        mutableStateOf(CloudSetupStep.Browse.ordinal)
+    }
     val cloudSetupStep = CloudSetupStep.entries[
         cloudSetupStepOrdinal.coerceIn(CloudSetupStep.entries.indices)
     ]
@@ -204,13 +207,24 @@ fun OneGalleryApp(
         }
     }
 
-    LaunchedEffect(authState.isSignedIn, cloudSetupStep) {
-        if (cloudSetupStep == CloudSetupStep.SignIn && authState.isSignedIn) {
-            setCloudSetupStep(CloudSetupStep.Browse)
+    LaunchedEffect(authState.isSignedIn, cloudSetupStep, setupDone) {
+        if (cloudSetupStep != CloudSetupStep.SignIn || !authState.isSignedIn) return@LaunchedEffect
+        val next = CloudSetupStep.entries[
+            postSignInStepOrdinal.coerceIn(CloudSetupStep.entries.indices)
+        ]
+        setCloudSetupStep(next)
+        if (next == CloudSetupStep.Hidden && setupDone) {
+            syncTasks.runBidirectionalSync(userInitiated = true)
         }
     }
 
+    fun openMicrosoftSignIn() {
+        postSignInStepOrdinal = CloudSetupStep.Hidden.ordinal
+        setCloudSetupStep(CloudSetupStep.SignIn)
+    }
+
     fun openCloudFolderPicker() {
+        postSignInStepOrdinal = CloudSetupStep.Browse.ordinal
         setCloudSetupStep(CloudSetupStep.SignIn)
     }
 
@@ -384,6 +398,8 @@ fun OneGalleryApp(
                 SyncStatusScreen(
                     syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
+                    authManager = authManager,
+                    onMicrosoftSignIn = { openMicrosoftSignIn() },
                 )
             }
             composable(MainTab.Settings.route) {
@@ -391,6 +407,7 @@ fun OneGalleryApp(
                     authManager = authManager,
                     syncPreferences = syncPreferences,
                     onOpenCloudFolderPicker = { openCloudFolderPicker() },
+                    onMicrosoftSignIn = { openMicrosoftSignIn() },
                 )
             }
             composable(

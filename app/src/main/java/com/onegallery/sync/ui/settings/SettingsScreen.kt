@@ -17,6 +17,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -50,6 +51,7 @@ fun SettingsScreen(
     authManager: MsalAuthManager,
     syncPreferences: SyncPreferences,
     onOpenCloudFolderPicker: () -> Unit,
+    onMicrosoftSignIn: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as OneGalleryApplication
     val syncCoordinator = app.syncCoordinator
@@ -114,18 +116,43 @@ fun SettingsScreen(
             }
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    if (
+                        syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH &&
+                        !authState.isSignedIn &&
+                        !authState.isCheckingStoredAccount
+                    ) {
+                        Button(
+                            onClick = onMicrosoftSignIn,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.auth_sign_in))
+                        }
+                    }
                     OutlinedButton(
                         onClick = onOpenCloudFolderPicker,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Escolher pasta na nuvem")
                     }
-                    Text(
-                        stringResource(R.string.settings_cloud_folder_reindex_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
+                    if (
+                        syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH &&
+                        !authState.isSignedIn &&
+                        !authState.isCheckingStoredAccount
+                    ) {
+                        Text(
+                            "Entre na Microsoft antes de escolher ou alterar a pasta de sync.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    } else {
+                        Text(
+                            stringResource(R.string.settings_cloud_folder_reindex_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                     TextButton(
                         onClick = { scope.launch { authManager.signOut() } },
                         modifier = Modifier.fillMaxWidth(),
