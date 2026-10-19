@@ -392,17 +392,10 @@ fun OneGalleryApp(
                 PlacesMapScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
-                    mediaCacheRepository = mediaCacheRepository,
                     syncTasks = syncTasks,
                     onBack = { navController.popBackStack() },
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
-                    },
-                    onShowAllAtPlace = { placeLabel ->
-                        galleryViewModel.setPlaceFilterFromLocationLabel(placeLabel)
-                        navController.navigate(ALBUMS_BROWSE_ROUTE) {
-                            launchSingleTop = true
-                        }
                     },
                 )
             }

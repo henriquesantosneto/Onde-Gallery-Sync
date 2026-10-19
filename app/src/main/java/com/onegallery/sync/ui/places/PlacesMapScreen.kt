@@ -23,7 +23,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -31,7 +30,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -57,9 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaAccessPermissions
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncTaskLauncher
-import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.ui.gallery.GalleryViewModel
-import com.onegallery.sync.ui.gallery.MediaSamsungDetailsContent
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -80,11 +76,9 @@ import org.maplibre.android.maps.Style
 fun PlacesMapScreen(
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
-    mediaCacheRepository: MediaCacheRepository,
     syncTasks: SyncTaskLauncher,
     onBack: () -> Unit,
     onOpenItem: (String) -> Unit,
-    onShowAllAtPlace: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val hasMediaLocation = MediaAccessPermissions.hasMediaLocationAccess(context)
@@ -111,8 +105,6 @@ fun PlacesMapScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pinSignature = remember(state.geoItems) { buildPhotoMapPinSignature(state.geoItems) }
     val pins = remember(pinSignature) { buildPhotoMapPins(state.geoItems) }
-    var selectedPin by remember { mutableStateOf<PhotoMapPin?>(null) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -212,7 +204,13 @@ fun PlacesMapScreen(
                         syncCoordinator = syncCoordinator,
                         deviceLocationGranted = deviceLocationGranted,
                         locateUserRequest = locateUserRequest,
-                        onPinSelected = { selectedPin = it },
+                        onPinSelected = { pin ->
+                            val encoded = URLEncoder.encode(
+                                pin.item.canonicalPath,
+                                StandardCharsets.UTF_8.name(),
+                            )
+                            onOpenItem(encoded)
+                        },
                         onRequestDeviceLocationPermission = {
                             pendingLocateAfterPermission = true
                             deviceLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -248,52 +246,6 @@ fun PlacesMapScreen(
         }
     }
 
-    val pin = selectedPin
-    if (pin != null) {
-        val item = pin.item
-        val displayPool = remember(state.geoItems, state.items) {
-            (state.geoItems + state.items).distinctBy { it.canonicalPath }
-        }
-        ModalBottomSheet(
-            onDismissRequest = { selectedPin = null },
-            sheetState = sheetState,
-            containerColor = Color(0xFF0D0D0D),
-            contentColor = Color.White,
-        ) {
-            MediaSamsungDetailsContent(
-                canonicalPaths = listOf(item.canonicalPath),
-                displayItems = displayPool,
-                syncCoordinator = syncCoordinator,
-                mediaCacheRepository = mediaCacheRepository,
-                footer = {
-                    Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
-                        item.locationLabel?.takeIf { it.isNotBlank() }?.let { label ->
-                            TextButton(
-                                onClick = {
-                                    selectedPin = null
-                                    onShowAllAtPlace(label)
-                                },
-                            ) {
-                                Text("Ver outras fotos neste lugar")
-                            }
-                        }
-                        TextButton(
-                            onClick = {
-                                selectedPin = null
-                                val encoded = URLEncoder.encode(
-                                    item.canonicalPath,
-                                    StandardCharsets.UTF_8.name(),
-                                )
-                                onOpenItem(encoded)
-                            },
-                        ) {
-                            Text("Abrir foto")
-                        }
-                    }
-                },
-            )
-        }
-    }
 }
 
 /** Enquadra os locais das fotos (comportamento próximo ao mapa do app Fotos no iPhone). */
@@ -468,13 +420,14 @@ private fun PlacesMapView(
             CircularProgressIndicator(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(14.dp)
+                    .padding(10.dp)
+                    .size(22.dp)
                     .background(
                         Color.Black.copy(alpha = 0.45f),
                         shape = MaterialTheme.shapes.small,
                     )
-                    .padding(10.dp),
-                strokeWidth = 2.5.dp,
+                    .padding(5.dp),
+                strokeWidth = 2.dp,
                 color = Color.White,
             )
         }
