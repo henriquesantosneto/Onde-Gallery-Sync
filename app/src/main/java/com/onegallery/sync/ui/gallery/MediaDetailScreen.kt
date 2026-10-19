@@ -115,6 +115,7 @@ fun MediaDetailScreen(
         liveItems,
         state.albumFilter,
         state.locationFilter,
+        state.geoItems,
         initialCanonicalPath,
     ) {
         detailContextItems(
@@ -122,6 +123,7 @@ fun MediaDetailScreen(
             albumFilter = state.albumFilter,
             locationFilter = state.locationFilter,
             anchorPath = initialCanonicalPath,
+            geoItems = state.geoItems,
         )
     }
 

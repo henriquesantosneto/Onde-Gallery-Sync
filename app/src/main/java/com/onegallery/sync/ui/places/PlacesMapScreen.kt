@@ -205,6 +205,7 @@ fun PlacesMapScreen(
                         deviceLocationGranted = deviceLocationGranted,
                         locateUserRequest = locateUserRequest,
                         onPinSelected = { pin ->
+                            viewModel.clearBrowseFilters()
                             val encoded = URLEncoder.encode(
                                 pin.item.canonicalPath,
                                 StandardCharsets.UTF_8.name(),
@@ -377,21 +378,15 @@ private fun PlacesMapView(
                         items = listOf(pin.item),
                         syncCoordinator = syncCoordinator,
                     )
-                    Triple(
-                        pin,
-                        bitmap,
-                        pin.item.locationLabel?.takeIf { it.isNotBlank() } ?: pin.item.displayName,
-                    )
+                    pin to bitmap
                 }
             }
-            markerArt.forEach { (pin, stackBitmap, title) ->
+            markerArt.forEach { (pin, stackBitmap) ->
                 val path = pin.item.canonicalPath
                 if (path in markerByPath) return@forEach
                 val added = map.addMarker(
                     org.maplibre.android.annotations.MarkerOptions()
                         .position(LatLng(pin.latitude, pin.longitude))
-                        .title(title)
-                        .snippet(pin.item.displayName)
                         .icon(iconFactory.fromBitmap(stackBitmap)),
                 )
                 markerByPath[path] = added to pin
