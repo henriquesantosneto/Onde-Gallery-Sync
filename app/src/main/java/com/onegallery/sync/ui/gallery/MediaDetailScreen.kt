@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,6 +69,7 @@ fun MediaDetailScreen(
     mediaCacheRepository: MediaCacheRepository,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
     val liveItems = state.items
     val snackbarHostState = remember { SnackbarHostState() }
@@ -152,11 +154,11 @@ fun MediaDetailScreen(
         }
         detailLoading = true
         showAdvancedDetails = false
-        detailInfo = withContext(Dispatchers.Default) {
+        detailInfo = withContext(Dispatchers.IO) {
             val entity = syncCoordinator.getMetadata(currentPath) ?: return@withContext null
             val display = liveItems.find { it.canonicalPath == currentPath }
                 ?: GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
-            buildMediaDetailInfo(entity, display)
+            buildMediaDetailInfo(entity, display, context)
         }
         detailLoading = false
     }
@@ -360,6 +362,8 @@ fun MediaDetailScreen(
         BottomSheetScaffold(
             scaffoldState = bottomSheetScaffoldState,
             sheetPeekHeight = 56.dp,
+            sheetContainerColor = Color(0xFF0D0D0D),
+            sheetContentColor = Color.White,
             sheetDragHandle = { BottomSheetDefaults.DragHandle() },
             sheetContent = {
                 MediaDetailSamsungSheet(
@@ -369,6 +373,7 @@ fun MediaDetailScreen(
                     showAdvanced = showAdvancedDetails,
                     onToggleAdvanced = { showAdvancedDetails = !showAdvancedDetails },
                     showExpandedContent = detailsSheetExpanded,
+                    contentOnDark = true,
                 )
             },
             snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },

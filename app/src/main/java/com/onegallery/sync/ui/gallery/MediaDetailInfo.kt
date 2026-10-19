@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import android.content.Context
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
@@ -22,6 +23,9 @@ data class MediaDetailInfo(
     val capturedAtSeconds: Long?,
     val capturedAtFormatted: String,
     val capturedAtFriendly: String,
+    val samsungHeadline: String,
+    val storagePathLabel: String,
+    val captureSpecs: MediaCaptureSpecs?,
     val locationLabel: String?,
     val mapLatitude: Double?,
     val mapLongitude: Double?,
@@ -66,6 +70,7 @@ private fun cloudSyncStateLabel(state: CloudSyncState): String = when (state) {
 fun buildMediaDetailInfo(
     entity: SyncMetadataEntity,
     display: GalleryDisplayItem,
+    context: Context? = null,
 ): MediaDetailInfo {
     val kindLabel = when (display.kind) {
         MediaKind.VIDEO -> "Vídeo"
@@ -129,6 +134,11 @@ fun buildMediaDetailInfo(
         entity.lastError?.takeIf { it.isNotBlank() }?.let { add("Último erro" to it) }
     }
 
+    val storagePath = formatStoragePathLabel(
+        folderPath.ifBlank { SyncPaths.albumFromCanonical(entity.canonicalPath) },
+    )
+    val specs = context?.let { readMediaCaptureSpecs(it, entity, display) }
+
     return MediaDetailInfo(
         displayName = display.displayName,
         kindLabel = kindLabel,
@@ -136,6 +146,9 @@ fun buildMediaDetailInfo(
         capturedAtSeconds = capturedAt,
         capturedAtFormatted = formatMediaDateTime(capturedAt),
         capturedAtFriendly = capturedAt?.let { formatMediaCaptureDate(it) }.orEmpty(),
+        samsungHeadline = formatSamsungDetailHeadline(capturedAt),
+        storagePathLabel = storagePath,
+        captureSpecs = specs,
         locationLabel = display.locationLabel?.takeIf { it.isNotBlank() },
         mapLatitude = display.latitude?.takeIf { display.longitude != null },
         mapLongitude = display.longitude?.takeIf { display.latitude != null },

@@ -21,8 +21,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.SyncCoordinator
@@ -37,17 +40,20 @@ fun MediaDetailsBottomSheet(
     mediaCacheRepository: MediaCacheRepository,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var infos by remember(canonicalPaths) { mutableStateOf<List<MediaDetailInfo>>(emptyList()) }
     var loading by remember(canonicalPaths) { mutableStateOf(true) }
 
     LaunchedEffect(canonicalPaths) {
         loading = true
-        infos = canonicalPaths.mapNotNull { path ->
-            val entity = syncCoordinator.getMetadata(path) ?: return@mapNotNull null
-            val display = displayItems.find { it.canonicalPath == path }
-                ?: GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
-            buildMediaDetailInfo(entity, display)
+        infos = withContext(Dispatchers.IO) {
+            canonicalPaths.mapNotNull { path ->
+                val entity = syncCoordinator.getMetadata(path) ?: return@mapNotNull null
+                val display = displayItems.find { it.canonicalPath == path }
+                    ?: GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
+                buildMediaDetailInfo(entity, display, context)
+            }
         }
         loading = false
     }

@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,13 +35,62 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
-/** Recorte estático do mapa (estilo galeria Samsung) para a folha de detalhes. */
+/** Mapa + endereço no cartão (estilo galeria Samsung). Só compor quando há GPS. */
+@Composable
+fun PhotoDetailLocationSection(
+    latitude: Double,
+    longitude: Double,
+    locationLabel: String?,
+    modifier: Modifier = Modifier,
+    contentOnDark: Boolean = false,
+) {
+    val addressColor = if (contentOnDark) {
+        Color.White.copy(alpha = 0.92f)
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val secondaryColor = if (contentOnDark) {
+        Color.White.copy(alpha = 0.65f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val cardBackground = if (contentOnDark) {
+        Color(0xFF1E1E1E)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(cardBackground),
+    ) {
+        PhotoDetailLocationMap(
+            latitude = latitude,
+            longitude = longitude,
+            locationLabel = locationLabel,
+            modifier = Modifier.fillMaxWidth(),
+            mapCornerRadius = 0.dp,
+        )
+        locationLabel?.takeIf { it.isNotBlank() }?.let { address ->
+            Text(
+                address,
+                style = MaterialTheme.typography.bodyMedium,
+                color = addressColor,
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 12.dp),
+            )
+        }
+    }
+}
+
 @Composable
 fun PhotoDetailLocationMap(
     latitude: Double,
     longitude: Double,
     locationLabel: String?,
     modifier: Modifier = Modifier,
+    mapCornerRadius: androidx.compose.ui.unit.Dp = 12.dp,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -101,11 +151,17 @@ fun PhotoDetailLocationMap(
         markerPlaced = true
     }
 
+    val shape = if (mapCornerRadius > 0.dp) {
+        RoundedCornerShape(mapCornerRadius)
+    } else {
+        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(168.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         AndroidView(
