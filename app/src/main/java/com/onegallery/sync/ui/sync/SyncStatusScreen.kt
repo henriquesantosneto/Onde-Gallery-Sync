@@ -161,7 +161,7 @@ fun SyncStatusScreen(
                                 )
                             }
                         }
-                        val queueCap = if (coordinatorState.isRunning) 50 else 8
+                        val queueCap = if (coordinatorState.isRunning) 10 else 8
                         val queueInStatus = queueForUi.take(queueCap)
                         val activeItem = coordinatorState.activeItem
                         val activeMissingFromList = coordinatorState.isRunning &&
