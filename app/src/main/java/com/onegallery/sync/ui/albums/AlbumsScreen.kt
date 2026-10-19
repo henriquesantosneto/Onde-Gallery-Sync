@@ -68,6 +68,7 @@ import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumListSort
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.ui.gallery.albumMediaCountBadgeCorner
 import com.onegallery.sync.ui.gallery.albumMediaCountBadgeFontScale
 import com.onegallery.sync.ui.gallery.albumMediaCountBadgeInnerPadding
@@ -129,6 +130,7 @@ fun AlbumsScreen(
     val canDeleteUserAlbums = selectedUserAlbums.isNotEmpty()
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {

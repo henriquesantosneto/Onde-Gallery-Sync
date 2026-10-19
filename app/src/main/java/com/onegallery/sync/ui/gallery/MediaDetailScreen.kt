@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -46,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -319,7 +319,7 @@ fun MediaDetailScreen(
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        contentWindowInsets = ZeroScaffoldContentInsets,
         snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
         topBar = topBar,
     ) { padding ->

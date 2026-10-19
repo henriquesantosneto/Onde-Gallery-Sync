@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.data.onedrive.OneDriveDocumentBrowser
 import com.onegallery.sync.data.onedrive.OneDrivePickerHelper
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 
 private data class SafCrumb(
     val entry: OneDriveDocumentBrowser.BrowseEntry,
@@ -87,6 +88,7 @@ fun OneDriveSafBrowserScreen(
     }
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         topBar = {
             TopAppBar(
                 title = {

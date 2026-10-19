@@ -57,6 +57,7 @@ import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.ui.albums.formatMediaCount
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncPaths
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -112,6 +113,7 @@ fun GalleryScreen(
     }
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(

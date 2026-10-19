@@ -58,6 +58,7 @@ import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.MediaSamsungDetailsContent
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +115,7 @@ fun PlacesMapScreen(
     val scope = rememberCoroutineScope()
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(

@@ -43,6 +43,7 @@ import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncTaskLauncher
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,6 +70,7 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         topBar = { TopAppBar(title = { Text("Ajustes") }) },
     ) { padding ->
         LazyColumn(

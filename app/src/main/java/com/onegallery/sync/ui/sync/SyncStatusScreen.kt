@@ -36,6 +36,7 @@ import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
@@ -75,6 +76,7 @@ fun SyncStatusScreen(
     }
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         topBar = { TopAppBar(title = { Text("Sync") }) },
     ) { padding ->
         LazyColumn(

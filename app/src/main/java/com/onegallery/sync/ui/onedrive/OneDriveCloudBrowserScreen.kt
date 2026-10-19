@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.data.onedrive.OneDriveBrowseEntry
 import com.onegallery.sync.data.onedrive.OneDriveRepository
+import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncPolicy
 import kotlinx.coroutines.launch
 
@@ -89,6 +90,7 @@ fun OneDriveCloudBrowserScreen(
     }
 
     Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
         topBar = {
             TopAppBar(
                 title = {
