@@ -376,10 +376,14 @@ private fun buildAlbums(
         val items = grouped[title].orEmpty()
         val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
         val userMeta = userAlbums.find { it.title == title }
+        val photoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
+        val videoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
         MediaAlbum(
             bucketId = "album:$title",
             title = title,
             itemCount = items.size,
+            photoCount = photoCount,
+            videoCount = videoCount,
             coverUri = items.firstOrNull()?.localUri ?: items.firstOrNull()?.cachedOriginal?.let {
                 android.net.Uri.fromFile(it)
             },
@@ -422,10 +426,14 @@ private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> 
             val title = sampleComponents?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
                 ?: group.first().locationLabel.orEmpty()
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
+            val photoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
+            val videoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
             MediaAlbum(
                 bucketId = "place:$encodedKey",
                 title = title,
                 itemCount = group.size,
+                photoCount = photoCount,
+                videoCount = videoCount,
                 coverUri = group.maxByOrNull { it.sortTimestamp }?.localUri
                     ?: group.firstNotNullOfOrNull { it.cachedOriginal?.let(android.net.Uri::fromFile) },
                 sortTimestamp = latest,

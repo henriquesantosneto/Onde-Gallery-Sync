@@ -47,7 +47,7 @@ fun AlbumDetailsBottomSheet(
                 modifier = Modifier.padding(top = 4.dp),
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-            DetailRow("Itens", "${album.itemCount}")
+            DetailRow("Conteúdo", formatAlbumMediaCount(album))
             if (album.isUserManaged && album.createdAtEpoch != null && album.createdAtEpoch > 0L) {
                 val created = Instant.ofEpochSecond(album.createdAtEpoch)
                     .atZone(ZoneId.systemDefault())

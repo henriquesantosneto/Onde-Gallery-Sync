@@ -484,32 +484,32 @@ private fun AlbumGridTile(
                         .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(50)),
                 )
             }
+            Text(
+                text = formatAlbumMediaCountBadge(album),
+                style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
+        Text(
+            text = album.title,
+            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleMedium,
+            maxLines = if (compact) 1 else 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = if (compact) 6.dp else 10.dp),
+        )
         if (!compact) {
             Text(
-                text = album.title,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-            )
-            Text(
-                text = "${album.itemCount} ${if (album.itemCount == 1) "item" else "itens"}",
+                text = formatAlbumMediaCount(album),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
-            )
-        } else {
-            Text(
-                text = album.title,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
             )
         }
     }

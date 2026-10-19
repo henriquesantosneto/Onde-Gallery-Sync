@@ -20,6 +20,8 @@ class LocalMediaRepository(private val context: Context) {
                 bucketId = title,
                 title = title,
                 itemCount = items.size,
+                photoCount = items.count { it.kind == MediaKind.IMAGE },
+                videoCount = items.count { it.kind == MediaKind.VIDEO },
                 coverUri = items.maxByOrNull { it.dateAddedSeconds }?.uri,
             )
         }.sortedByDescending { it.itemCount }

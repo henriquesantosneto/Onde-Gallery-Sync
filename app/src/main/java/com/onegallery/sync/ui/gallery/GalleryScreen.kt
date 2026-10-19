@@ -5,6 +5,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +60,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.ui.albums.formatMediaCount
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
 import java.net.URLEncoder
@@ -93,16 +95,34 @@ fun GalleryScreen(
     val title = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
         state.locationFilter != null -> state.locationFilter ?: "Local"
-        state.albumFilter != null -> "Álbum: ${state.albumFilter}"
+        state.albumFilter != null -> state.albumFilter ?: "Álbum"
         else -> "Fotos"
     }
     val filteredBrowse = state.locationFilter != null || state.albumFilter != null
+    val browseMediaCountLine = if (filteredBrowse && !state.selectionMode) {
+        val photos = state.items.count { it.kind == MediaKind.IMAGE }
+        val videos = state.items.count { it.kind == MediaKind.VIDEO }
+        formatMediaCount(photos, videos)
+    } else {
+        null
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(title) },
+                title = {
+                    Column {
+                        Text(title)
+                        browseMediaCountLine?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     if (!state.selectionMode && filteredBrowse) {
                         IconButton(

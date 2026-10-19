@@ -30,6 +30,8 @@ data class MediaAlbum(
     val bucketId: String,
     val title: String,
     val itemCount: Int,
+    val photoCount: Int = itemCount,
+    val videoCount: Int = 0,
     val coverUri: Uri?,
     val sortTimestamp: Long = 0L,
     /** Álbum criado pelo usuário (pode renomear/excluir a organização). */
