@@ -1,12 +1,13 @@
-OneGallery Sync — APK 0.8.40 (versionCode 96)
+OneGallery Sync — APK 0.8.41 (versionCode 97)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.40-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.41-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Ajustes: versão do app exibida discretamente no rodapé
-- v0.8.39: recria índice ao escolher pasta OneDrive
+- Sync: se local ou nuvem estiver mais novo (mesmo caminho/nome), envia e sobrescreve o outro lado
+- Nuvem mais recente substitui o arquivo na galeria automaticamente no sync
+- Sem parar em “conflito” — vence quem tiver a versão mais nova
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
