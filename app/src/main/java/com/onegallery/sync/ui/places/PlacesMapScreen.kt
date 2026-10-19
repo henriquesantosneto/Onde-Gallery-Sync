@@ -5,11 +5,9 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -45,7 +43,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -58,12 +55,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaAccessPermissions
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncTaskLauncher
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.ui.gallery.GalleryViewModel
-import com.onegallery.sync.ui.gallery.MediaThumbnailImage
-import com.onegallery.sync.ui.gallery.formatMediaCaptureDate
+import com.onegallery.sync.ui.gallery.MediaSamsungDetailsContent
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,6 +77,7 @@ import org.maplibre.android.maps.Style
 fun PlacesMapScreen(
     viewModel: GalleryViewModel,
     syncCoordinator: SyncCoordinator,
+    mediaCacheRepository: MediaCacheRepository,
     syncTasks: SyncTaskLauncher,
     onBack: () -> Unit,
     onOpenItem: (String) -> Unit,
@@ -250,72 +247,49 @@ fun PlacesMapScreen(
     val pin = selectedPin
     if (pin != null) {
         val item = pin.item
+        val displayPool = remember(state.geoItems, state.items) {
+            (state.geoItems + state.items).distinctBy { it.canonicalPath }
+        }
         ModalBottomSheet(
             onDismissRequest = { selectedPin = null },
             sheetState = sheetState,
+            containerColor = Color(0xFF0D0D0D),
+            contentColor = Color.White,
         ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(
-                    item.locationLabel?.takeIf { it.isNotBlank() } ?: item.displayName,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                if (item.locationLabel?.isNotBlank() == true) {
-                    Text(
-                        item.displayName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-                val dateLine = formatMediaCaptureDate(item.sortTimestamp).takeIf { it.isNotBlank() }
-                Text(
-                    listOfNotNull(
-                        dateLine,
-                        formatPinCoordinates(pin.latitude, pin.longitude),
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-                )
-                item.locationLabel?.takeIf { it.isNotBlank() }?.let { label ->
-                    TextButton(
-                        onClick = {
-                            selectedPin = null
-                            onShowAllAtPlace(label)
-                        },
-                    ) {
-                        Text("Ver outras fotos neste lugar")
+            MediaSamsungDetailsContent(
+                canonicalPaths = listOf(item.canonicalPath),
+                displayItems = displayPool,
+                syncCoordinator = syncCoordinator,
+                mediaCacheRepository = mediaCacheRepository,
+                footer = {
+                    Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+                        item.locationLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                            TextButton(
+                                onClick = {
+                                    selectedPin = null
+                                    onShowAllAtPlace(label)
+                                },
+                            ) {
+                                Text("Ver outras fotos neste lugar")
+                            }
+                        }
+                        TextButton(
+                            onClick = {
+                                selectedPin = null
+                                val encoded = URLEncoder.encode(
+                                    item.canonicalPath,
+                                    StandardCharsets.UTF_8.name(),
+                                )
+                                onOpenItem(encoded)
+                            },
+                        ) {
+                            Text("Abrir foto")
+                        }
                     }
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth()
-                    .aspectRatio(1.2f)
-                    .clickable {
-                        selectedPin = null
-                        val encoded = URLEncoder.encode(
-                            item.canonicalPath,
-                            StandardCharsets.UTF_8.name(),
-                        )
-                        onOpenItem(encoded)
-                    },
-            ) {
-                MediaThumbnailImage(
-                    item = item,
-                    syncCoordinator = syncCoordinator,
-                    contentDescription = item.displayName,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            }
+                },
+            )
         }
     }
-}
-
-private fun formatPinCoordinates(latitude: Double, longitude: Double): String {
-    return String.format(Locale.US, "%.5f°, %.5f°", latitude, longitude)
 }
 
 /** Enquadra os locais das fotos (comportamento próximo ao mapa do app Fotos no iPhone). */

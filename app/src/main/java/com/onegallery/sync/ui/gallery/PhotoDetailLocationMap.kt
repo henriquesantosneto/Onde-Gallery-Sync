@@ -49,11 +49,6 @@ fun PhotoDetailLocationSection(
     } else {
         MaterialTheme.colorScheme.onSurface
     }
-    val secondaryColor = if (contentOnDark) {
-        Color.White.copy(alpha = 0.65f)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
     val cardBackground = if (contentOnDark) {
         Color(0xFF1E1E1E)
     } else {

@@ -21,12 +21,10 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -88,6 +86,8 @@ fun GalleryScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
     var showMediaDetails by remember { mutableStateOf(false) }
+    var showSelectionOverflow by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -144,19 +144,19 @@ fun GalleryScreen(
                 },
                 actions = {
                     if (state.selectionMode) {
-                        if (state.selectedPaths.isNotEmpty()) {
-                            IconButton(onClick = { showMediaDetails = true }) {
-                                Icon(Icons.Outlined.Info, contentDescription = "Detalhes")
-                            }
-                        }
                         IconButton(onClick = { showMoveDialog = true }) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
-                        IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
-                            Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
-                        }
-                        IconButton(onClick = { viewModel.deleteSelected() }) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
+                        if (state.selectedPaths.isNotEmpty()) {
+                            MediaGalleryOverflowMenuButton(
+                                expanded = showSelectionOverflow,
+                                onExpandedChange = { showSelectionOverflow = it },
+                                showDetails = true,
+                                onDetails = { showMediaDetails = true },
+                                onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
+                                onDelete = { showDeleteConfirm = true },
+                                deleteLabel = "Excluir tudo",
+                            )
                         }
                         TextButton(onClick = { viewModel.clearSelection() }) {
                             Text("Cancelar")
@@ -302,6 +302,17 @@ fun GalleryScreen(
             syncCoordinator = syncCoordinator,
             mediaCacheRepository = mediaCacheRepository,
             onDismiss = { showMediaDetails = false },
+        )
+    }
+
+    if (showDeleteConfirm && state.selectedPaths.isNotEmpty()) {
+        DeleteSelectionDialog(
+            count = state.selectedPaths.size,
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                viewModel.deleteSelected()
+            },
         )
     }
 

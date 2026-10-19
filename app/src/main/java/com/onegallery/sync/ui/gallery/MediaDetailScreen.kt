@@ -12,18 +12,13 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -155,10 +150,13 @@ fun MediaDetailScreen(
         detailLoading = true
         showAdvancedDetails = false
         detailInfo = withContext(Dispatchers.IO) {
-            val entity = syncCoordinator.getMetadata(currentPath) ?: return@withContext null
-            val display = liveItems.find { it.canonicalPath == currentPath }
-                ?: GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
-            buildMediaDetailInfo(entity, display, context)
+            loadMediaDetailInfos(
+                context = context,
+                canonicalPaths = listOf(currentPath),
+                displayItems = liveItems,
+                syncCoordinator = syncCoordinator,
+                mediaCacheRepository = mediaCacheRepository,
+            ).firstOrNull()
         }
         detailLoading = false
     }
@@ -236,11 +234,16 @@ fun MediaDetailScreen(
                         IconButton(onClick = { showMoveDialog = true }) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
-                        IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
-                            Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
-                        }
-                        IconButton(onClick = { viewModel.deleteSelected() }) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
+                        if (state.selectedPaths.isNotEmpty()) {
+                            MediaGalleryOverflowMenuButton(
+                                expanded = showOverflowMenu,
+                                onExpandedChange = { showOverflowMenu = it },
+                                showDetails = detailPaths.isNotEmpty(),
+                                onDetails = { showMediaDetailsModal = true },
+                                onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
+                                onDelete = { showDeleteConfirm = true },
+                                deleteLabel = "Excluir tudo",
+                            )
                         }
                         TextButton(onClick = { viewModel.clearSelection() }) {
                             Text("Cancelar")
@@ -253,45 +256,20 @@ fun MediaDetailScreen(
                                 contentDescription = "Selecionar",
                             )
                         }
-                        Box {
-                            IconButton(onClick = { showOverflowMenu = true }) {
-                                Icon(Icons.Outlined.MoreVert, contentDescription = "Mais opções")
-                            }
-                            DropdownMenu(
-                                expanded = showOverflowMenu,
-                                onDismissRequest = { showOverflowMenu = false },
-                            ) {
-                                if (detailPaths.isNotEmpty()) {
-                                    DropdownMenuItem(
-                                        text = { Text("Detalhes") },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            if (embeddedDetailsSheet) {
-                                                sheetScope.launch {
-                                                    bottomSheetState.expand()
-                                                }
-                                            } else {
-                                                showMediaDetailsModal = true
-                                            }
-                                        },
-                                    )
+                        MediaGalleryOverflowMenuButton(
+                            expanded = showOverflowMenu,
+                            onExpandedChange = { showOverflowMenu = it },
+                            showDetails = detailPaths.isNotEmpty(),
+                            onDetails = {
+                                if (embeddedDetailsSheet) {
+                                    sheetScope.launch { bottomSheetState.expand() }
+                                } else {
+                                    showMediaDetailsModal = true
                                 }
-                                DropdownMenuItem(
-                                    text = { Text("Liberar espaço") },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        viewModel.releaseSingle(currentPath)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Excluir") },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        showDeleteConfirm = true
-                                    },
-                                )
-                            }
-                        }
+                            },
+                            onFreeSpace = { viewModel.releaseSingle(currentPath) },
+                            onDelete = { showDeleteConfirm = true },
+                        )
                     }
                 },
             )
@@ -400,15 +378,28 @@ fun MediaDetailScreen(
         )
     }
 
-    if (showDeleteConfirm && currentPath != null) {
-        DeleteSelectionDialog(
-            count = 1,
-            onDismiss = { showDeleteConfirm = false },
-            onConfirm = {
-                showDeleteConfirm = false
-                viewModel.deleteSingle(currentPath, onBack)
-            },
-        )
+    if (showDeleteConfirm) {
+        val deleteCount = if (state.selectionMode && state.selectedPaths.isNotEmpty()) {
+            state.selectedPaths.size
+        } else if (currentPath != null) {
+            1
+        } else {
+            0
+        }
+        if (deleteCount > 0) {
+            DeleteSelectionDialog(
+                count = deleteCount,
+                onDismiss = { showDeleteConfirm = false },
+                onConfirm = {
+                    showDeleteConfirm = false
+                    if (state.selectionMode && state.selectedPaths.isNotEmpty()) {
+                        viewModel.deleteSelected()
+                    } else if (currentPath != null) {
+                        viewModel.deleteSingle(currentPath, onBack)
+                    }
+                },
+            )
+        }
     }
 
     if (showMoveDialog) {

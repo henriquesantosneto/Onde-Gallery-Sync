@@ -79,7 +79,7 @@ fun readMediaCaptureSpecs(
     entity: SyncMetadataEntity,
     display: GalleryDisplayItem,
 ): MediaCaptureSpecs? {
-    val exif = openExifInterface(context, display) ?: return fallbackSpecs(entity, display)
+    val exif = openExifInterface(context, display) ?: return fallbackSpecs(display)
     val width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
         .takeIf { it > 0 }
         ?: exif.getAttributeInt(ExifInterface.TAG_PIXEL_X_DIMENSION, 0)
@@ -117,11 +117,10 @@ fun readMediaCaptureSpecs(
         statsSecondaryLine = joinStats(listOf(isoLabel, focalLabel, fLabel, exposure)),
     ).takeIf {
         it.deviceLabel != null || it.statsPrimaryLine != null || it.statsSecondaryLine != null
-    } ?: fallbackSpecs(entity, display)
+    } ?: fallbackSpecs(display)
 }
 
 private fun fallbackSpecs(
-    entity: SyncMetadataEntity,
     display: GalleryDisplayItem,
 ): MediaCaptureSpecs? {
     val file = resolveReadableFile(display)

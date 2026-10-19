@@ -380,6 +380,7 @@ fun OneGalleryApp(
                 PlacesMapScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
                     syncTasks = syncTasks,
                     onBack = { navController.popBackStack() },
                     onOpenItem = { encoded ->
