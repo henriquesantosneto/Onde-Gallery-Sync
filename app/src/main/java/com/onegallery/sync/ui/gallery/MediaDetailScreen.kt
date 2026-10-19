@@ -297,8 +297,10 @@ private fun MediaDetailPage(
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
 
     suspend fun refreshDisplayItem() {
-        item = syncCoordinator.getMetadata(canonicalPath)?.let {
-            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
+        item = withContext(Dispatchers.Default) {
+            syncCoordinator.getMetadata(canonicalPath)?.let {
+                GalleryMapper.toDisplayItem(it, mediaCacheRepository)
+            }
         }
     }
 
@@ -310,7 +312,6 @@ private fun MediaDetailPage(
         }
         val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
         if (result.isSuccess) {
-            syncCoordinator.ensureThumbnailCached(canonicalPath)
             withContext(Dispatchers.Main.immediate) {
                 refreshDisplayItem()
             }

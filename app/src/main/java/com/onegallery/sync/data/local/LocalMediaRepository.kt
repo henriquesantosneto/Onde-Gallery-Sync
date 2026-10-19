@@ -9,6 +9,9 @@ import android.provider.MediaStore
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 class LocalMediaRepository(private val context: Context) {
 
@@ -100,14 +103,14 @@ class LocalMediaRepository(private val context: Context) {
      * Coloca um arquivo baixado de volta na galeria do Android (recall após liberar espaço).
      * Usa a pasta do [canonicalPath] (ex.: DCIM/Camera/).
      */
-    fun importIntoMediaStore(
+    suspend fun importIntoMediaStore(
         canonicalPath: String,
         displayName: String,
         kind: MediaKind,
         sourceFile: java.io.File,
-    ): Result<LocalMediaItem> {
+    ): Result<LocalMediaItem> = withContext(Dispatchers.IO) {
         if (!sourceFile.isFile || sourceFile.length() <= 0L) {
-            return Result.failure(IllegalArgumentException("Arquivo inválido para importar."))
+            return@withContext Result.failure(IllegalArgumentException("Arquivo inválido para importar."))
         }
         val collection = mediaCollectionUri(kind)
         val folder = SyncPaths.albumFromCanonical(canonicalPath)
@@ -122,12 +125,12 @@ class LocalMediaRepository(private val context: Context) {
             }
         }
         var insertedUri: Uri? = null
-        return runCatching {
+        return@withContext runCatching {
             val uri = context.contentResolver.insert(collection, values)
                 ?: throw IllegalStateException("Não foi possível criar entrada na galeria.")
             insertedUri = uri
             context.contentResolver.openOutputStream(uri, "w")?.use { output ->
-                sourceFile.inputStream().use { input -> input.copyTo(output) }
+                copyFileWithYield(sourceFile, output)
             } ?: throw IllegalStateException("Não foi possível gravar na galeria.")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val done = ContentValues().apply {
@@ -155,6 +158,28 @@ class LocalMediaRepository(private val context: Context) {
                 runCatching { context.contentResolver.delete(pending, null, null) }
             }
         }
+    }
+
+    private suspend fun copyFileWithYield(sourceFile: java.io.File, output: java.io.OutputStream) {
+        val buffer = ByteArray(IMPORT_COPY_BUFFER_BYTES)
+        sourceFile.inputStream().use { input ->
+            var sinceYield = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                output.write(buffer, 0, read)
+                sinceYield += read
+                if (sinceYield >= IMPORT_YIELD_EVERY_BYTES) {
+                    sinceYield = 0L
+                    yield()
+                }
+            }
+        }
+    }
+
+    private companion object {
+        const val IMPORT_COPY_BUFFER_BYTES = 64 * 1024
+        const val IMPORT_YIELD_EVERY_BYTES = 512 * 1024L
     }
 
     private fun mediaCollectionUri(kind: MediaKind): Uri {

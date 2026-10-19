@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -101,7 +102,8 @@ class GalleryViewModel(
         syncCoordinator.userAlbums,
     ) { metadata, userAlbums ->
         metadata to userAlbums
-    }.map { (metadata, userAlbums) ->
+    }.debounce(120)
+        .map { (metadata, userAlbums) ->
         LibrarySnapshot(
             allItems = metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
             userAlbums = userAlbums,
@@ -172,7 +174,8 @@ class GalleryViewModel(
             actionMessage = controls.message,
             geoItems = allItems.filter { it.latitude != null && it.longitude != null },
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
 
     init {
         refresh()

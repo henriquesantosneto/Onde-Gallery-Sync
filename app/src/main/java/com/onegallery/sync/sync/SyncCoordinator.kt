@@ -1051,10 +1051,10 @@ class SyncCoordinator(
         return !hasLocalOriginalOnDevice(row)
     }
 
-    /** Baixa da nuvem (se preciso) e restaura na galeria do Android. */
+    /** Baixa da nuvem (se preciso); importação na galeria roda em segundo plano. */
     suspend fun recallOriginalToDevice(canonicalPath: String): Result<File> {
-        ensureGraphSessionOnMain().getOrElse { return Result.failure(it) }
         return withContext(Dispatchers.IO) {
+            ensureGraphSessionOnMain().getOrElse { return@withContext Result.failure(it) }
             val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
             mutex.withLock {
                 try {
@@ -1122,10 +1122,22 @@ class SyncCoordinator(
             target
         }
 
-        return restoreRecalledOriginalToDevice(
-            syncMetadataDao.getByCanonicalPath(canonicalPath) ?: row,
-            sourceFile,
-        )
+        if (!hasLocalOriginalOnDevice(row.copy(cachedFilePath = sourceFile.absolutePath))) {
+            scheduleRecalledGalleryImport(canonicalPath, sourceFile)
+        }
+        return Result.success(sourceFile)
+    }
+
+    private fun scheduleRecalledGalleryImport(canonicalPath: String, sourceFile: File) {
+        val scope = backgroundScope ?: return
+        scope.launch(Dispatchers.IO) {
+            val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
+            mutex.withLock {
+                val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return@launch
+                if (hasLocalOriginalOnDevice(row)) return@launch
+                importRecalledOriginalToGallery(row, sourceFile)
+            }
+        }
     }
 
     private fun hasLocalOriginalOnDevice(row: SyncMetadataEntity): Boolean {
@@ -1141,7 +1153,7 @@ class SyncCoordinator(
         return false
     }
 
-    private suspend fun restoreRecalledOriginalToDevice(
+    private suspend fun importRecalledOriginalToGallery(
         row: SyncMetadataEntity,
         sourceFile: File,
     ): Result<File> {
@@ -1183,7 +1195,7 @@ class SyncCoordinator(
         }
         syncMetadataDao.upsert(updated)
         mediaCacheRepository.thumbFile(row.canonicalPath).delete()
-        ensureThumbnailCachedOnIo(row.canonicalPath)
+        runCatching { ensureThumbnailCachedOnIo(row.canonicalPath) }
         return Result.success(sourceFile)
     }
 
