@@ -432,12 +432,10 @@ private fun MediaThumbnail(
             modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
         )
         if (item.kind == MediaKind.VIDEO) {
-            Text(
-                "Vídeo",
+            VideoDurationOverlay(
+                durationMs = item.videoDurationMs,
+                gridZoomScale = gridZoomScale,
                 modifier = Modifier.align(Alignment.BottomStart).padding(overlayPad),
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = MaterialTheme.typography.labelSmall.fontSize * gridZoomScale.coerceIn(0.45f, 1f),
-                ),
             )
         }
         if (!item.isOfflineAvailable && item.cloudState == CloudSyncState.CLOUD_ONLY) {

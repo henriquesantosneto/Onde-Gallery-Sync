@@ -117,6 +117,9 @@ class LocalMediaRepository(private val context: Context) {
             add(MediaStore.MediaColumns.DATE_MODIFIED)
             add(MediaStore.MediaColumns.SIZE)
             add(MediaStore.MediaColumns.MIME_TYPE)
+            if (kind == MediaKind.VIDEO) {
+                add(MediaStore.Video.VideoColumns.DURATION)
+            }
             if (includeGps) {
                 add(MediaStore.Images.ImageColumns.LATITUDE)
                 add(MediaStore.Images.ImageColumns.LONGITUDE)
@@ -134,6 +137,11 @@ class LocalMediaRepository(private val context: Context) {
             val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+            val durationCol = if (kind == MediaKind.VIDEO) {
+                cursor.getColumnIndex(MediaStore.Video.VideoColumns.DURATION)
+            } else {
+                -1
+            }
             val latCol = if (includeGps) cursor.getColumnIndex(MediaStore.Images.ImageColumns.LATITUDE) else -1
             val lonCol = if (includeGps) cursor.getColumnIndex(MediaStore.Images.ImageColumns.LONGITUDE) else -1
             while (cursor.moveToNext()) {
@@ -143,6 +151,11 @@ class LocalMediaRepository(private val context: Context) {
                     normalizeGps(cursor.getDouble(latCol), cursor.getDouble(lonCol))
                 } else {
                     null to null
+                }
+                val durationMs = if (durationCol >= 0) {
+                    cursor.getLong(durationCol).takeIf { it > 0L }
+                } else {
+                    null
                 }
                 result.add(
                     LocalMediaItem(
@@ -164,6 +177,7 @@ class LocalMediaRepository(private val context: Context) {
                         sizeBytes = cursor.getLong(sizeCol),
                         kind = kind,
                         mimeType = cursor.getString(mimeCol),
+                        durationMs = durationMs,
                     ),
                 )
             }

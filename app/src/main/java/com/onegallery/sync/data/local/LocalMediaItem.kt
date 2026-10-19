@@ -24,6 +24,8 @@ data class LocalMediaItem(
     val sizeBytes: Long,
     val kind: MediaKind,
     val mimeType: String?,
+    /** MediaStore DURATION (ms), só vídeos. */
+    val durationMs: Long? = null,
 )
 
 data class MediaAlbum(

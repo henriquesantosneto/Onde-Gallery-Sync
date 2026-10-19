@@ -22,6 +22,7 @@ data class GalleryDisplayItem(
     val locationLabel: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    val videoDurationMs: Long? = null,
 ) {
     val thumbnailModel: Any?
         get() = when (cloudState) {

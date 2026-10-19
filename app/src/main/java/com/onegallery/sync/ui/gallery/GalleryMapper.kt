@@ -41,6 +41,7 @@ object GalleryMapper {
             locationLabel = entity.locationLabel,
             latitude = entity.latitude,
             longitude = entity.longitude,
+            videoDurationMs = entity.videoDurationMs,
         )
     }
 }

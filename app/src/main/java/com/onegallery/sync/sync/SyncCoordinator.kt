@@ -508,6 +508,11 @@ class SyncCoordinator(
         if (existing.localContentUri != item.uri.toString()) return false
         if (existing.displayName != item.displayName) return false
         if (existing.pendingDeleteTarget != PendingDeleteTarget.NONE) return false
+        if (item.kind == com.onegallery.sync.data.local.MediaKind.VIDEO &&
+            existing.videoDurationMs != item.durationMs
+        ) {
+            return false
+        }
         return true
     }
 
@@ -1463,6 +1468,11 @@ class SyncCoordinator(
             locationLabel = location.first,
             latitude = location.second,
             longitude = location.third,
+            videoDurationMs = if (item.kind == com.onegallery.sync.data.local.MediaKind.VIDEO) {
+                item.durationMs ?: existing?.videoDurationMs
+            } else {
+                null
+            },
         )
     }
 

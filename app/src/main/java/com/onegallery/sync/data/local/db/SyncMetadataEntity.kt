@@ -26,6 +26,8 @@ data class SyncMetadataEntity(
     val locationLabel: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    /** Duração do vídeo (MediaStore), em milissegundos. */
+    val videoDurationMs: Long? = null,
     /** Liberar espaço: cópia local removida de propósito; não espelhar como exclusão na nuvem. */
     val localReleasedForSpace: Boolean = false,
 )
