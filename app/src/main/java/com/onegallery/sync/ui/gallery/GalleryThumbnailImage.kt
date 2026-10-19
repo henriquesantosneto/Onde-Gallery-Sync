@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
@@ -37,6 +38,7 @@ fun GalleryThumbnailImage(
     contentScale: ContentScale = ContentScale.Crop,
     style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
     sizePx: Int,
+    onContentAspectRatio: ((Float) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var displayData by remember(item.canonicalPath, sizePx) {
@@ -79,6 +81,14 @@ fun GalleryThumbnailImage(
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = contentScale,
+            onState = { state ->
+                if (onContentAspectRatio != null && state is AsyncImagePainter.State.Success) {
+                    val size = state.painter.intrinsicSize
+                    if (size.width.isFinite() && size.height.isFinite() && size.height > 0f) {
+                        onContentAspectRatio(size.width / size.height)
+                    }
+                }
+            },
         )
     } else {
         val showCenterCloud = item.cloudState != CloudSyncState.CLOUD_ONLY &&

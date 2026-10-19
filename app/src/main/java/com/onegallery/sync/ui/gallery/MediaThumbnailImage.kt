@@ -15,6 +15,7 @@ fun MediaThumbnailImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    onContentAspectRatio: ((Float) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val sizePx = remember(context) {
@@ -28,6 +29,7 @@ fun MediaThumbnailImage(
         contentScale = contentScale,
         style = GalleryThumbnailStyle.Detail,
         sizePx = sizePx,
+        onContentAspectRatio = onContentAspectRatio,
     )
 }
 

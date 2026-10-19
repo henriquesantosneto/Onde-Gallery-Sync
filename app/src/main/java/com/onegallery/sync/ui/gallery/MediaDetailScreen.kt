@@ -456,6 +456,7 @@ private fun MediaDetailPage(
     var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
+    var contentAspectRatio by remember(canonicalPath) { mutableStateOf<Float?>(null) }
 
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
         withContext(Dispatchers.Default) {
@@ -563,6 +564,7 @@ private fun MediaDetailPage(
                             MediaDetailMediaShell(
                                 item = overlayItem,
                                 recalling = loadingFull,
+                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 VideoPlayerView(
@@ -577,6 +579,7 @@ private fun MediaDetailPage(
                             MediaDetailMediaShell(
                                 item = overlayItem,
                                 recalling = loadingFull,
+                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 ZoomableMediaContainer(
@@ -591,6 +594,7 @@ private fun MediaDetailPage(
                                         contentDescription = display.displayName,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Fit,
+                                        onContentAspectRatio = { contentAspectRatio = it },
                                     )
                                 }
                             }
@@ -599,6 +603,7 @@ private fun MediaDetailPage(
                             MediaDetailMediaShell(
                                 item = overlayItem,
                                 recalling = loadingFull,
+                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 ZoomableImageContent(
@@ -608,6 +613,7 @@ private fun MediaDetailPage(
                                     contentScale = ContentScale.Fit,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onSingleTap = onToggleImmersive,
+                                    onContentAspectRatio = { contentAspectRatio = it },
                                 )
                             }
                         }
@@ -615,6 +621,7 @@ private fun MediaDetailPage(
                             MediaDetailMediaShell(
                                 item = overlayItem,
                                 recalling = loadingFull,
+                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 ZoomableMediaContainer(
@@ -629,6 +636,7 @@ private fun MediaDetailPage(
                                         contentDescription = display.displayName,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Fit,
+                                        onContentAspectRatio = { contentAspectRatio = it },
                                     )
                                 }
                             }
@@ -644,11 +652,16 @@ private fun MediaDetailPage(
 private fun MediaDetailMediaShell(
     item: GalleryDisplayItem,
     recalling: Boolean,
+    contentAspectRatio: Float?,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Box(modifier = modifier) {
         content()
-        MediaDetailCloudOverlay(item = item, recalling = recalling)
+        MediaDetailCloudOverlay(
+            item = item,
+            recalling = recalling,
+            contentAspectRatio = contentAspectRatio,
+        )
     }
 }

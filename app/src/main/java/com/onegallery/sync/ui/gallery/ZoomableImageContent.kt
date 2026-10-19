@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 
 @Composable
@@ -17,6 +18,7 @@ fun ZoomableImageContent(
     contentScale: ContentScale = ContentScale.Fit,
     onZoomActiveChanged: (Boolean) -> Unit = {},
     onSingleTap: () -> Unit = {},
+    onContentAspectRatio: ((Float) -> Unit)? = null,
 ) {
     ZoomableMediaContainer(
         resetKey = model,
@@ -44,6 +46,14 @@ fun ZoomableImageContent(
                 contentDescription = contentDescription,
                 contentScale = contentScale,
                 modifier = Modifier.fillMaxSize(),
+                onState = { state ->
+                    if (onContentAspectRatio != null && state is AsyncImagePainter.State.Success) {
+                        val size = state.painter.intrinsicSize
+                        if (size.width.isFinite() && size.height.isFinite() && size.height > 0f) {
+                            onContentAspectRatio(size.width / size.height)
+                        }
+                    }
+                },
             )
         }
     }

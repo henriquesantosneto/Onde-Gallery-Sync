@@ -1,9 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -79,14 +77,16 @@ fun GalleryCloudBadge(
 fun MediaDetailCloudOverlay(
     item: GalleryDisplayItem,
     recalling: Boolean,
+    contentAspectRatio: Float?,
     modifier: Modifier = Modifier,
 ) {
     val state = detailCloudBadgeState(item, recalling) ?: return
-    Box(modifier.fillMaxSize()) {
+    MediaContentFitOverlayHost(
+        contentAspectRatio = contentAspectRatio,
+        modifier = modifier,
+    ) {
         Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp),
+            modifier = Modifier.padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
