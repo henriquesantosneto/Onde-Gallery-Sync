@@ -16,7 +16,6 @@ import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -382,17 +381,6 @@ class GalleryViewModel(
         }
     }
 
-    /** Prefetch opcional ao tocar na grade; a tela de detalhe faz o recall completo. */
-    fun recallOriginalWhenOpening(canonicalPath: String) {
-        viewModelScope.launch {
-            if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return@launch
-            syncCoordinator.recallOriginalToDevice(canonicalPath)
-                .onSuccess { syncCoordinator.ensureThumbnailCached(canonicalPath) }
-                .onFailure { err ->
-                    err.message?.let { msg -> actionMessage.value = msg }
-                }
-        }
-    }
 }
 
 private fun buildAlbums(

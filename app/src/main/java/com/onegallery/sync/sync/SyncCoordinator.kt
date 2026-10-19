@@ -658,7 +658,7 @@ class SyncCoordinator(
                     )
                     return Result.failure(IllegalStateException("Pasta na nuvem não escolhida"))
                 }
-                oneDriveRepository.ensureGraphSession().getOrElse {
+                ensureGraphSessionOnMain().getOrElse {
                     _state.value = _state.value.copy(
                         lastMessage = if (com.onegallery.sync.auth.MsalAuthInteraction
                                 .needsInteractiveSignIn(it)
@@ -998,6 +998,12 @@ class SyncCoordinator(
     }
 
     suspend fun ensureThumbnailCached(canonicalPath: String): Result<File?> {
+        return withContext(Dispatchers.IO) {
+            ensureThumbnailCachedOnIo(canonicalPath)
+        }
+    }
+
+    private suspend fun ensureThumbnailCachedOnIo(canonicalPath: String): Result<File?> {
         mediaCacheRepository.thumbnailIfCached(canonicalPath)?.let { return Result.success(it) }
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         val thumbDest = mediaCacheRepository.thumbFile(canonicalPath)
@@ -1030,6 +1036,13 @@ class SyncCoordinator(
         return Result.success(null)
     }
 
+    private suspend fun ensureGraphSessionOnMain(): Result<Unit> {
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return Result.success(Unit)
+        return withContext(Dispatchers.Main.immediate) {
+            oneDriveRepository.ensureGraphSession()
+        }
+    }
+
     suspend fun needsOriginalRecall(canonicalPath: String): Boolean {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return false
         if (row.oneDriveItemId.isNullOrBlank()) return false
@@ -1038,11 +1051,7 @@ class SyncCoordinator(
 
     /** Baixa da nuvem (se preciso) e restaura na galeria do Android. */
     suspend fun recallOriginalToDevice(canonicalPath: String): Result<File> {
-        if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
-            withContext(Dispatchers.Main.immediate) {
-                oneDriveRepository.ensureGraphSession()
-            }.getOrElse { return Result.failure(it) }
-        }
+        ensureGraphSessionOnMain().getOrElse { return Result.failure(it) }
         return withContext(Dispatchers.IO) {
             val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
             mutex.withLock {

@@ -127,7 +127,7 @@ class LocalMediaRepository(private val context: Context) {
         val uri = context.contentResolver.insert(collection, values)
             ?: return Result.failure(IllegalStateException("Não foi possível criar entrada na galeria."))
         return runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
+            context.contentResolver.openOutputStream(uri, "w")?.use { output ->
                 sourceFile.inputStream().use { input -> input.copyTo(output) }
             } ?: error("Não foi possível gravar na galeria.")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

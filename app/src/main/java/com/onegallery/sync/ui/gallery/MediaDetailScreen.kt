@@ -307,9 +307,11 @@ private fun MediaDetailPage(
             error = null
         }
         val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
-        result.onSuccess {
+        if (result.isSuccess) {
             syncCoordinator.ensureThumbnailCached(canonicalPath)
-            refreshDisplayItem()
+            withContext(Dispatchers.Main.immediate) {
+                refreshDisplayItem()
+            }
         }
         withContext(Dispatchers.Main.immediate) {
             result.onFailure { err -> error = err.message }
@@ -326,8 +328,6 @@ private fun MediaDetailPage(
         loading = false
         if (syncCoordinator.needsOriginalRecall(canonicalPath)) {
             loadFullOriginalForViewing()
-        } else {
-            refreshDisplayItem()
         }
     }
 
