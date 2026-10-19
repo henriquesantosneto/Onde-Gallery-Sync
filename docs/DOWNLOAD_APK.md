@@ -1,28 +1,26 @@
 # Baixar o APK
 
-Os links do Origin **só funcionam com login** (repositório privado). Use uma destas opções:
+## Link estável (após você confirmar **Sim** na conversa)
 
-## A) Preview desta agent (recomendado)
+O agent roda `./scripts/ship-apk.sh` e publica no **GitHub Releases**. O link segue este padrão:
 
-1. Na conversa do agent, abra o cartão **Preview** (servidor local).
-2. Clique em **Baixar OneGallerySync-debug.apk**.
+`https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v{VERSÃO}-debug/OneGallerySync-debug.apk`
 
-URL local (na VM do agent): `http://127.0.0.1:43621/OneGallerySync-debug.apk`
+Exemplo (substitua pela versão atual em `app/build.gradle.kts`):
 
-## B) Painel de ficheiros do agent
+https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.50-debug/OneGallerySync-debug.apk
 
-1. Abra a run: https://cursor.com/agents/bc-7c109117-5b37-4cc7-821d-1fabf8860dd7
-2. No explorador de ficheiros do projeto, vá a `releases/OneGallerySync-debug.apk`.
-3. Descarregue o ficheiro (menu do ficheiro / download).
+Repositório: https://github.com/henriquesantosneto/Onde-Gallery-Sync
 
-## C) Clonar o repositório
+## Publicar manualmente
 
 ```bash
-origin repo clone henriquekako/tmp-a53cc6c3697b04a5
-cd tmp-a53cc6c3697b04a5/releases
+./scripts/ship-apk.sh
 ```
 
-## D) Compilar no PC
+Requer `GITHUB_TOKEN` ou `gh auth login` com permissão de release no repo.
+
+## Compilar no PC
 
 ```bash
 ./gradlew :app:assembleDebug

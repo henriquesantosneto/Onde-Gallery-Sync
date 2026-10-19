@@ -1,0 +1,17 @@
+---
+description: Quando o usuário confirmar APK com "Sim", publicar no GitHub e enviar link de download.
+alwaysApply: true
+---
+
+# APK — confirmação "Sim"
+
+Quando o usuário responder **Sim** (ou equivalente) para gerar/publicar o APK após uma versão:
+
+1. Execute **`./scripts/ship-apk.sh`** na raiz do repositório (build, commit em `releases/`, push `origin` + GitHub `main`, GitHub Release).
+2. Na resposta, inclua **sempre** o link de download público do GitHub Releases (saída `DOWNLOAD_URL=` do script), em markdown.
+3. Mencione brevemente a **versionName** (ex.: 0.8.50).
+4. O cartão Preview local (`http://127.0.0.1:43621/...`) é opcional; o link **obrigatório** para o usuário é o do GitHub Releases.
+5. Não peça confirmação extra se o usuário já disse Sim.
+
+Repositório: `henriquesantosneto/Onde-Gallery-Sync`  
+Padrão do asset: `https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v{versionName}-debug/OneGallerySync-debug.apk`
