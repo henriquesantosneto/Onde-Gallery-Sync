@@ -98,8 +98,16 @@ fun GalleryScreen(
         }
     }
 
+    var browseFilterWasActive by remember(requiresActiveBrowseFilter) { mutableStateOf(false) }
     LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
-        if (requiresActiveBrowseFilter && state.albumFilter == null && state.locationFilter == null) {
+        if (!requiresActiveBrowseFilter) return@LaunchedEffect
+        val hasFilter = state.albumFilter != null || state.locationFilter != null
+        if (hasFilter) {
+            browseFilterWasActive = true
+            return@LaunchedEffect
+        }
+        // Só volta se o filtro existiu e sumiu (evita fechar na 1ª frame antes do ViewModel atualizar).
+        if (browseFilterWasActive) {
             onExitAlbumFilter()
         }
     }
