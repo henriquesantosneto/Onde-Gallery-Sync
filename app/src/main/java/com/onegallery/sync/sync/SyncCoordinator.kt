@@ -312,8 +312,12 @@ class SyncCoordinator(
         }
         return longTaskMutex.withLock {
             withContext(Dispatchers.Default) {
-                runCatching {
+                try {
                     prepareSyncSession(userInitiated)
+                } catch (cancelled: CancellationException) {
+                    return@withContext Result.failure(cancelled)
+                }
+                runCatching {
                     bindActiveLongTaskJob()
                     _state.value = _state.value.copy(
                         isRunning = true,
@@ -514,7 +518,11 @@ class SyncCoordinator(
             ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
             return longTaskMutex.withLock {
                 foregroundGuard.runWithForeground {
-                    prepareSyncSession(userInitiated)
+                    try {
+                        prepareSyncSession(userInitiated)
+                    } catch (cancelled: CancellationException) {
+                        return@runWithForeground Result.failure(cancelled)
+                    }
                     indexLocalLibraryBody(manageRunningState)
                 }
             }
@@ -727,7 +735,11 @@ class SyncCoordinator(
 
         return longTaskMutex.withLock {
             foregroundGuard.runWithForeground {
-                prepareSyncSession(userInitiated)
+                try {
+                    prepareSyncSession(userInitiated)
+                } catch (cancelled: CancellationException) {
+                    return@runWithForeground Result.failure(cancelled)
+                }
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,
@@ -990,7 +1002,11 @@ class SyncCoordinator(
         }
         return longTaskMutex.withLock {
             foregroundGuard.runWithForeground {
-                prepareSyncSession(userInitiated)
+                try {
+                    prepareSyncSession(userInitiated)
+                } catch (cancelled: CancellationException) {
+                    return@runWithForeground Result.failure(cancelled)
+                }
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,

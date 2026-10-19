@@ -49,6 +49,7 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -89,8 +90,23 @@ fun MediaDetailScreen(
         }
     }
 
+    val itemsByPath = remember(liveItems) {
+        liveItems.associateBy { it.canonicalPath }
+    }
+
     if (liveItems.isEmpty()) {
-        LaunchedEffect(Unit) { onBack() }
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = Color.White)
+        }
+        LaunchedEffect(initialCanonicalPath) {
+            delay(600)
+            if (viewModel.state.value.items.isEmpty()) {
+                onBack()
+            }
+        }
         return
     }
 
@@ -138,7 +154,7 @@ fun MediaDetailScreen(
     ) { pagerPaths.size.coerceAtLeast(1) }
 
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
-    val currentItem = currentPath?.let { path -> liveItems.find { it.canonicalPath == path } }
+    val currentItem = currentPath?.let { path -> itemsByPath[path] }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
     val detailPaths = when {
         state.selectionMode && state.selectedPaths.isNotEmpty() -> state.selectedPaths.toList()
@@ -162,9 +178,9 @@ fun MediaDetailScreen(
 
     val chromeVisible = !immersive
 
-    val filmstripItems = remember(pagerPaths, liveItems, contextItems) {
-        val pool = liveItems.ifEmpty { contextItems }
-        pagerPaths.mapNotNull { path -> pool.find { it.canonicalPath == path } }
+    val filmstripItems = remember(pagerPaths, itemsByPath, contextItems) {
+        val pool = if (liveItems.isNotEmpty()) itemsByPath else contextItems.associateBy { it.canonicalPath }
+        pagerPaths.mapNotNull { path -> pool[path] }
     }
     val detailsPanelOpen = showDetailsSheet && detailPaths.isNotEmpty()
     val detailsPanelFraction by animateFloatAsState(
@@ -217,7 +233,7 @@ fun MediaDetailScreen(
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
-                val live = liveItems.find { it.canonicalPath == path }
+                val live = itemsByPath[path]
                 MediaDetailPage(
                     canonicalPath = path,
                     liveItem = live,
@@ -395,8 +411,8 @@ private fun MediaDetailPage(
     onActivePageError: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var item by remember(canonicalPath) { mutableStateOf<GalleryDisplayItem?>(null) }
-    var loading by remember(canonicalPath) { mutableStateOf(true) }
+    var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
+    var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
 
@@ -438,10 +454,16 @@ private fun MediaDetailPage(
             return@LaunchedEffect
         }
         try {
-            if (item == null) loading = true
             error = null
-            item = loadDisplayItem() ?: liveItem
-            syncCoordinator.ensureThumbnailCached(canonicalPath)
+            if (liveItem != null) {
+                item = liveItem
+                loading = false
+            }
+            item = loadDisplayItem() ?: liveItem ?: item
+            if (item != null) loading = false
+            withContext(Dispatchers.IO) {
+                syncCoordinator.ensureThumbnailCached(canonicalPath)
+            }
             item = loadDisplayItem() ?: item
             loading = false
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -456,7 +478,10 @@ private fun MediaDetailPage(
     LaunchedEffect(canonicalPath, isActivePage) {
         if (!isActivePage) return@LaunchedEffect
         try {
-            if (syncCoordinator.needsOriginalRecall(canonicalPath)) {
+            val needsRecall = withContext(Dispatchers.Default) {
+                syncCoordinator.needsOriginalRecall(canonicalPath)
+            }
+            if (needsRecall) {
                 loadFullOriginalForViewing()
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {

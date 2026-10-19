@@ -15,6 +15,7 @@ import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -229,13 +230,16 @@ class GalleryViewModel(
             coroutineContext[Job]?.let { syncCoordinator.registerManagedSyncJob(it) }
             loading.value = true
             errorState.value = null
-            syncCoordinator.runBidirectionalSync(userInitiated = false)
-                .onFailure {
-                    if (errorState.value == null) {
-                        errorState.value = it.message
+            try {
+                syncCoordinator.runBidirectionalSync(userInitiated = false)
+                    .onFailure {
+                        if (errorState.value == null) {
+                            errorState.value = it.message
+                        }
                     }
-                }
-            loading.value = false
+            } finally {
+                loading.value = false
+            }
         }
     }
 
