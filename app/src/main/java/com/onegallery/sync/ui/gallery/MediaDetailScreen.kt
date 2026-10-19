@@ -22,7 +22,6 @@ import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -40,7 +39,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -290,7 +288,6 @@ private fun MediaDetailPage(
     onZoomActiveChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     var item by remember(canonicalPath) { mutableStateOf<GalleryDisplayItem?>(null) }
     var loading by remember(canonicalPath) { mutableStateOf(true) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
@@ -407,32 +404,22 @@ private fun MediaDetailPage(
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.padding(vertical = 6.dp),
                         )
-                        if (error != null) {
-                            Text(error ?: "", color = MaterialTheme.colorScheme.error)
-                        }
-                        if (display.needsCloudOriginalRecall()) {
-                            if (loadingFull) {
-                                Row(
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    CircularProgressIndicator(strokeWidth = 2.dp)
-                                    Text("Recuperando da nuvem…")
-                                }
-                            } else {
-                                Button(
-                                    onClick = { scope.launch { loadFullOriginalForViewing() } },
-                                ) {
-                                    Text(
-                                        if (display.kind == MediaKind.VIDEO) {
-                                            "Tentar reproduzir de novo"
-                                        } else {
-                                            "Recuperar da nuvem"
-                                        },
-                                    )
-                                }
+                        if (loadingFull) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(strokeWidth = 2.dp)
+                                Text("Recuperando da nuvem…")
                             }
+                        }
+                        if (error != null) {
+                            Text(
+                                error ?: "",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
                         }
                         RowWithActions(
                             onDeleteAll = { viewModel.deleteSingle(canonicalPath, onRemoved) },
