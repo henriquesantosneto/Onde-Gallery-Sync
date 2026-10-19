@@ -1,13 +1,12 @@
-OneGallery Sync — APK 0.8.41 (versionCode 97)
+OneGallery Sync — APK 0.8.42 (versionCode 98)
 ============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.41-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.42-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Sync: se local ou nuvem estiver mais novo (mesmo caminho/nome), envia e sobrescreve o outro lado
-- Nuvem mais recente substitui o arquivo na galeria automaticamente no sync
-- Sem parar em “conflito” — vence quem tiver a versão mais nova
+- WhatsApp: caminhos curtos na raiz do espelho (ex. WhatsApp Images/, WhatsApp Video/)
+- v0.8.41: sync sobrescreve o lado mais novo (local↔nuvem)
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
