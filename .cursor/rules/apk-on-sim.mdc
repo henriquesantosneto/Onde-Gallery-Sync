@@ -1,17 +1,22 @@
 ---
-description: Quando o usuário confirmar APK com "Sim", publicar no GitHub e enviar link de download.
+description: APK/GitHub Release só após o usuário responder Sim explicitamente para publicar.
 alwaysApply: true
 ---
 
-# APK — confirmação "Sim"
+# APK — publicar só com "Sim" do usuário
 
-Quando o usuário responder **Sim** (ou equivalente) para gerar/publicar o APK após uma versão:
+## Nunca automático
 
-1. Execute **`./scripts/ship-apk.sh`** na raiz do repositório (build, commit em `releases/`, push `origin` + GitHub `main`, GitHub Release).
-2. Na resposta, inclua **sempre** o link de download público do GitHub Releases (saída `DOWNLOAD_URL=` do script), em markdown.
-3. Mencione brevemente a **versionName** (ex.: 0.8.50).
-4. O cartão Preview local (`http://127.0.0.1:43621/...`) é opcional; o link **obrigatório** para o usuário é o do GitHub Releases.
-5. Não peça confirmação extra se o usuário já disse Sim.
+- **Não** execute `./scripts/ship-apk.sh`, `./gradlew assembleDebug` para release, nem GitHub Release **por conta própria** ao terminar uma tarefa, corrigir bug ou subir `versionName`.
+- **Não** publique APK porque o usuário disse "Sim" a **outra coisa** (implementar feature, otimização, etc.) — "Sim" só vale para APK quando a pergunta era claramente gerar/publicar o APK ou ele pediu o link de download.
+- Ao concluir código: commit/push normal; **pergunte** se quer o APK (ex.: "Quer que eu gere e publique o APK? Responda **Sim**.").
+
+## Quando o usuário responder **Sim** (para publicar APK)
+
+1. Execute **`./scripts/ship-apk.sh`** na raiz do repositório.
+2. Na resposta, inclua o link **DOWNLOAD_URL** do GitHub Releases em markdown e a **versionName**.
+3. Preview local (`http://127.0.0.1:43621/...`) é opcional; o link principal é o GitHub Releases.
+4. Não peça confirmação extra se ele já disse Sim **para o APK**.
 
 Repositório: `henriquesantosneto/Onde-Gallery-Sync`  
-Padrão do asset: `https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v{versionName}-debug/OneGallerySync-debug.apk`
+Padrão: `https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v{versionName}-debug/OneGallerySync-debug.apk`
