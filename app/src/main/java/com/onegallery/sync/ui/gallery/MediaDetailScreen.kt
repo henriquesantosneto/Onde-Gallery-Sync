@@ -1,9 +1,13 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -47,6 +51,8 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val DETAILS_PANEL_SCREEN_FRACTION = 0.56f
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -160,7 +166,16 @@ fun MediaDetailScreen(
         val pool = liveItems.ifEmpty { contextItems }
         pagerPaths.mapNotNull { path -> pool.find { it.canonicalPath == path } }
     }
-    val showFilmstrip = chromeVisible && !state.selectionMode && filmstripItems.size > 1
+    val detailsPanelOpen = showDetailsSheet && detailPaths.isNotEmpty()
+    val detailsPanelFraction by animateFloatAsState(
+        targetValue = if (detailsPanelOpen) DETAILS_PANEL_SCREEN_FRACTION else 0f,
+        animationSpec = tween(durationMillis = 280),
+        label = "detailsPanelFraction",
+    )
+    val showFilmstrip = chromeVisible &&
+        !state.selectionMode &&
+        !detailsPanelOpen &&
+        filmstripItems.size > 1
 
     val barTitle = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
@@ -181,14 +196,20 @@ fun MediaDetailScreen(
             }
         },
     ) { _ ->
-        Box(
+        val photoWeight = (1f - detailsPanelFraction).coerceAtLeast(0.01f)
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .openDetailsOnSwipeUp(
-                    enabled = swipeUpForDetails,
+                    enabled = swipeUpForDetails && !detailsPanelOpen,
                     onSwipeUp = { openDetailsSheet() },
                 ),
         ) {
+            Box(
+                modifier = Modifier
+                    .weight(photoWeight)
+                    .fillMaxWidth(),
+            ) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -303,17 +324,21 @@ fun MediaDetailScreen(
                     )
                 }
             }
-        }
-    }
+            }
 
-    if (showDetailsSheet && detailPaths.isNotEmpty()) {
-        MediaDetailsBottomSheet(
-            canonicalPaths = detailPaths,
-            displayItems = liveItems,
-            syncCoordinator = syncCoordinator,
-            mediaCacheRepository = mediaCacheRepository,
-            onDismiss = { showDetailsSheet = false },
-        )
+            if (detailsPanelOpen || detailsPanelFraction > 0.02f) {
+                MediaDetailPushDetailsSheet(
+                    canonicalPaths = detailPaths,
+                    displayItems = liveItems,
+                    syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    onDismiss = { showDetailsSheet = false },
+                    modifier = Modifier
+                        .weight(detailsPanelFraction.coerceAtLeast(0.01f))
+                        .fillMaxWidth(),
+                )
+            }
+        }
     }
 
     if (showDeleteConfirm) {
