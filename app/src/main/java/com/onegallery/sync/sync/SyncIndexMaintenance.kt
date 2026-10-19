@@ -26,22 +26,67 @@ suspend fun sanitizeSyncMetadataIndex(
         return row.canonicalPath in seenLocalCanonicalPaths || id in seenLocalMediaIds
     }
     if (syncMode == SyncMode.LOCAL_ONLY) {
-        return purgeOrphans(
+        val purged = purgeOrphans(
             dao = dao,
             mediaCacheRepository = mediaCacheRepository,
             keep = { row, _ -> rowStillOnDevice(row) },
         )
+        val dupes = removeDuplicateMetadataRows(dao, mediaCacheRepository)
+        return purged.copy(removedRows = purged.removedRows + dupes)
     }
     if (!remoteListingAvailable) {
-        return IndexSanitizeResult(removedRows = 0, fullRebuild = false)
+        val dupes = removeDuplicateMetadataRows(dao, mediaCacheRepository)
+        return IndexSanitizeResult(removedRows = dupes, fullRebuild = false)
     }
-    return purgeOrphans(
+    val purged = purgeOrphans(
         dao = dao,
         mediaCacheRepository = mediaCacheRepository,
         keep = { row, _ ->
             rowStillOnDevice(row) || row.canonicalPath in remoteCanonicalPaths
         },
     )
+    val dupes = removeDuplicateMetadataRows(dao, mediaCacheRepository)
+    return purged.copy(removedRows = purged.removedRows + dupes)
+}
+
+/** Mesma mídia indexada duas vezes (caminho antigo/novo ou nuvem + local). */
+suspend fun removeDuplicateMetadataRows(
+    dao: SyncMetadataDao,
+    mediaCacheRepository: MediaCacheRepository,
+): Int {
+    val rows = dao.getAll()
+    if (rows.size <= 1) return 0
+    val localSeen = mutableSetOf<Long>()
+    val cloudSeen = mutableSetOf<String>()
+    val pathSeen = mutableSetOf<String>()
+    fun score(row: SyncMetadataEntity): Long {
+        var s = 0L
+        if (row.localMediaId != null) s += 1_000_000_000L
+        if (!row.localContentUri.isNullOrBlank()) s += 100_000_000L
+        if (!row.cachedFilePath.isNullOrBlank()) s += 10_000_000L
+        s += row.localModifiedAt ?: row.remoteModifiedAt ?: 0L
+        return s
+    }
+    val sorted = rows.sortedByDescending { score(it) }
+    val keep = mutableSetOf<String>()
+    for (row in sorted) {
+        val duplicate = row.localMediaId?.let { it in localSeen } == true ||
+            row.oneDriveItemId?.let { it in cloudSeen } == true ||
+            row.canonicalPath in pathSeen
+        if (duplicate) continue
+        row.localMediaId?.let { localSeen.add(it) }
+        row.oneDriveItemId?.let { cloudSeen.add(it) }
+        pathSeen.add(row.canonicalPath)
+        keep.add(row.canonicalPath)
+    }
+    var removed = 0
+    for (row in rows) {
+        if (row.canonicalPath in keep) continue
+        dao.deleteByCanonicalPath(row.canonicalPath)
+        mediaCacheRepository.deleteCached(row.canonicalPath)
+        removed++
+    }
+    return removed
 }
 
 private suspend fun purgeOrphans(

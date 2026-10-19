@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,9 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -43,14 +40,15 @@ fun MediaDetailPushDetailsSheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (canonicalPaths.isEmpty()) return
+
     BackHandler(onBack = onDismiss)
 
     val density = LocalDensity.current
     val dismissDragThresholdPx = with(density) { 96.dp.toPx() }
     var dragOffsetPx by remember { mutableFloatStateOf(0f) }
-    val scroll = rememberScrollState()
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
@@ -87,17 +85,14 @@ fun MediaDetailPushDetailsSheet(
                     .background(Color.White.copy(alpha = 0.35f)),
             )
         }
-        Column(
+        MediaSamsungDetailsContent(
+            canonicalPaths = canonicalPaths,
+            displayItems = displayItems,
+            syncCoordinator = syncCoordinator,
+            mediaCacheRepository = mediaCacheRepository,
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scroll),
-        ) {
-            MediaSamsungDetailsContent(
-                canonicalPaths = canonicalPaths,
-                displayItems = displayItems,
-                syncCoordinator = syncCoordinator,
-                mediaCacheRepository = mediaCacheRepository,
-            )
-        }
+                .padding(top = 24.dp),
+        )
     }
 }

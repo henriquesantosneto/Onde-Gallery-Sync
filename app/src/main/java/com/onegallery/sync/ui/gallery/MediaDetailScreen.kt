@@ -5,7 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -212,8 +212,9 @@ fun MediaDetailScreen(
             }
         },
     ) { _ ->
-        val photoWeight = (1f - detailsPanelFraction).coerceAtLeast(0.01f)
-        Column(
+        val detailsVisible = detailsPanelOpen || detailsPanelFraction > 0.02f
+        val photoHeightFraction = (1f - detailsPanelFraction).coerceIn(0.15f, 1f)
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .openDetailsOnSwipeUp(
@@ -223,8 +224,9 @@ fun MediaDetailScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .weight(photoWeight)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
+                    .align(Alignment.TopCenter),
             ) {
             HorizontalPager(
                 state = pagerState,
@@ -342,7 +344,7 @@ fun MediaDetailScreen(
             }
             }
 
-            if (detailsPanelOpen || detailsPanelFraction > 0.02f) {
+            if (detailsVisible && detailPaths.isNotEmpty()) {
                 MediaDetailPushDetailsSheet(
                     canonicalPaths = detailPaths,
                     displayItems = liveItems,
@@ -350,8 +352,9 @@ fun MediaDetailScreen(
                     mediaCacheRepository = mediaCacheRepository,
                     onDismiss = { showDetailsSheet = false },
                     modifier = Modifier
-                        .weight(detailsPanelFraction.coerceAtLeast(0.01f))
-                        .fillMaxWidth(),
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .fillMaxHeight(detailsPanelFraction.coerceIn(0.15f, 0.88f)),
                 )
             }
         }

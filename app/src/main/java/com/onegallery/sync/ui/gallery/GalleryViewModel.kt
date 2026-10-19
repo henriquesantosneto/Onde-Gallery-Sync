@@ -108,7 +108,9 @@ class GalleryViewModel(
     }.conflate()
         .map { (metadata, userAlbums) ->
         LibrarySnapshot(
-            allItems = metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
+            allItems = dedupeGalleryDisplayItems(
+                metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
+            ),
             userAlbums = userAlbums,
         )
     }.flowOn(Dispatchers.Default)
@@ -232,9 +234,10 @@ class GalleryViewModel(
             errorState.value = null
             try {
                 syncCoordinator.runBidirectionalSync(userInitiated = false)
-                    .onFailure {
+                    .onFailure { error ->
+                        if (error is CancellationException) return@onFailure
                         if (errorState.value == null) {
-                            errorState.value = it.message
+                            errorState.value = error.message
                         }
                     }
             } finally {
