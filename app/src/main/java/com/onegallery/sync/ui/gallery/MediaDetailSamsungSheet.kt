@@ -35,12 +35,12 @@ fun MediaDetailSamsungSheet(
     contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
     showAdvancedToggle: Boolean = true,
     contentOnDark: Boolean = false,
+    scrollContentInternally: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val effectiveAdvanced = showAdvanced || contentLevel == MediaDetailContentLevel.Full
-    val showStandardBody = contentLevel == MediaDetailContentLevel.Standard ||
+    val showStandardBody = contentLevel == MediaDetailContentLevel.Simple ||
         contentLevel == MediaDetailContentLevel.Full
-    val showPeekOnly = contentLevel == MediaDetailContentLevel.Peek
     val primaryText = if (contentOnDark) Color.White else MaterialTheme.colorScheme.onSurface
     val secondaryText = if (contentOnDark) {
         Color.White.copy(alpha = 0.62f)
@@ -53,7 +53,7 @@ fun MediaDetailSamsungSheet(
         modifier = modifier
             .fillMaxWidth()
             .then(
-                if (showExpandedContent) {
+                if (showExpandedContent && scrollContentInternally) {
                     Modifier.verticalScroll(scroll)
                 } else {
                     Modifier
@@ -99,21 +99,6 @@ fun MediaDetailSamsungSheet(
                     fontWeight = FontWeight.SemiBold,
                     color = primaryText,
                 )
-                if (showPeekOnly) {
-                    Text(
-                        info.capturedAtFriendly.takeIf { it.isNotBlank() } ?: info.displayName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = secondaryText,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Text(
-                        "Continue puxando para cima para ver tudo",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = secondaryText.copy(alpha = 0.85f),
-                        modifier = Modifier.padding(top = 10.dp),
-                    )
-                }
-
                 if (!showStandardBody) return@Column
 
                 Text(

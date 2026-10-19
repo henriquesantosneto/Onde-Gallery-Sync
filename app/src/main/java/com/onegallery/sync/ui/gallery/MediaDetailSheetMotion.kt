@@ -15,33 +15,30 @@ import kotlin.math.abs
 /** Fração da altura da tela ocupada pelo painel de detalhes (0 = fechado). */
 object MediaDetailSheetAnchors {
     const val FULL = 0.88f
-    const val PEEK = 0.22f
+    /** Detalhes resumidos (data, arquivo, câmera, mapa). */
+    const val SIMPLE = 0.45f
 
     fun snap(fraction: Float): Float {
         return when {
-            fraction < 0.08f -> 0f
-            fraction < 0.34f -> PEEK
-            fraction < 0.62f -> 0.52f
+            fraction < 0.10f -> 0f
+            fraction < 0.62f -> SIMPLE
             else -> FULL
         }
     }
 }
 
 enum class MediaDetailContentLevel {
-    /** Só data/título. */
-    Peek,
-    /** EXIF resumido, mapa, caminho — sem bloco técnico. */
-    Standard,
-    /** Tudo, incluindo linhas de “Mais informações”. */
+    /** Resumo Samsung (sem bloco técnico longo). */
+    Simple,
+    /** EXIF / “Mais informações”. */
     Full,
 }
 
 fun contentLevelForPanelFraction(fraction: Float): MediaDetailContentLevel {
-    return when {
-        fraction >= 0.68f -> MediaDetailContentLevel.Full
-        fraction >= 0.30f -> MediaDetailContentLevel.Standard
-        fraction > 0.04f -> MediaDetailContentLevel.Peek
-        else -> MediaDetailContentLevel.Peek
+    return if (fraction >= 0.58f) {
+        MediaDetailContentLevel.Full
+    } else {
+        MediaDetailContentLevel.Simple
     }
 }
 
@@ -59,67 +56,59 @@ fun rememberMediaDetailSheetFraction(
     return if (dragging) dragFraction else animated
 }
 
-private const val VERTICAL_DOMINANCE_RATIO = 1.35f
+private const val VERTICAL_DOMINANCE_RATIO = 1.15f
 
 /**
- * Deslize para cima na foto: o painel sobe contínuo com o dedo (não salto fixo).
+ * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
+ * [fractionAtDragStart] é lido só no início do gesto — não entra na chave do [pointerInput].
  */
-fun Modifier.draggableDetailsFromPhoto(
+fun Modifier.draggableDetailPanelHeight(
     enabled: Boolean,
-    startFraction: Float,
     screenHeightPx: Float,
+    fractionAtDragStart: () -> Float,
     onDragStart: () -> Unit,
     onDragFraction: (Float) -> Unit,
     onDragEnd: () -> Unit,
 ): Modifier {
     if (!enabled || screenHeightPx <= 0f) return this
-    return pointerInput(enabled, startFraction, screenHeightPx) {
+    return pointerInput(enabled, screenHeightPx) {
         val touchSlop = viewConfiguration.touchSlop
         val maxFraction = MediaDetailSheetAnchors.FULL
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             var sumX = 0f
             var sumY = 0f
-            var lockedVerticalUp = false
-            var passedToHorizontal = false
+            var lockedVertical = false
+            var passedToChildren = false
             var dragging = false
-            var baseFraction = startFraction.coerceIn(0f, maxFraction)
+            var baseFraction = 0f
 
             while (true) {
                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (!change.pressed) break
-                if (passedToHorizontal) break
+                if (passedToChildren) break
 
                 val delta = change.positionChange()
-                if (!lockedVerticalUp) {
+                if (!lockedVertical) {
                     sumX += delta.x
                     sumY += delta.y
                     val ax = abs(sumX)
                     val ay = abs(sumY)
                     if (ax < touchSlop && ay < touchSlop) continue
 
+                    baseFraction = fractionAtDragStart().coerceIn(0f, maxFraction)
                     when {
-                        ay > ax * VERTICAL_DOMINANCE_RATIO && sumY < 0f -> {
-                            lockedVerticalUp = true
+                        ay > ax * VERTICAL_DOMINANCE_RATIO -> {
+                            lockedVertical = true
                             change.consume()
                             dragging = true
-                            baseFraction = startFraction.coerceIn(0f, maxFraction)
                             onDragStart()
                             val fraction = (baseFraction - sumY / screenHeightPx).coerceIn(0f, maxFraction)
                             onDragFraction(fraction)
                         }
-                        ay > ax * VERTICAL_DOMINANCE_RATIO && sumY > 0f && startFraction > 0.05f -> {
-                            lockedVerticalUp = true
-                            change.consume()
-                            dragging = true
-                            baseFraction = startFraction
-                            onDragStart()
-                            val fraction = (baseFraction - sumY / screenHeightPx).coerceIn(0f, maxFraction)
-                            onDragFraction(fraction)
-                        }
-                        ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToHorizontal = true
-                        sumY > touchSlop && startFraction < 0.05f -> passedToHorizontal = true
+                        ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToChildren = true
+                        baseFraction < 0.05f && sumY > touchSlop -> passedToChildren = true
                     }
                 } else {
                     change.consume()
@@ -134,3 +123,20 @@ fun Modifier.draggableDetailsFromPhoto(
         }
     }
 }
+
+/** @see draggableDetailPanelHeight */
+fun Modifier.draggableDetailsFromPhoto(
+    enabled: Boolean,
+    startFraction: Float,
+    screenHeightPx: Float,
+    onDragStart: () -> Unit,
+    onDragFraction: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+): Modifier = draggableDetailPanelHeight(
+    enabled = enabled,
+    screenHeightPx = screenHeightPx,
+    fractionAtDragStart = { startFraction },
+    onDragStart = onDragStart,
+    onDragFraction = onDragFraction,
+    onDragEnd = onDragEnd,
+)

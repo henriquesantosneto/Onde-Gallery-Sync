@@ -53,6 +53,8 @@ fun MediaSamsungDetailsContent(
     footer: (@Composable () -> Unit)? = null,
     contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
     showAdvancedToggle: Boolean = true,
+    /** false quando um [verticalScroll] pai já rola o conteúdo (evita crash). */
+    scrollContentInternally: Boolean = true,
 ) {
     val context = LocalContext.current
     var infos by remember(canonicalPaths) { mutableStateOf<List<MediaDetailInfo>>(emptyList()) }
@@ -88,6 +90,7 @@ fun MediaSamsungDetailsContent(
                 modifier = modifier,
                 contentLevel = contentLevel,
                 showAdvancedToggle = showAdvancedToggle,
+                scrollContentInternally = scrollContentInternally,
             )
             footer?.invoke()
         }
@@ -127,6 +130,7 @@ private fun SamsungDetailBlock(
     modifier: Modifier = Modifier,
     contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
     showAdvancedToggle: Boolean = true,
+    scrollContentInternally: Boolean = true,
 ) {
     var showAdvanced by remember(info.displayName) { mutableStateOf(false) }
     MediaDetailSamsungSheet(
@@ -139,6 +143,7 @@ private fun SamsungDetailBlock(
         contentLevel = contentLevel,
         showAdvancedToggle = showAdvancedToggle,
         contentOnDark = true,
+        scrollContentInternally = scrollContentInternally,
         modifier = modifier,
     )
 }

@@ -173,10 +173,10 @@ fun MediaDetailScreen(
         activePageError = null
     }
 
-    fun openDetailsToPeek() {
+    fun openDetailsToSimple() {
         if (detailPaths.isNotEmpty()) {
-            detailsSettleFraction = MediaDetailSheetAnchors.PEEK
-            detailsDragFraction = MediaDetailSheetAnchors.PEEK
+            detailsSettleFraction = MediaDetailSheetAnchors.SIMPLE
+            detailsDragFraction = MediaDetailSheetAnchors.SIMPLE
         }
     }
 
@@ -232,11 +232,10 @@ fun MediaDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .draggableDetailsFromPhoto(
-                    enabled = swipeUpForDetails &&
-                        detailsDisplayFraction < MediaDetailSheetAnchors.FULL - 0.02f,
-                    startFraction = detailsDisplayFraction,
+                .draggableDetailPanelHeight(
+                    enabled = swipeUpForDetails && pagerScrollEnabled,
                     screenHeightPx = screenHeightPx,
+                    fractionAtDragStart = { detailsDisplayFraction },
                     onDragStart = {
                         detailsDragging = true
                         detailsDragFraction = detailsDisplayFraction
@@ -326,7 +325,7 @@ fun MediaDetailScreen(
                                     expanded = showOverflowMenu,
                                     onExpandedChange = { showOverflowMenu = it },
                                     showDetails = detailPaths.isNotEmpty(),
-                                    onDetails = { openDetailsToPeek() },
+                                    onDetails = { openDetailsToSimple() },
                                     onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
                                     onDelete = { showDeleteConfirm = true },
                                     deleteLabel = "Excluir tudo",
@@ -347,7 +346,7 @@ fun MediaDetailScreen(
                                 expanded = showOverflowMenu,
                                 onExpandedChange = { showOverflowMenu = it },
                                 showDetails = detailPaths.isNotEmpty(),
-                                onDetails = { openDetailsToPeek() },
+                                onDetails = { openDetailsToSimple() },
                                 onFreeSpace = { viewModel.releaseSingle(currentPath) },
                                 onDelete = { showDeleteConfirm = true },
                             )

@@ -2,7 +2,6 @@ package com.onegallery.sync.ui.gallery
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,15 +14,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -57,7 +52,7 @@ fun MediaDetailPushDetailsSheet(
     }
     val contentLevel = contentLevelForPanelFraction(panelFraction)
     val scroll = rememberScrollState()
-    var dragStartFraction by remember { mutableFloatStateOf(0f) }
+    val multiSelect = canonicalPaths.size > 1
 
     Box(
         modifier = modifier
@@ -69,19 +64,18 @@ fun MediaDetailPushDetailsSheet(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(panelFraction) {
-                    detectVerticalDragGestures(
-                        onDragStart = { dragStartFraction = panelFraction },
-                        onDragEnd = { onPanelDragEnd() },
-                        onDragCancel = { onPanelDragEnd() },
-                    ) { _, dragAmount ->
-                        val next = (dragStartFraction - dragAmount / screenHeightPx)
-                            .coerceIn(0f, MediaDetailSheetAnchors.FULL)
-                        onPanelFractionChange(next)
-                    }
-                }
+                .height(44.dp)
+                .align(Alignment.TopCenter)
+                .draggableDetailPanelHeight(
+                    enabled = true,
+                    screenHeightPx = screenHeightPx,
+                    fractionAtDragStart = { panelFraction },
+                    onDragStart = { },
+                    onDragFraction = onPanelFractionChange,
+                    onDragEnd = onPanelDragEnd,
+                )
                 .padding(top = 10.dp, bottom = 6.dp),
-            contentAlignment = Alignment.Center,
+            contentAlignment = Alignment.TopCenter,
         ) {
             Spacer(
                 modifier = Modifier
@@ -91,7 +85,7 @@ fun MediaDetailPushDetailsSheet(
                     .background(Color.White.copy(alpha = 0.35f)),
             )
         }
-        val scrollModifier = if (contentLevel == MediaDetailContentLevel.Full) {
+        val scrollModifier = if (!multiSelect) {
             Modifier.verticalScroll(scroll)
         } else {
             Modifier
@@ -109,6 +103,7 @@ fun MediaDetailPushDetailsSheet(
                 mediaCacheRepository = mediaCacheRepository,
                 contentLevel = contentLevel,
                 showAdvancedToggle = false,
+                scrollContentInternally = multiSelect,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
