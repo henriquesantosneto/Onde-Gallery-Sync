@@ -14,10 +14,13 @@ import com.onegallery.sync.data.local.preferredBrowseKey
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -87,10 +90,22 @@ class GalleryViewModel(
     private val albumSelectionMode = MutableStateFlow(false)
     private val selectedAlbumTitles = MutableStateFlow<Set<String>>(emptySet())
 
-    private val libraryFlow = combine(
+    private data class LibrarySnapshot(
+        val allItems: List<GalleryDisplayItem>,
+        val userAlbums: List<UserAlbumEntity>,
+    )
+
+    private val librarySnapshot = combine(
         syncCoordinator.galleryMetadata,
         syncCoordinator.userAlbums,
-    ) { metadata, userAlbums -> metadata to userAlbums }
+    ) { metadata, userAlbums ->
+        metadata to userAlbums
+    }.map { (metadata, userAlbums) ->
+        LibrarySnapshot(
+            allItems = metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
+            userAlbums = userAlbums,
+        )
+    }.flowOn(Dispatchers.Default)
 
     private val uiControls = combine(
         combine(browseFilter, loading, errorState, actionMessage, selectionMode) {
@@ -118,8 +133,9 @@ class GalleryViewModel(
         )
     }
 
-    val state: StateFlow<GalleryUiState> = combine(libraryFlow, uiControls) { (metadata, userAlbums), controls ->
-        val allItems = metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) }
+    val state: StateFlow<GalleryUiState> = combine(librarySnapshot, uiControls) { snapshot, controls ->
+        val allItems = snapshot.allItems
+        val userAlbums = snapshot.userAlbums
         val items = allItems
             .filter { item ->
                 when (val filter = controls.browseFilter) {

@@ -81,6 +81,12 @@ fun GalleryScreen(
         galleryPreferences.galleryGridZoom = scale
     }
     val mediaCellMin = gridAdaptiveMinSize(baseMinDp = 120f, zoomScale = gridPinch.scale)
+    val density = LocalDensity.current
+    val gridThumbPx = remember(mediaCellMin, density) {
+        with(density) {
+            GalleryThumbnailModels.gridPixelSize(mediaCellMin.roundToPx())
+        }
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
@@ -217,7 +223,6 @@ fun GalleryScreen(
                 val gridEntries = remember(state.items, state.sortOrder, timelineGrouping) {
                     buildGalleryGridEntries(state.items, state.sortOrder, timelineGrouping)
                 }
-                val density = LocalDensity.current
                 val stickyBarHeightPx = remember(density) {
                     with(density) { GalleryStickyTimelineBarHeight.roundToPx() }
                 }
@@ -273,6 +278,7 @@ fun GalleryScreen(
                                         state = state,
                                         syncCoordinator = syncCoordinator,
                                         gridPinch = gridPinch,
+                                        gridThumbPx = gridThumbPx,
                                         viewModel = viewModel,
                                         onOpenItem = onOpenItem,
                                     )
@@ -326,6 +332,7 @@ private fun TimelinePhotoCell(
     state: GalleryUiState,
     syncCoordinator: SyncCoordinator,
     gridPinch: GalleryGridPinchZoom,
+    gridThumbPx: Int,
     viewModel: GalleryViewModel,
     onOpenItem: (String) -> Unit,
 ) {
@@ -336,6 +343,7 @@ private fun TimelinePhotoCell(
         selectionMode = state.selectionMode,
         selected = selected,
         gridZoomScale = gridPinch.scale,
+        gridThumbPx = gridThumbPx,
         gesturesEnabled = !gridPinch.blockItemGestures,
         onClick = {
             if (state.selectionMode) {
@@ -391,6 +399,7 @@ private fun MediaThumbnail(
     selectionMode: Boolean,
     selected: Boolean,
     gridZoomScale: Float,
+    gridThumbPx: Int,
     gesturesEnabled: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -408,12 +417,14 @@ private fun MediaThumbnail(
                 },
             ),
     ) {
-        MediaThumbnailImage(
+        GalleryThumbnailImage(
             item = item,
             syncCoordinator = syncCoordinator,
             contentDescription = item.displayName,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
+            style = GalleryThumbnailStyle.Grid,
+            sizePx = gridThumbPx,
         )
         if (selectionMode) {
             Icon(

@@ -1,20 +1,10 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import coil.compose.AsyncImage
+import androidx.compose.ui.platform.LocalContext
 import com.onegallery.sync.sync.SyncCoordinator
 import java.io.File
 
@@ -26,28 +16,19 @@ fun MediaThumbnailImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
 ) {
-    var model by remember(item.canonicalPath) { mutableStateOf<Any?>(item.thumbnailModel) }
-
-    LaunchedEffect(item.canonicalPath, item.thumbnailModel, item.oneDriveItemId) {
-        if (model != null) return@LaunchedEffect
-        val coordinator = syncCoordinator ?: return@LaunchedEffect
-        coordinator.ensureThumbnailCached(item.canonicalPath)
-            .getOrNull()
-            ?.let { model = it }
+    val context = LocalContext.current
+    val sizePx = remember(context) {
+        (context.resources.displayMetrics.widthPixels / 2).coerceIn(320, 720)
     }
-
-    if (model != null) {
-        AsyncImage(
-            model = model,
-            contentDescription = contentDescription,
-            modifier = modifier,
-            contentScale = contentScale,
-        )
-    } else {
-        Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            Icon(Icons.Outlined.CloudDownload, contentDescription = null)
-        }
-    }
+    GalleryThumbnailImage(
+        item = item,
+        syncCoordinator = syncCoordinator,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = contentScale,
+        style = GalleryThumbnailStyle.Detail,
+        sizePx = sizePx,
+    )
 }
 
 fun GalleryDisplayItem.playbackUri(): android.net.Uri? {

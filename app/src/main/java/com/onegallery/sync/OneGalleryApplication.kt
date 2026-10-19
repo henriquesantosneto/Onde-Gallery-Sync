@@ -87,7 +87,7 @@ class OneGalleryApplication : Application() {
                 .components {
                     add(VideoFrameDecoder.Factory())
                 }
-                .crossfade(true)
+                .crossfade(false)
                 .build(),
         )
         authManager = MsalAuthManager(this, AuthPreferences(this))
