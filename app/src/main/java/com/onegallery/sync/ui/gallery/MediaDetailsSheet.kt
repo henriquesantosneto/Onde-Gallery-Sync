@@ -74,6 +74,9 @@ private fun cloudSyncStateLabel(state: CloudSyncState): String = when (state) {
 private data class MediaDetailSection(
     val title: String,
     val rows: List<Pair<String, String>>,
+    val mapLatitude: Double? = null,
+    val mapLongitude: Double? = null,
+    val mapLocationLabel: String? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -157,6 +160,23 @@ private fun MediaDetailSectionBlock(section: MediaDetailSection, showTitle: Bool
                 modifier = Modifier.padding(bottom = 12.dp),
             )
         }
+        val lat = section.mapLatitude
+        val lon = section.mapLongitude
+        if (lat != null && lon != null) {
+            PhotoDetailLocationMap(
+                latitude = lat,
+                longitude = lon,
+                locationLabel = section.mapLocationLabel,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+            section.mapLocationLabel?.takeIf { it.isNotBlank() }?.let { place ->
+                Text(
+                    place,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+        }
         section.rows.forEachIndexed { index, (label, value) ->
             if (index > 0) {
                 HorizontalDivider(
@@ -220,8 +240,11 @@ private fun buildDetailSection(
         }
         add("Alteração no aparelho" to formatMediaDateTime(entity.localModifiedAt))
         add("Alteração na nuvem" to formatMediaDateTime(entity.remoteModifiedAt))
-        display.locationLabel?.takeIf { it.isNotBlank() }?.let { add("Local" to it) }
-        coords?.let { add("Coordenadas" to it) }
+        val hasMap = display.latitude != null && display.longitude != null
+        if (!hasMap) {
+            display.locationLabel?.takeIf { it.isNotBlank() }?.let { add("Local" to it) }
+            coords?.let { add("Coordenadas" to it) }
+        }
         add("Sincronização" to cloudSyncStateLabel(display.cloudState))
         add("Fila" to entity.syncQueueStatusLabel())
         if (entity.pendingDeleteTarget != PendingDeleteTarget.NONE) {
@@ -238,5 +261,13 @@ private fun buildDetailSection(
         entity.oneDriveItemId?.takeIf { it.isNotBlank() }?.let { add("ID OneDrive" to it) }
         entity.lastError?.takeIf { it.isNotBlank() }?.let { add("Último erro" to it) }
     }
-    return MediaDetailSection(title = display.displayName, rows = rows)
+    val mapLat = display.latitude?.takeIf { display.longitude != null }
+    val mapLon = display.longitude?.takeIf { display.latitude != null }
+    return MediaDetailSection(
+        title = display.displayName,
+        rows = rows,
+        mapLatitude = mapLat,
+        mapLongitude = mapLon,
+        mapLocationLabel = display.locationLabel?.takeIf { it.isNotBlank() },
+    )
 }
