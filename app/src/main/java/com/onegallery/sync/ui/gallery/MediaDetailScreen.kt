@@ -139,7 +139,7 @@ fun MediaDetailScreen(
     }
 
     val multiSelection = state.selectionMode && state.selectedPaths.size > 1
-    val swipeUpForDetails = !immersive && !multiSelection && currentPath != null && pagerScrollEnabled
+    val swipeUpForDetails = !immersive && !multiSelection && currentPath != null
 
     LaunchedEffect(pagerState.currentPage) {
         showDetailsSheet = false
@@ -236,16 +236,16 @@ fun MediaDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .openDetailsOnSwipeUp(
+                    enabled = swipeUpForDetails,
+                    onSwipeUp = { openDetailsSheet() },
+                )
                 .padding(if (chromeVisible) padding else PaddingValues()),
         ) {
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxSize()
-                    .openDetailsOnSwipeUp(
-                        enabled = swipeUpForDetails,
-                        onSwipeUp = { openDetailsSheet() },
-                    ),
+                    .fillMaxSize(),
             ) {
                 HorizontalPager(
                     state = pagerState,
