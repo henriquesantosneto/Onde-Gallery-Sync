@@ -300,11 +300,10 @@ private fun MediaDetailPage(
     }
 
     suspend fun loadFullOriginalForViewing() {
-        val current = item ?: return
-        if (!current.needsCloudOriginalRecall()) return
+        if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
         loadingFull = true
         error = null
-        syncCoordinator.downloadOriginalOnDemand(canonicalPath)
+        syncCoordinator.recallOriginalToDevice(canonicalPath)
             .onSuccess {
                 syncCoordinator.ensureThumbnailCached(canonicalPath)
                 refreshDisplayItem()
@@ -320,14 +319,10 @@ private fun MediaDetailPage(
         syncCoordinator.ensureThumbnailCached(canonicalPath)
         refreshDisplayItem()
         loading = false
-        val snapshot = syncCoordinator.getMetadata(canonicalPath)?.let {
-            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
-        }
-        if (snapshot != null) {
-            item = snapshot
-        }
-        if (snapshot?.needsCloudOriginalRecall() == true) {
+        if (syncCoordinator.needsOriginalRecall(canonicalPath)) {
             loadFullOriginalForViewing()
+        } else {
+            refreshDisplayItem()
         }
     }
 

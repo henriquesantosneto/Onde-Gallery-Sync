@@ -16,6 +16,7 @@ import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -384,11 +385,16 @@ class GalleryViewModel(
     /** Inicia recall (original da nuvem) ao abrir a foto — idempotente com a tela de detalhe. */
     fun recallOriginalWhenOpening(canonicalPath: String) {
         viewModelScope.launch {
-            val entity = syncCoordinator.getMetadata(canonicalPath) ?: return@launch
-            val display = GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
-            if (!display.needsCloudOriginalRecall()) return@launch
-            syncCoordinator.downloadOriginalOnDemand(canonicalPath)
-                .onSuccess { syncCoordinator.ensureThumbnailCached(canonicalPath) }
+            withContext(Dispatchers.IO) {
+                if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return@withContext
+                syncCoordinator.recallOriginalToDevice(canonicalPath)
+                    .onSuccess { syncCoordinator.ensureThumbnailCached(canonicalPath) }
+                    .onFailure { err ->
+                        if (err.message != null) {
+                            actionMessage.value = err.message
+                        }
+                    }
+            }
         }
     }
 }

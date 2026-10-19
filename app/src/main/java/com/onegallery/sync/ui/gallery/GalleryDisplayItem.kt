@@ -23,6 +23,7 @@ data class GalleryDisplayItem(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val videoDurationMs: Long? = null,
+    val localReleasedForSpace: Boolean = false,
 ) {
     val thumbnailModel: Any?
         get() = when (cloudState) {
@@ -42,16 +43,12 @@ data class GalleryDisplayItem(
     val showSyncedBadge: Boolean
         get() = cloudState == CloudSyncState.SYNCED
 
-    /** Precisa recall: há cópia na nuvem e ainda não há original na galeria do aparelho. */
+    /** Heurística rápida na grade; a decisão final fica no [SyncCoordinator.needsOriginalRecall]. */
     fun needsCloudOriginalRecall(): Boolean {
         if (oneDriveItemId == null) return false
+        if (localReleasedForSpace) return true
+        if (cloudState == CloudSyncState.CLOUD_ONLY) return true
         if (cloudState == CloudSyncState.PENDING_DOWNLOAD) return true
-        if (localUri != null && cloudState != CloudSyncState.CLOUD_ONLY) return false
-        if (localMediaId != null && cloudState == CloudSyncState.SYNCED && localUri != null) {
-            return false
-        }
-        return cloudState == CloudSyncState.CLOUD_ONLY ||
-            localUri == null ||
-            localMediaId == null
+        return localMediaId == null && localUri == null
     }
 }

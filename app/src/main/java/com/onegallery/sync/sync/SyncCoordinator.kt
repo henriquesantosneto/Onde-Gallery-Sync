@@ -1030,19 +1030,38 @@ class SyncCoordinator(
         return Result.success(null)
     }
 
-    suspend fun downloadOriginalOnDemand(canonicalPath: String): Result<File> {
-        val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
-        return mutex.withLock {
-            downloadOriginalOnDemandLocked(canonicalPath)
+    suspend fun needsOriginalRecall(canonicalPath: String): Boolean {
+        val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return false
+        if (row.oneDriveItemId.isNullOrBlank()) return false
+        return !hasLocalOriginalOnDevice(row)
+    }
+
+    /** Baixa da nuvem (se preciso) e restaura na galeria do Android. */
+    suspend fun recallOriginalToDevice(canonicalPath: String): Result<File> {
+        return withContext(Dispatchers.IO) {
+            val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
+            mutex.withLock {
+                downloadOriginalOnDemandLocked(canonicalPath)
+            }
         }
     }
+
+    suspend fun downloadOriginalOnDemand(canonicalPath: String): Result<File> =
+        recallOriginalToDevice(canonicalPath)
 
     private suspend fun downloadOriginalOnDemandLocked(canonicalPath: String): Result<File> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
 
         if (hasLocalOriginalOnDevice(row)) {
-            return Result.failure(IllegalStateException("Original já está no dispositivo"))
+            val existing = row.cachedFilePath?.let { path ->
+                File(path).takeIf { it.isFile && it.length() > 0L }
+            }
+            return if (existing != null) {
+                Result.success(existing)
+            } else {
+                Result.failure(IllegalStateException("Original já está no dispositivo"))
+            }
         }
 
         val itemId = row.oneDriveItemId
@@ -1093,6 +1112,7 @@ class SyncCoordinator(
     }
 
     private fun hasLocalOriginalOnDevice(row: SyncMetadataEntity): Boolean {
+        if (row.cloudState == CloudSyncState.CLOUD_ONLY || row.localReleasedForSpace) return false
         if (row.cloudState == CloudSyncState.PENDING_DOWNLOAD) return false
         row.localMediaId?.let { id ->
             if (localMediaRepository.contentUriForMediaId(id) != null) return true

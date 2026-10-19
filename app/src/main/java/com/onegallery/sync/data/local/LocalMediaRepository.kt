@@ -109,10 +109,7 @@ class LocalMediaRepository(private val context: Context) {
         if (!sourceFile.isFile || sourceFile.length() <= 0L) {
             return Result.failure(IllegalArgumentException("Arquivo inválido para importar."))
         }
-        val collection = when (kind) {
-            MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        }
+        val collection = mediaCollectionUri(kind)
         val folder = SyncPaths.albumFromCanonical(canonicalPath)
         val relativePath = when {
             folder.equals("Raiz", ignoreCase = true) -> "Pictures/OneGallerySync/"
@@ -156,6 +153,22 @@ class LocalMediaRepository(private val context: Context) {
             )
         }.onFailure {
             runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
+    private fun mediaCollectionUri(kind: MediaKind): Uri {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            when (kind) {
+                MediaKind.IMAGE ->
+                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                MediaKind.VIDEO ->
+                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            }
+        } else {
+            when (kind) {
+                MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            }
         }
     }
 
