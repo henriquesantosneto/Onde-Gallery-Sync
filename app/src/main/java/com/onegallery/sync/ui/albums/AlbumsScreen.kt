@@ -68,7 +68,11 @@ import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumListSort
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
+import com.onegallery.sync.ui.gallery.albumMediaCountBadgeCorner
+import com.onegallery.sync.ui.gallery.albumMediaCountBadgeFontScale
+import com.onegallery.sync.ui.gallery.albumMediaCountBadgeInnerPadding
 import com.onegallery.sync.ui.gallery.gridAdaptiveMinSize
+import com.onegallery.sync.ui.gallery.gridOverlayPadding
 import com.onegallery.sync.ui.gallery.rememberGalleryGridZoom
 
 private enum class AlbumsBrowseTab {
@@ -276,6 +280,7 @@ fun AlbumsScreen(
                                 AlbumGridTile(
                                     album = entry.album,
                                     compact = compactTiles,
+                                    gridZoomScale = gridPinch.scale,
                                     isPlace = isPlace,
                                     selected = selected,
                                     selectionMode = !isPlace && state.albumSelectionMode,
@@ -432,6 +437,7 @@ fun AlbumsScreen(
 private fun AlbumGridTile(
     album: MediaAlbum,
     compact: Boolean,
+    gridZoomScale: Float,
     isPlace: Boolean,
     selected: Boolean,
     selectionMode: Boolean,
@@ -484,15 +490,24 @@ private fun AlbumGridTile(
                         .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(50)),
                 )
             }
+            val badgeFontScale = albumMediaCountBadgeFontScale(gridZoomScale)
+            val (badgePadH, badgePadV) = albumMediaCountBadgeInnerPadding(gridZoomScale)
+            val badgeOuterPad = gridOverlayPadding(gridZoomScale)
             Text(
                 text = formatAlbumMediaCountBadge(album),
-                style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = MaterialTheme.typography.labelSmall.fontSize * badgeFontScale,
+                    fontWeight = FontWeight.SemiBold,
+                ),
                 color = Color.White,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(badgeOuterPad)
+                    .background(
+                        Color.Black.copy(alpha = 0.55f),
+                        RoundedCornerShape(albumMediaCountBadgeCorner(gridZoomScale)),
+                    )
+                    .padding(horizontal = badgePadH, vertical = badgePadV),
             )
         }
         Text(

@@ -86,3 +86,21 @@ fun gridOverlayPadding(zoomScale: Float): Dp {
     val pad = (4f * zoomScale).coerceIn(1.5f, 6f)
     return pad.dp
 }
+
+/** Contador na capa do álbum — proporcional ao pinça / tamanho da célula. */
+fun albumMediaCountBadgeFontScale(zoomScale: Float): Float {
+    return zoomScale.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
+        .coerceIn(0.45f, 1.05f)
+}
+
+fun albumMediaCountBadgeCorner(zoomScale: Float): Dp {
+    val r = (3f * zoomScale).coerceIn(2f, 6f)
+    return r.dp
+}
+
+fun albumMediaCountBadgeInnerPadding(zoomScale: Float): Pair<Dp, Dp> {
+    val scale = zoomScale.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
+    val horizontal = (3f + 2.5f * scale).coerceIn(2f, 7f).dp
+    val vertical = (1f + 1.2f * scale).coerceIn(1f, 3.5f).dp
+    return horizontal to vertical
+}
