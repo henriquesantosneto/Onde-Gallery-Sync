@@ -28,6 +28,7 @@ import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
+import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.queueDetailLabel
 import com.onegallery.sync.sync.syncQueueStatusLabel
@@ -198,18 +199,21 @@ private fun buildDetailSection(
             String.format(Locale.US, "%.5f, %.5f", display.latitude, display.longitude)
         else -> null
     }
-    val folderAlbum = entity.albumName.takeIf { it.isNotBlank() }
+    val folderPath = entity.albumName.takeIf { it.isNotBlank() }
+        ?: SyncPaths.albumFromCanonical(entity.canonicalPath)
     val userAlbum = entity.userAlbumName?.takeIf { it.isNotBlank() }
+    val galleryAlbumLabel = userAlbum
+        ?: SyncPaths.albumListDisplayName(folderPath)
 
     val rows = buildList {
         add("Nome" to display.displayName)
         add("Tipo" to kindLabel)
-        add("Álbum na galeria" to display.albumName)
-        if (userAlbum != null && userAlbum != folderAlbum) {
+        add("Álbum na galeria" to galleryAlbumLabel)
+        if (userAlbum != null) {
             add("Álbum personalizado" to userAlbum)
         }
-        if (folderAlbum != null && folderAlbum != display.albumName) {
-            add("Pasta na nuvem" to folderAlbum)
+        if (folderPath.isNotBlank() && folderPath != "Raiz") {
+            add("Pasta (caminho completo)" to folderPath)
         }
         entity.capturedAtSeconds?.takeIf { it > 0L }?.let {
             add("Quando foi tirada" to formatMediaDateTime(it))

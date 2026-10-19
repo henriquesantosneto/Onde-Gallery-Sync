@@ -14,6 +14,7 @@ import com.onegallery.sync.data.local.preferredBrowseKey
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.SyncPaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -407,7 +408,8 @@ private fun buildAlbums(
         val videoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
         MediaAlbum(
             bucketId = "album:$title",
-            title = title,
+            title = if (userMeta != null) title else SyncPaths.albumListDisplayName(title),
+            filterKey = title,
             itemCount = items.size,
             photoCount = photoCount,
             videoCount = videoCount,

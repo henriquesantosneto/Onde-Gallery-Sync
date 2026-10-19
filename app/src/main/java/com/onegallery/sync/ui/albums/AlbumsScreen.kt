@@ -123,7 +123,7 @@ fun AlbumsScreen(
         viewModel.clearAlbumSelection()
     }
 
-    val selectedAlbumModels = state.albums.filter { it.title in state.selectedAlbumTitles }
+    val selectedAlbumModels = state.albums.filter { it.filterKey in state.selectedAlbumTitles }
     val selectedUserAlbums = selectedAlbumModels.filter { it.isUserManaged }
     val canRename = state.selectedAlbumTitles.size == 1 && selectedUserAlbums.size == 1
     val canDeleteUserAlbums = selectedUserAlbums.isNotEmpty()
@@ -276,7 +276,7 @@ fun AlbumsScreen(
                         when (entry) {
                             is AlbumsGridEntry.Album -> {
                                 val isPlace = entry.isPlace
-                                val selected = !isPlace && entry.album.title in state.selectedAlbumTitles
+                                val selected = !isPlace && entry.album.filterKey in state.selectedAlbumTitles
                                 AlbumGridTile(
                                     album = entry.album,
                                     compact = compactTiles,
@@ -287,13 +287,13 @@ fun AlbumsScreen(
                                     gesturesEnabled = !gridPinch.blockItemGestures,
                                     onClick = {
                                         if (!isPlace && state.albumSelectionMode) {
-                                            viewModel.toggleAlbumSelection(entry.album.title)
+                                            viewModel.toggleAlbumSelection(entry.album.filterKey)
                                         } else if (isPlace) {
                                             val matchKey = entry.album.bucketId.removePrefix("place:")
                                             viewModel.setPlaceFilter(entry.album.title, matchKey)
                                             onOpenAlbum(entry.album.title)
                                         } else {
-                                            viewModel.setAlbumFilter(entry.album.title)
+                                            viewModel.setAlbumFilter(entry.album.filterKey)
                                             onOpenAlbum(entry.album.title)
                                         }
                                     },
@@ -302,9 +302,9 @@ fun AlbumsScreen(
                                             detailsAlbum = entry.album to true
                                         } else {
                                             if (!state.albumSelectionMode) {
-                                                viewModel.enterAlbumSelectionMode(entry.album.title)
+                                                viewModel.enterAlbumSelectionMode(entry.album.filterKey)
                                             } else {
-                                                viewModel.toggleAlbumSelection(entry.album.title)
+                                                viewModel.toggleAlbumSelection(entry.album.filterKey)
                                             }
                                         }
                                     },
@@ -424,7 +424,7 @@ fun AlbumsScreen(
                     val matchKey = album.bucketId.removePrefix("place:")
                     viewModel.setPlaceFilter(album.title, matchKey)
                 } else {
-                    viewModel.setAlbumFilter(album.title)
+                    viewModel.setAlbumFilter(album.filterKey)
                 }
                 onOpenAlbum(album.title)
             },

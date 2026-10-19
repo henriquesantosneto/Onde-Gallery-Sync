@@ -63,6 +63,7 @@ import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.ui.albums.formatMediaCount
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.SyncPaths
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -101,7 +102,8 @@ fun GalleryScreen(
     val title = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
         state.locationFilter != null -> state.locationFilter ?: "Local"
-        state.albumFilter != null -> state.albumFilter ?: "Álbum"
+        state.albumFilter != null ->
+            SyncPaths.albumListDisplayName(state.albumFilter ?: "Álbum")
         else -> "Fotos"
     }
     val filteredBrowse = state.locationFilter != null || state.albumFilter != null

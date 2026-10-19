@@ -31,6 +31,8 @@ data class LocalMediaItem(
 data class MediaAlbum(
     val bucketId: String,
     val title: String,
+    /** Chave interna para filtro (ex.: DCIM/Camera); [title] é o rótulo na lista. */
+    val filterKey: String = title,
     val itemCount: Int,
     val photoCount: Int = itemCount,
     val videoCount: Int = 0,

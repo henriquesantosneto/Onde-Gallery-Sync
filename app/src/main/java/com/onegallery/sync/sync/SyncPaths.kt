@@ -106,4 +106,17 @@ object SyncPaths {
         if (fromCanonical != "Raiz") return fromCanonical
         return bucketDisplayName.ifBlank { "Raiz" }
     }
+
+    /** Título na grade de álbuns — omite o prefixo DCIM/; caminho completo fica nos detalhes. */
+    fun albumListDisplayName(folderAlbum: String): String {
+        val normalized = folderAlbum.trim('/').replace('\\', '/')
+        if (normalized.isBlank() || normalized.equals("Raiz", ignoreCase = true)) {
+            return folderAlbum.ifBlank { "Raiz" }
+        }
+        val segments = normalized.split('/').filter { it.isNotBlank() }
+        if (segments.size >= 2 && segments.first().equals("DCIM", ignoreCase = true)) {
+            return segments.drop(1).joinToString("/")
+        }
+        return normalized
+    }
 }
