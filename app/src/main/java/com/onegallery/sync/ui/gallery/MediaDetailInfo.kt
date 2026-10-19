@@ -27,7 +27,10 @@ data class MediaDetailInfo(
     val mapLongitude: Double?,
     val syncLabel: String,
     val advancedRows: List<Pair<String, String>>,
-)
+) {
+    val hasLocationMap: Boolean
+        get() = mapLatitude != null && mapLongitude != null
+}
 
 private val ptBr = Locale("pt", "BR")
 

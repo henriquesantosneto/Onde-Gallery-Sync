@@ -38,6 +38,7 @@ import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +88,9 @@ fun MediaDetailScreen(
         snackbarHostState = snackbarHostState,
     )
     val sheetScope = rememberCoroutineScope()
+    val detailsSheetExpanded by remember {
+        derivedStateOf { bottomSheetState.currentValue == SheetValue.Expanded }
+    }
 
     ImmersiveSystemBarsEffect(immersive)
 
@@ -160,6 +164,12 @@ fun MediaDetailScreen(
         activePageError = null
         if (bottomSheetState.currentValue == SheetValue.Expanded) {
             bottomSheetState.partialExpand()
+        }
+    }
+
+    LaunchedEffect(bottomSheetState.currentValue) {
+        if (bottomSheetState.currentValue != SheetValue.Expanded) {
+            showAdvancedDetails = false
         }
     }
 
@@ -326,7 +336,7 @@ fun MediaDetailScreen(
     if (embeddedDetailsSheet) {
         BottomSheetScaffold(
             scaffoldState = bottomSheetScaffoldState,
-            sheetPeekHeight = 128.dp,
+            sheetPeekHeight = 56.dp,
             sheetDragHandle = { BottomSheetDefaults.DragHandle() },
             sheetContent = {
                 MediaDetailSamsungSheet(
@@ -342,6 +352,7 @@ fun MediaDetailScreen(
                         currentPath?.let(viewModel::releaseSingle)
                     },
                     showActions = true,
+                    showExpandedContent = detailsSheetExpanded,
                 )
             },
             snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },

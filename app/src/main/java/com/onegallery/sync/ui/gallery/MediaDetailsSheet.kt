@@ -81,6 +81,7 @@ fun MediaDetailsBottomSheet(
                     onDelete = onDismiss,
                     onFreeSpace = onDismiss,
                     showActions = false,
+                    showExpandedContent = true,
                 )
             }
             else -> {

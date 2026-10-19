@@ -25,8 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /**
- * Painel de detalhes estilo Samsung: resumo no peek, mapa e ações ao expandir,
- * detalhes técnicos opcionais.
+ * Painel de detalhes estilo Samsung: só a alça no peek; conteúdo completo ao expandir.
+ * Mapa só quando há coordenadas GPS.
  */
 @Composable
 fun MediaDetailSamsungSheet(
@@ -38,15 +38,42 @@ fun MediaDetailSamsungSheet(
     onDelete: () -> Unit,
     onFreeSpace: () -> Unit,
     showActions: Boolean = true,
+    showExpandedContent: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(scroll)
-            .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            .then(
+                if (showExpandedContent) {
+                    Modifier.verticalScroll(scroll)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(start = 20.dp, end = 20.dp, bottom = if (showExpandedContent) 28.dp else 10.dp),
     ) {
+        if (!showExpandedContent) {
+            Text(
+                "Deslize para cima para ver detalhes",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+            )
+            error?.takeIf { it.isNotBlank() }?.let { message ->
+                Text(
+                    message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            return@Column
+        }
+
         when {
             loading && info == null -> {
                 CircularProgressIndicator(
@@ -90,12 +117,10 @@ fun MediaDetailSamsungSheet(
                     modifier = Modifier.padding(top = 8.dp),
                 )
 
-                val lat = info.mapLatitude
-                val lon = info.mapLongitude
-                if (lat != null && lon != null) {
+                if (info.hasLocationMap) {
                     PhotoDetailLocationMap(
-                        latitude = lat,
-                        longitude = lon,
+                        latitude = info.mapLatitude!!,
+                        longitude = info.mapLongitude!!,
                         locationLabel = info.locationLabel,
                         modifier = Modifier.padding(top = 12.dp),
                     )
