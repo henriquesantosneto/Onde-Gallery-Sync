@@ -60,8 +60,10 @@ suspend fun removeDuplicateMetadataRows(
     val cloudSeen = mutableSetOf<String>()
     val uriSeen = mutableSetOf<String>()
     val pathSeen = mutableSetOf<String>()
+    val contentSigSeen = mutableSetOf<String>()
     fun score(row: SyncMetadataEntity): Long {
         var s = 0L
+        if (row.oneDriveItemId != null) s += 5_000_000_000L
         if (row.localMediaId != null) s += 1_000_000_000L
         if (!row.localContentUri.isNullOrBlank()) s += 100_000_000L
         if (!row.cachedFilePath.isNullOrBlank()) s += 10_000_000L
@@ -74,11 +76,13 @@ suspend fun removeDuplicateMetadataRows(
         val duplicate = row.localMediaId?.let { it in localSeen } == true ||
             row.oneDriveItemId?.let { it in cloudSeen } == true ||
             row.localContentUri?.takeIf { it.isNotBlank() }?.let { it in uriSeen } == true ||
-            row.canonicalPath in pathSeen
+            row.canonicalPath in pathSeen ||
+            metadataLocalContentSignature(row)?.let { it in contentSigSeen } == true
         if (duplicate) continue
         row.localMediaId?.let { localSeen.add(it) }
         row.oneDriveItemId?.let { cloudSeen.add(it) }
         row.localContentUri?.takeIf { it.isNotBlank() }?.let { uriSeen.add(it) }
+        metadataLocalContentSignature(row)?.let { contentSigSeen.add(it) }
         pathSeen.add(row.canonicalPath)
         keep.add(row.canonicalPath)
     }
@@ -90,6 +94,15 @@ suspend fun removeDuplicateMetadataRows(
         removed++
     }
     return removed
+}
+
+/** Cópias locais duplicadas (IDs diferentes, mesma foto) — ainda sem vínculo OneDrive. */
+private fun metadataLocalContentSignature(row: SyncMetadataEntity): String? {
+    if (row.oneDriveItemId != null) return null
+    val name = row.displayName.trim().lowercase().replace(Regex(" \\(\\d+\\)(?=\\.)"), "")
+    val captured = row.capturedAtSeconds?.takeIf { it > 0L } ?: return null
+    if (name.isBlank()) return null
+    return "$name|$captured"
 }
 
 private suspend fun purgeOrphans(
