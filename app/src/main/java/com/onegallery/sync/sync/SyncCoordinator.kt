@@ -545,7 +545,7 @@ class SyncCoordinator(
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
 
                     var uploaded = 0
-                    var markedPendingDownload = 0
+                    var downloaded = 0
                     var cloudOnly = 0
 
                     val allRows = syncMetadataDao.getAll()
@@ -577,7 +577,8 @@ class SyncCoordinator(
                                 syncMetadataDao.upsert(merged)
                                 when (merged.cloudState) {
                                     CloudSyncState.PENDING_UPLOAD -> uploaded += uploadLocalRow(merged)
-                                    CloudSyncState.PENDING_DOWNLOAD -> markedPendingDownload++
+                                    CloudSyncState.PENDING_DOWNLOAD ->
+                                        downloaded += downloadLocalRow(merged, remote)
                                     else -> Unit
                                 }
                             }
@@ -642,7 +643,7 @@ class SyncCoordinator(
                         pendingOperations = pendingCount,
                         lastMessage = buildString {
                             append(
-                                "Sync: $uploaded enviados, $markedPendingDownload aguardando download, " +
+                                "Sync: $uploaded enviados, $downloaded baixados (nuvem→local), " +
                                     "$cloudOnly só na nuvem$freeMsg.",
                             )
                             if (sanitized.removedRows > 0) {
@@ -655,7 +656,7 @@ class SyncCoordinator(
                         },
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
-                    SyncSummary(uploaded, markedPendingDownload, cloudOnly)
+                    SyncSummary(uploaded, downloaded, cloudOnly)
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
                     _state.value = _state.value.copy(
@@ -1187,6 +1188,59 @@ class SyncCoordinator(
         }
     }
 
+    private suspend fun downloadLocalRow(row: SyncMetadataEntity, remote: RemoteDriveFile): Int {
+        ensureSyncMayContinue()
+        val localId = row.localMediaId ?: return 0
+        setActiveSyncItem(
+            ActiveSyncItem(
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                operationLabel = "Baixando da nuvem (substituir local)…",
+            ),
+        )
+        val suffix = row.displayName.substringAfterLast('.', "bin")
+        val temp = File.createTempFile("ogs-cloud-overwrite-", ".$suffix", appContext.cacheDir)
+        return runCatching {
+            downloadRemoteFile(
+                remoteId = remote.itemId,
+                target = temp,
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                operationLabel = "Baixando da nuvem (substituir local)…",
+            ).getOrThrow()
+            if (!localMediaRepository.overwriteMediaContent(localId, temp)) {
+                error("Não foi possível substituir o arquivo local.")
+            }
+            val refreshed = localMediaRepository.findById(localId)
+            syncMetadataDao.upsert(
+                row.copy(
+                    oneDriveItemId = remote.itemId,
+                    remoteModifiedAt = remote.modifiedAtEpoch,
+                    localModifiedAt = refreshed?.dateModifiedSeconds ?: remote.modifiedAtEpoch,
+                    localContentUri = refreshed?.uri?.toString() ?: row.localContentUri,
+                    cloudState = CloudSyncState.SYNCED,
+                    cachedFilePath = null,
+                    lastError = null,
+                ),
+            )
+            mediaCacheRepository.deleteCached(row.canonicalPath)
+            ensureThumbnailCached(row.canonicalPath).getOrNull()
+            1
+        }.getOrElse {
+            syncMetadataDao.upsert(
+                row.copy(
+                    cloudState = CloudSyncState.PENDING_DOWNLOAD,
+                    lastError = it.message,
+                ),
+            )
+            0
+        }.also {
+            temp.delete()
+            setActiveSyncItem(null)
+            removeFromRunQueue(row.canonicalPath)
+        }
+    }
+
     private fun reconcileWithRemote(row: SyncMetadataEntity, remote: RemoteDriveFile): SyncMetadataEntity {
         val localTs = row.localModifiedAt ?: 0L
         val remoteTs = remote.modifiedAtEpoch ?: 0L
@@ -1198,17 +1252,11 @@ class SyncCoordinator(
         if (row.localMediaId == null) {
             return base.copy(cloudState = CloudSyncState.CLOUD_ONLY)
         }
-        val lastKnownRemote = row.remoteModifiedAt
-        val remoteChangedSinceSync = lastKnownRemote != null &&
-            remoteTs > lastKnownRemote + SYNC_TIMESTAMP_TOLERANCE_SEC
         val localNewerThanCloud = localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC
+        val remoteNewerThanLocal = remoteTs > localTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         return when {
-            remoteChangedSinceSync && localNewerThanCloud ->
-                base.copy(cloudState = CloudSyncState.CONFLICT)
-            remoteChangedSinceSync ->
-                base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
-            localNewerThanCloud ->
-                base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
+            localNewerThanCloud -> base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
+            remoteNewerThanLocal -> base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
             else -> base.copy(cloudState = CloudSyncState.SYNCED)
         }
     }
@@ -1737,6 +1785,6 @@ class SyncCoordinator(
 
 data class SyncSummary(
     val uploaded: Int,
-    val pendingDownload: Int,
+    val downloaded: Int,
     val cloudOnly: Int,
 )

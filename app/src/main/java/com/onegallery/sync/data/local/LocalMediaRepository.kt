@@ -89,6 +89,18 @@ class LocalMediaRepository(private val context: Context) {
         return context.contentResolver.delete(uri, null, null) > 0
     }
 
+    /** Substitui o conteúdo de um item da galeria (mesmo nome/caminho, versão mais nova na nuvem). */
+    fun overwriteMediaContent(mediaId: Long, sourceFile: java.io.File): Boolean {
+        if (!sourceFile.exists() || sourceFile.length() <= 0L) return false
+        val item = findById(mediaId) ?: return false
+        return runCatching {
+            context.contentResolver.openOutputStream(item.uri, "wt")?.use { output ->
+                sourceFile.inputStream().use { input -> input.copyTo(output) }
+            } ?: return false
+            true
+        }.getOrDefault(false)
+    }
+
     private fun queryCollection(collection: Uri, kind: MediaKind): List<LocalMediaItem> {
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
