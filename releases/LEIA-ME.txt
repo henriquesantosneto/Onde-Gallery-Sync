@@ -1,12 +1,12 @@
-OneGallery Sync — APK 0.8.48 (versionCode 104)
+OneGallery Sync — APK 0.8.49 (versionCode 105)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.48-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.49-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Álbums: contador na capa (estilo Samsung) + fotos/vídeos; total na barra ao abrir o álbum
-- v0.8.47: manutenção do índice sem cancelar ao sair dos Ajustes
+- Sync: não regrava no índice itens locais inalterados (sync seguinte mais leve)
+- v0.8.48: contador de mídias por álbum (estilo Samsung)
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
