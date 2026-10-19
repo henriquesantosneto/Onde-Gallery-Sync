@@ -1,12 +1,12 @@
-OneGallery Sync — APK 0.8.47 (versionCode 103)
+OneGallery Sync — APK 0.8.48 (versionCode 104)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.47-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.48-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Manutenção do índice: não cancela ao sair dos Ajustes (sem mensagem "coroutine left composition")
-- v0.8.46: verificar/limpar índice mais rápido
+- Álbums: contador na capa (estilo Samsung) + fotos/vídeos; total na barra ao abrir o álbum
+- v0.8.47: manutenção do índice sem cancelar ao sair dos Ajustes
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
