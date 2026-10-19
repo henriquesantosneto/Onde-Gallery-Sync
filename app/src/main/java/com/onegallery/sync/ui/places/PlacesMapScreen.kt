@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -333,6 +334,7 @@ private fun PlacesMapView(
     val markerByPath = remember { mutableStateMapOf<String, Pair<Marker, PhotoMapPin>>() }
     var mapInitialized by remember { mutableStateOf(false) }
     var initialCameraApplied by rememberSaveable { mutableStateOf(false) }
+    var mountingPins by remember(pinSignature) { mutableStateOf(pins.isNotEmpty()) }
 
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -390,9 +392,14 @@ private fun PlacesMapView(
         }
     }
 
-    LaunchedEffect(pinSignature, mapRef, styleReady, syncCoordinator) {
-        val map = mapRef ?: return@LaunchedEffect
-        if (!styleReady) return@LaunchedEffect
+    LaunchedEffect(pinSignature, mapRef, styleReady, syncCoordinator, pins) {
+        if (pins.isEmpty()) {
+            mountingPins = false
+            return@LaunchedEffect
+        }
+        mountingPins = true
+        val map = mapRef
+        if (map == null || !styleReady) return@LaunchedEffect
         map.setOnMarkerClickListener { marker ->
             markerByPath.values.firstOrNull { it.first == marker }?.second?.let { onPinSelected(it) }
             true
@@ -405,32 +412,39 @@ private fun PlacesMapView(
         }
         val iconFactory = IconFactory.getInstance(context)
         val toAdd = pinByPath.filterKeys { it !in markerByPath }
-        if (toAdd.isEmpty()) return@LaunchedEffect
-        val markerArt = withContext(Dispatchers.Default) {
-            toAdd.values.map { pin ->
-                val bitmap = PhotoStackMarkerBitmap.create(
-                    context = context,
-                    items = listOf(pin.item),
-                    syncCoordinator = syncCoordinator,
-                )
-                Triple(
-                    pin,
-                    bitmap,
-                    pin.item.locationLabel?.takeIf { it.isNotBlank() } ?: pin.item.displayName,
-                )
-            }
+        if (toAdd.isEmpty()) {
+            mountingPins = false
+            return@LaunchedEffect
         }
-        markerArt.forEach { (pin, stackBitmap, title) ->
-            val path = pin.item.canonicalPath
-            if (path in markerByPath) return@forEach
-            val added = map.addMarker(
-                org.maplibre.android.annotations.MarkerOptions()
-                    .position(LatLng(pin.latitude, pin.longitude))
-                    .title(title)
-                    .snippet(pin.item.displayName)
-                    .icon(iconFactory.fromBitmap(stackBitmap)),
-            )
-            markerByPath[path] = added to pin
+        try {
+            val markerArt = withContext(Dispatchers.Default) {
+                toAdd.values.map { pin ->
+                    val bitmap = PhotoStackMarkerBitmap.create(
+                        context = context,
+                        items = listOf(pin.item),
+                        syncCoordinator = syncCoordinator,
+                    )
+                    Triple(
+                        pin,
+                        bitmap,
+                        pin.item.locationLabel?.takeIf { it.isNotBlank() } ?: pin.item.displayName,
+                    )
+                }
+            }
+            markerArt.forEach { (pin, stackBitmap, title) ->
+                val path = pin.item.canonicalPath
+                if (path in markerByPath) return@forEach
+                val added = map.addMarker(
+                    org.maplibre.android.annotations.MarkerOptions()
+                        .position(LatLng(pin.latitude, pin.longitude))
+                        .title(title)
+                        .snippet(pin.item.displayName)
+                        .icon(iconFactory.fromBitmap(stackBitmap)),
+                )
+                markerByPath[path] = added to pin
+            }
+        } finally {
+            mountingPins = false
         }
     }
 
@@ -449,5 +463,19 @@ private fun PlacesMapView(
                 .background(Color.Black.copy(alpha = 0.45f))
                 .padding(horizontal = 6.dp, vertical = 3.dp),
         )
+        if (mountingPins) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(14.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.45f),
+                        shape = MaterialTheme.shapes.small,
+                    )
+                    .padding(10.dp),
+                strokeWidth = 2.5.dp,
+                color = Color.White,
+            )
+        }
     }
 }
