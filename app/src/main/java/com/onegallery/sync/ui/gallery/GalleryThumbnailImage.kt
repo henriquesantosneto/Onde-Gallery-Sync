@@ -16,6 +16,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -80,13 +81,20 @@ fun GalleryThumbnailImage(
             contentScale = contentScale,
         )
     } else {
-        MediaThumbnailPlaceholder(modifier = modifier)
+        val showCenterCloud = item.cloudState != CloudSyncState.CLOUD_ONLY &&
+            item.cloudState != CloudSyncState.PENDING_DOWNLOAD
+        MediaThumbnailPlaceholder(modifier = modifier, showCloudIcon = showCenterCloud)
     }
 }
 
 @Composable
-fun MediaThumbnailPlaceholder(modifier: Modifier = Modifier) {
+fun MediaThumbnailPlaceholder(
+    modifier: Modifier = Modifier,
+    showCloudIcon: Boolean = true,
+) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+        if (showCloudIcon) {
+            Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+        }
     }
 }

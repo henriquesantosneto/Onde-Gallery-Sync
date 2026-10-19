@@ -38,7 +38,8 @@ data class GalleryDisplayItem(
     val showCloudBadge: Boolean
         get() = cloudState == CloudSyncState.CLOUD_ONLY ||
             cloudState == CloudSyncState.PENDING_DOWNLOAD ||
-            cloudState == CloudSyncState.PENDING_UPLOAD
+            cloudState == CloudSyncState.PENDING_UPLOAD ||
+            (localReleasedForSpace && oneDriveItemId != null && localUri == null)
 
     val showSyncedBadge: Boolean
         get() = cloudState == CloudSyncState.SYNCED

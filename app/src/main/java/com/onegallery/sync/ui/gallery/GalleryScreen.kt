@@ -25,7 +25,6 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Info
@@ -439,11 +438,13 @@ private fun MediaThumbnail(
                     .size(overlayIconSize),
             )
         }
-        CloudBadge(
-            state = item.cloudState,
-            iconSize = overlayIconSize,
-            modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
-        )
+        if (item.showCloudBadge) {
+            CloudBadge(
+                state = cloudBadgeState(item),
+                iconSize = overlayIconSize,
+                modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
+            )
+        }
         if (item.kind == MediaKind.VIDEO) {
             VideoDurationOverlay(
                 durationMs = item.videoDurationMs,
@@ -451,17 +452,14 @@ private fun MediaThumbnail(
                 modifier = Modifier.align(Alignment.BottomStart).padding(overlayPad),
             )
         }
-        if (!item.isOfflineAvailable && item.cloudState == CloudSyncState.CLOUD_ONLY) {
-            Icon(
-                Icons.Outlined.CloudOff,
-                contentDescription = "Somente nuvem",
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(overlayPad)
-                    .size(overlayIconSize),
-            )
-        }
     }
+}
+
+private fun cloudBadgeState(item: GalleryDisplayItem): CloudSyncState {
+    if (item.localReleasedForSpace && item.localUri == null && item.oneDriveItemId != null) {
+        return CloudSyncState.CLOUD_ONLY
+    }
+    return item.cloudState
 }
 
 @Composable
