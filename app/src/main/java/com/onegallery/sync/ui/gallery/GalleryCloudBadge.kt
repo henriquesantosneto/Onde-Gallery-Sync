@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -29,10 +30,12 @@ private fun hasLocalMediaCopy(item: GalleryDisplayItem): Boolean {
     return cached?.isFile == true && cached.length() > 0L
 }
 
-/** Ícone no canto da grade / detalhe: nuvem vazia (só nuvem) ou nuvem com ✓ (local + nuvem). */
+/** Ícone no canto da grade / detalhe: celular (só local), nuvem ou nuvem com ✓. */
 fun galleryCloudOverlayState(item: GalleryDisplayItem): CloudSyncState? {
     val hasCloud = item.oneDriveItemId != null
-    if (!hasCloud) return null
+    if (!hasCloud) {
+        return if (item.isDeviceOnlyBadge()) CloudSyncState.LOCAL_ONLY else null
+    }
     if (hasLocalMediaCopy(item)) return CloudSyncState.SYNCED
     val badge = cloudBadgeState(item)
     return when (badge) {
@@ -46,10 +49,20 @@ fun galleryCloudOverlayState(item: GalleryDisplayItem): CloudSyncState? {
 
 /** Estado do ícone de nuvem na visualização expandida (recall / cópia local). */
 fun detailCloudBadgeState(item: GalleryDisplayItem, recalling: Boolean): CloudSyncState? {
-    val hasCloud = item.oneDriveItemId != null
-    if (!hasCloud && item.cloudState == CloudSyncState.LOCAL_ONLY) return null
     if (recalling) return CloudSyncState.CLOUD_ONLY
     return galleryCloudOverlayState(item)
+        ?: if (item.isDeviceOnlyBadge()) CloudSyncState.LOCAL_ONLY else null
+}
+
+private fun GalleryDisplayItem.isDeviceOnlyBadge(): Boolean {
+    if (oneDriveItemId != null) return false
+    if (localReleasedForSpace) return false
+    return when (cloudState) {
+        CloudSyncState.LOCAL_ONLY,
+        CloudSyncState.PENDING_UPLOAD,
+        -> hasLocalMediaCopy(this) || localMediaId != null
+        else -> false
+    }
 }
 
 @Composable
@@ -60,15 +73,22 @@ fun GalleryCloudBadge(
 ) {
     val icon = when (state) {
         CloudSyncState.SYNCED -> Icons.Outlined.CloudDone
+        CloudSyncState.LOCAL_ONLY -> Icons.Outlined.Smartphone
         CloudSyncState.CLOUD_ONLY,
         CloudSyncState.PENDING_DOWNLOAD,
         CloudSyncState.PENDING_UPLOAD,
         -> Icons.Outlined.Cloud
         else -> Icons.Outlined.Cloud
     }
+    val description = when (state) {
+        CloudSyncState.LOCAL_ONLY -> "Só no aparelho"
+        CloudSyncState.SYNCED -> "Sincronizado com a nuvem"
+        CloudSyncState.CLOUD_ONLY -> "Só na nuvem"
+        else -> state.name
+    }
     Icon(
         icon,
-        contentDescription = state.name,
+        contentDescription = description,
         modifier = modifier.size(iconSize),
     )
 }
