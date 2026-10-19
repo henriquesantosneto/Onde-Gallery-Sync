@@ -35,22 +35,22 @@ fun MediaDetailPushDetailsSheet(
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     panelFraction: Float,
+    contentLevel: MediaDetailContentLevel,
     onPanelFractionChange: (Float) -> Unit,
-    onPanelDragEnd: () -> Unit,
+    onPanelDragEnd: (velocityYPxPerSec: Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (canonicalPaths.isEmpty() || panelFraction <= 0f) return
 
     BackHandler(onBack = {
         onPanelFractionChange(0f)
-        onPanelDragEnd()
+        onPanelDragEnd(0f)
     })
 
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(LocalDensity.current) {
         configuration.screenHeightDp.dp.toPx()
     }
-    val contentLevel = contentLevelForPanelFraction(panelFraction)
     val scroll = rememberScrollState()
     val multiSelect = canonicalPaths.size > 1
 
@@ -70,7 +70,7 @@ fun MediaDetailPushDetailsSheet(
                     enabled = true,
                     screenHeightPx = screenHeightPx,
                     fractionAtDragStart = { panelFraction },
-                    onDragStart = { },
+                    onDragStart = { onPanelFractionChange(panelFraction) },
                     onDragFraction = onPanelFractionChange,
                     onDragEnd = onPanelDragEnd,
                 )

@@ -1,15 +1,18 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.abs
 
 /** Fração da altura da tela ocupada pelo painel de detalhes (0 = fechado). */
@@ -18,11 +21,26 @@ object MediaDetailSheetAnchors {
     /** Detalhes resumidos (data, arquivo, câmera, mapa). */
     const val SIMPLE = 0.45f
 
-    fun snap(fraction: Float): Float {
+    private val anchors = floatArrayOf(0f, SIMPLE, FULL)
+
+    /** Snap ao âncora mais próximo; fling vertical promove/rebaixa um degrau. */
+    fun snap(fraction: Float, velocityYPxPerSec: Float = 0f): Float {
+        val flingUp = velocityYPxPerSec < -900f
+        val flingDown = velocityYPxPerSec > 900f
+        if (flingUp) {
+            val idx = anchors.indexOfLast { fraction >= it - 0.04f }.coerceAtLeast(0)
+            return anchors[(idx + 1).coerceAtMost(anchors.lastIndex)]
+        }
+        if (flingDown) {
+            val idx = anchors.indexOfFirst { fraction <= it + 0.04f }
+                .let { if (it < 0) anchors.lastIndex else it }
+            return anchors[(idx - 1).coerceAtLeast(0)]
+        }
         return when {
-            fraction < 0.10f -> 0f
-            fraction < 0.62f -> SIMPLE
-            else -> FULL
+            fraction < 0.12f -> 0f
+            // Acima da metade entre simples e completo → nível 2 (sem exigir ~62% da tela).
+            fraction >= 0.50f -> FULL
+            else -> SIMPLE
         }
     }
 }
@@ -48,12 +66,15 @@ fun rememberMediaDetailSheetFraction(
     dragFraction: Float,
     dragging: Boolean,
 ): Float {
-    val animated by animateFloatAsState(
-        targetValue = settleTarget,
-        animationSpec = tween(durationMillis = 220),
-        label = "detailsSettleFraction",
-    )
-    return if (dragging) dragFraction else animated
+    val animatable = remember { Animatable(0f) }
+    LaunchedEffect(dragging, dragFraction, settleTarget) {
+        if (dragging) {
+            animatable.snapTo(dragFraction)
+        } else {
+            animatable.animateTo(settleTarget, tween(durationMillis = 220))
+        }
+    }
+    return animatable.value
 }
 
 private const val VERTICAL_DOMINANCE_RATIO = 1.15f
@@ -68,7 +89,7 @@ fun Modifier.draggableDetailPanelHeight(
     fractionAtDragStart: () -> Float,
     onDragStart: () -> Unit,
     onDragFraction: (Float) -> Unit,
-    onDragEnd: () -> Unit,
+    onDragEnd: (velocityYPxPerSec: Float) -> Unit,
 ): Modifier {
     if (!enabled || screenHeightPx <= 0f) return this
     return pointerInput(enabled, screenHeightPx) {
@@ -82,6 +103,7 @@ fun Modifier.draggableDetailPanelHeight(
             var passedToChildren = false
             var dragging = false
             var baseFraction = 0f
+            val velocityTracker = VelocityTracker()
 
             while (true) {
                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
@@ -90,6 +112,9 @@ fun Modifier.draggableDetailPanelHeight(
                 if (passedToChildren) break
 
                 val delta = change.positionChange()
+                if (delta != Offset.Zero) {
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                }
                 if (!lockedVertical) {
                     sumX += delta.x
                     sumY += delta.y
@@ -118,7 +143,8 @@ fun Modifier.draggableDetailPanelHeight(
                 }
             }
             if (dragging) {
-                onDragEnd()
+                val velocityY = velocityTracker.calculateVelocity().y
+                onDragEnd(velocityY)
             }
         }
     }
@@ -138,5 +164,5 @@ fun Modifier.draggableDetailsFromPhoto(
     fractionAtDragStart = { startFraction },
     onDragStart = onDragStart,
     onDragFraction = onDragFraction,
-    onDragEnd = onDragEnd,
+    onDragEnd = { _ -> onDragEnd() },
 )

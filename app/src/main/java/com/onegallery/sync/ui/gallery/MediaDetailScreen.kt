@@ -180,8 +180,8 @@ fun MediaDetailScreen(
         }
     }
 
-    fun snapDetailsPanel() {
-        val snapped = MediaDetailSheetAnchors.snap(detailsDragFraction)
+    fun snapDetailsPanel(velocityYPxPerSec: Float = 0f) {
+        val snapped = MediaDetailSheetAnchors.snap(detailsDragFraction, velocityYPxPerSec)
         detailsSettleFraction = snapped
         detailsDragFraction = snapped
     }
@@ -191,6 +191,14 @@ fun MediaDetailScreen(
         dragFraction = detailsDragFraction,
         dragging = detailsDragging,
     )
+    var detailsContentLevel by remember {
+        mutableStateOf(MediaDetailContentLevel.Simple)
+    }
+    LaunchedEffect(detailsDragging, detailsSettleFraction) {
+        if (!detailsDragging) {
+            detailsContentLevel = contentLevelForPanelFraction(detailsSettleFraction)
+        }
+    }
 
     val chromeVisible = !immersive
 
@@ -244,9 +252,9 @@ fun MediaDetailScreen(
                         detailsDragging = true
                         detailsDragFraction = fraction
                     },
-                    onDragEnd = {
+                    onDragEnd = { velocityY ->
+                        snapDetailsPanel(velocityY)
                         detailsDragging = false
-                        snapDetailsPanel()
                     },
                 ),
         ) {
@@ -379,13 +387,14 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     panelFraction = detailsDisplayFraction,
+                    contentLevel = detailsContentLevel,
                     onPanelFractionChange = { fraction ->
                         detailsDragging = true
                         detailsDragFraction = fraction
                     },
-                    onPanelDragEnd = {
+                    onPanelDragEnd = { velocityY ->
+                        snapDetailsPanel(velocityY)
                         detailsDragging = false
-                        snapDetailsPanel()
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
