@@ -16,6 +16,9 @@ data class LocalMediaItem(
     val dateAddedSeconds: Long,
     /** MediaStore DATE_TAKEN (segundos UTC), quando disponível. */
     val dateTakenSeconds: Long? = null,
+    /** MediaStore LATITUDE/LONGITUDE (imagens; requer ACCESS_MEDIA_LOCATION). */
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     /** MediaStore DATE_MODIFIED (segundos UTC). Usado na reconciliação com a nuvem. */
     val dateModifiedSeconds: Long,
     val sizeBytes: Long,

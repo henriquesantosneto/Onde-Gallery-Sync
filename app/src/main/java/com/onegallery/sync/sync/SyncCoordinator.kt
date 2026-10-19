@@ -126,6 +126,8 @@ class SyncCoordinator(
     private val syncCancelReason = AtomicReference(SyncCancelReason.NONE)
     private val activeLongTaskJob = AtomicReference<Job?>(null)
     private val pendingIndexRebuild = AtomicBoolean(false)
+    /** Cache da passagem atual de indexação (evita re-varrer MediaStore no backfill). */
+    private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
     private val longTaskMutex = Mutex()
     private val foregroundGuard = SyncForegroundGuard(appContext)
 
@@ -410,37 +412,46 @@ class SyncCoordinator(
             bindActiveLongTaskJob()
             _state.value = _state.value.copy(
                 isRunning = true,
-                lastMessage = "Indexando biblioteca local e GPS das fotos…",
+                lastMessage = "Indexando biblioteca local…",
             )
         }
         return runCatching {
             ensureNotCancelled()
             coroutineContext.ensureActive()
             val items = localMediaRepository.loadAllMedia()
+            indexPassLocalItemsById = items.associateBy { it.id }
             ensureNotCancelled()
+            val existingRows = syncMetadataDao.getAll()
+            val existingByCanonical = existingRows.associateBy { it.canonicalPath }
+            val existingByLocalId = existingRows.mapNotNull { row ->
+                row.localMediaId?.let { id -> id to row }
+            }.toMap()
             val seenPaths = mutableSetOf<String>()
+            val pendingUpserts = ArrayList<SyncMetadataEntity>(items.size)
+            val pathsToDelete = mutableListOf<String>()
             items.forEachIndexed { index, item ->
-                if (index % 32 == 0) {
+                if (index % 64 == 0) {
                     ensureNotCancelled()
                     coroutineContext.ensureActive()
                 }
                 val canonical = SyncPaths.canonicalFromLocal(item)
                 seenPaths.add(canonical)
-                val existingByPath = syncMetadataDao.getByCanonicalPath(canonical)
-                val existingByLocal = syncMetadataDao.getByLocalId(item.id)
+                val existingByPath = existingByCanonical[canonical]
+                val existingByLocal = existingByLocalId[item.id]
                 val existing = existingByPath ?: existingByLocal
                 if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
                     seenPaths.add(existingByLocal.canonicalPath)
+                    pathsToDelete.add(existingByLocal.canonicalPath)
                 }
-                syncMetadataDao.upsert(mergeLocalIntoEntity(item, canonical, existing))
-                if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
-                    syncMetadataDao.deleteByCanonicalPath(existingByLocal.canonicalPath)
-                }
+                pendingUpserts.add(mergeLocalIntoEntity(item, canonical, existing))
             }
+            pendingUpserts.chunked(256).forEach { batch ->
+                ensureNotCancelled()
+                syncMetadataDao.upsertAll(batch)
+            }
+            pathsToDelete.forEach { syncMetadataDao.deleteByCanonicalPath(it) }
             ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)
-            backfillMissingGpsLocations()
-            backfillMissingCaptureTimes()
             if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) {
                 val sanitized = runIndexSanitizePass(
                     remoteCanonicalPaths = emptySet(),
@@ -458,7 +469,7 @@ class SyncCoordinator(
                     lastIndexedLocalCount = items.size,
                     isRunning = false,
                 activeItem = null,
-                    lastMessage = "Indexação local: ${items.size} itens (incl. localização GPS quando disponível).",
+                    lastMessage = "Indexação local: ${items.size} itens. GPS/data extra no sync ou em Sync → indexar GPS.",
                 )
             } else {
                 _state.value = _state.value.copy(lastIndexedLocalCount = items.size)
@@ -478,6 +489,10 @@ class SyncCoordinator(
                 )
             } else if (cancelled) {
                 throw error
+            }
+        }.also {
+            if (manageRunningState) {
+                indexPassLocalItemsById = emptyMap()
             }
         }
     }
@@ -544,7 +559,7 @@ class SyncCoordinator(
                     flushLegacyPendingDeletes()
                     applyPendingIndexRebuildIfNeeded()
                     _state.value = _state.value.copy(
-                        lastMessage = "Indexando biblioteca local e GPS das fotos…",
+                        lastMessage = "Indexando biblioteca local…",
                     )
                     indexLocalLibrary(manageRunningState = false).getOrThrow()
                     _state.value = _state.value.copy(lastMessage = "Sincronizando com OneDrive…")
@@ -637,6 +652,7 @@ class SyncCoordinator(
                     )
                     backfillMissingGpsLocations()
                     backfillMissingCaptureTimes()
+                    indexPassLocalItemsById = emptyMap()
                     prefetchCloudThumbnails()
                     val sanitized = runIndexSanitizePass(
                         remoteCanonicalPaths = remoteByPath.keys,
@@ -706,6 +722,7 @@ class SyncCoordinator(
                     indexLocalLibrary(manageRunningState = false, userInitiated = userInitiated).getOrThrow()
                     backfillMissingGpsLocations()
                     backfillMissingCaptureTimes()
+                    indexPassLocalItemsById = emptyMap()
                     syncMetadataDao.getAll().count { it.latitude != null && it.longitude != null }
                 }
                 result.onSuccess { withGps ->
@@ -1400,6 +1417,11 @@ class SyncCoordinator(
                 existing.longitude,
             )
         }
+        item.latitude?.let { lat ->
+            item.longitude?.let { lon ->
+                return Triple(formatCoordLabel(lat, lon), lat, lon)
+            }
+        }
         val resolved = resolveLocationLocalOnly(
             uri = item.uri,
             cachedFilePath = existing?.cachedFilePath,
@@ -1440,7 +1462,14 @@ class SyncCoordinator(
             oneDriveItemId = null,
         )?.let { return it }
         val localId = row.localMediaId ?: return null
-        val item = localMediaRepository.findById(localId) ?: return null
+        val item = indexPassLocalItemsById[localId]
+            ?: localMediaRepository.findById(localId)
+            ?: return null
+        item.latitude?.let { lat ->
+            item.longitude?.let { lon ->
+                return MediaLocation(lat, lon, formatCoordLabel(lat, lon))
+            }
+        }
         val temp = localMediaRepository.materializeToTempFile(item) ?: return null
         return runCatching {
             mediaLocationResolver.resolveFromFile(temp)
@@ -1488,7 +1517,9 @@ class SyncCoordinator(
         }
         if (rows.isEmpty()) return
         var cloudProbes = 0
+        var localProbes = 0
         val maxCloudProbesPerRun = 200
+        val maxLocalProbesPerRun = 400
         var indexed = 0
         rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
             .forEachIndexed { index, row ->
@@ -1498,7 +1529,11 @@ class SyncCoordinator(
                 }
                 val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
                 val resolved = when {
-                    hasLocal -> resolveLocationForBackfill(row)
+                    hasLocal && localProbes < maxLocalProbesPerRun -> {
+                        localProbes++
+                        resolveLocationForBackfill(row)
+                    }
+                    hasLocal -> null
                     row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
                         cloudProbes++
                         resolveLocationFromSources(
@@ -1519,10 +1554,10 @@ class SyncCoordinator(
                 indexed++
             }
         if (indexed > 0) {
-            val suffix = if (cloudProbes >= maxCloudProbesPerRun) {
-                " (limite de nuvem nesta passagem; sincronize de novo para o restante)"
-            } else {
-                ""
+            val suffix = buildString {
+                if (localProbes >= maxLocalProbesPerRun || cloudProbes >= maxCloudProbesPerRun) {
+                    append(" (limite nesta passagem; sincronize de novo para o restante)")
+                }
             }
             _state.value = _state.value.copy(
                 lastMessage = "Localização GPS: $indexed item(ns) indexado(s)$suffix",
@@ -1560,7 +1595,9 @@ class SyncCoordinator(
             oneDriveItemId = null,
         )?.let { return it }
         val localId = row.localMediaId ?: return null
-        val item = localMediaRepository.findById(localId) ?: return null
+        val item = indexPassLocalItemsById[localId]
+            ?: localMediaRepository.findById(localId)
+            ?: return null
         return mediaCaptureTimeResolver.resolveFromLocalItem(item)
             ?: run {
                 val temp = localMediaRepository.materializeToTempFile(item) ?: return null

@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import com.onegallery.sync.sync.SyncPolicy
+import kotlin.math.abs
 
 class LocalMediaRepository(private val context: Context) {
 
@@ -102,17 +103,23 @@ class LocalMediaRepository(private val context: Context) {
     }
 
     private fun queryCollection(collection: Uri, kind: MediaKind): List<LocalMediaItem> {
-        val projection = arrayOf(
-            MediaStore.MediaColumns._ID,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-            MediaStore.MediaColumns.RELATIVE_PATH,
-            MediaStore.MediaColumns.DATE_ADDED,
-            MediaStore.MediaColumns.DATE_TAKEN,
-            MediaStore.MediaColumns.DATE_MODIFIED,
-            MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.MIME_TYPE,
-        )
+        val includeGps = kind == MediaKind.IMAGE &&
+            MediaAccessPermissions.hasMediaLocationAccess(context)
+        val projection = buildList {
+            add(MediaStore.MediaColumns._ID)
+            add(MediaStore.MediaColumns.DISPLAY_NAME)
+            add(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+            add(MediaStore.MediaColumns.RELATIVE_PATH)
+            add(MediaStore.MediaColumns.DATE_ADDED)
+            add(MediaStore.MediaColumns.DATE_TAKEN)
+            add(MediaStore.MediaColumns.DATE_MODIFIED)
+            add(MediaStore.MediaColumns.SIZE)
+            add(MediaStore.MediaColumns.MIME_TYPE)
+            if (includeGps) {
+                add(MediaStore.Images.ImageColumns.LATITUDE)
+                add(MediaStore.Images.ImageColumns.LONGITUDE)
+            }
+        }.toTypedArray()
         val sort = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
         val result = mutableListOf<LocalMediaItem>()
         context.contentResolver.query(collection, projection, null, null, sort)?.use { cursor ->
@@ -125,9 +132,16 @@ class LocalMediaRepository(private val context: Context) {
             val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+            val latCol = if (includeGps) cursor.getColumnIndex(MediaStore.Images.ImageColumns.LATITUDE) else -1
+            val lonCol = if (includeGps) cursor.getColumnIndex(MediaStore.Images.ImageColumns.LONGITUDE) else -1
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
                 val contentUri = ContentUris.withAppendedId(collection, id)
+                val (lat, lon) = if (latCol >= 0 && lonCol >= 0) {
+                    normalizeGps(cursor.getDouble(latCol), cursor.getDouble(lonCol))
+                } else {
+                    null to null
+                }
                 result.add(
                     LocalMediaItem(
                         id = id,
@@ -142,6 +156,8 @@ class LocalMediaRepository(private val context: Context) {
                         } else {
                             null
                         },
+                        latitude = lat,
+                        longitude = lon,
                         dateModifiedSeconds = cursor.getLong(dateModifiedCol),
                         sizeBytes = cursor.getLong(sizeCol),
                         kind = kind,
@@ -151,5 +167,11 @@ class LocalMediaRepository(private val context: Context) {
             }
         }
         return result
+    }
+
+    private fun normalizeGps(latitude: Double, longitude: Double): Pair<Double?, Double?> {
+        if (latitude == 0.0 && longitude == 0.0) return null to null
+        if (abs(latitude) > 90.0 || abs(longitude) > 180.0) return null to null
+        return latitude to longitude
     }
 }

@@ -53,6 +53,9 @@ interface SyncMetadataDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: SyncMetadataEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entities: List<SyncMetadataEntity>)
+
     @Query("DELETE FROM sync_metadata WHERE canonicalPath = :canonicalPath")
     suspend fun deleteByCanonicalPath(canonicalPath: String)
 
