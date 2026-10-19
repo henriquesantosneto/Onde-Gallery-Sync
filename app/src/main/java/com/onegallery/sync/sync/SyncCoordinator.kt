@@ -162,14 +162,6 @@ class SyncCoordinator(
         )
     }
 
-    private fun clearSyncProgressActivity() {
-        _state.value = _state.value.copy(
-            progressPhase = SyncProgressPhase.IDLE,
-            activityHeadline = "",
-            activityDetail = "",
-        )
-    }
-
     fun requestCancelSync() {
         cancelActiveSync(SyncCancelReason.USER, applyUserCooldown = true, inProgressMessage = "Cancelando…")
     }
