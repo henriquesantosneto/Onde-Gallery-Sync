@@ -312,8 +312,16 @@ private fun MediaDetailPage(
         }
         val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
         if (result.isSuccess) {
+            val file = result.getOrNull()
             withContext(Dispatchers.Main.immediate) {
                 refreshDisplayItem()
+                if (file != null) {
+                    item = item?.copy(cachedOriginal = file)
+                        ?: syncCoordinator.getMetadata(canonicalPath)?.let {
+                            GalleryMapper.toDisplayItem(it, mediaCacheRepository)
+                                .copy(cachedOriginal = file)
+                        }
+                }
             }
         }
         withContext(Dispatchers.Main.immediate) {

@@ -42,16 +42,24 @@ fun GalleryThumbnailImage(
         mutableStateOf<Any?>(item.localUri ?: item.thumbnailModel)
     }
 
-    LaunchedEffect(item.canonicalPath, item.localUri, item.oneDriveItemId, sizePx) {
+    LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
+        val fromItem = item.localUri ?: item.thumbnailModel
+        if (fromItem != null) {
+            displayData = fromItem
+        }
         if (item.localUri != null) {
-            displayData = withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 GalleryThumbnailModels.resolveGridModel(context, item, sizePx)
+            }?.let { resolved ->
+                displayData = resolved
             }
             return@LaunchedEffect
         }
         if (displayData != null) return@LaunchedEffect
         val coordinator = syncCoordinator ?: return@LaunchedEffect
-        displayData = coordinator.ensureThumbnailCached(item.canonicalPath).getOrNull()
+        coordinator.ensureThumbnailCached(item.canonicalPath).getOrNull()?.let { cached ->
+            displayData = cached
+        }
     }
 
     if (displayData != null) {
@@ -59,7 +67,7 @@ fun GalleryThumbnailImage(
             ImageRequest.Builder(context)
                 .data(displayData)
                 .size(sizePx)
-                .crossfade(style == GalleryThumbnailStyle.Detail)
+                .crossfade(true)
                 .allowHardware(style == GalleryThumbnailStyle.Grid)
                 .memoryCacheKey("${item.canonicalPath}:$sizePx:${style.name}")
                 .diskCacheKey("${item.canonicalPath}:$sizePx")

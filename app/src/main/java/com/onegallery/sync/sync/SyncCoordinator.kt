@@ -1008,33 +1008,43 @@ class SyncCoordinator(
     private suspend fun ensureThumbnailCachedOnIo(canonicalPath: String): Result<File?> {
         mediaCacheRepository.thumbnailIfCached(canonicalPath)?.let { return Result.success(it) }
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
-        val thumbDest = mediaCacheRepository.thumbFile(canonicalPath)
+        val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
+        staging.delete()
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
+
+        fun commitIfReady(): File? =
+            mediaCacheRepository.commitThumbnail(staging, canonicalPath)
 
         localContentUri(row)?.let { uri ->
             val ok = if (isVideo) {
-                VideoThumbnailHelper.captureToFile(appContext, uri, thumbDest)
+                VideoThumbnailHelper.captureToFile(appContext, uri, staging)
             } else {
-                cacheImageThumbnailFromUri(uri, thumbDest)
+                cacheImageThumbnailFromUri(uri, staging)
             }
-            if (ok) return Result.success(mediaCacheRepository.thumbnailIfCached(canonicalPath))
+            if (ok) commitIfReady()?.let { return Result.success(it) }
         }
 
         row.cachedFilePath?.let { path ->
             val cached = File(path)
-            if (cached.exists() && isVideo && VideoThumbnailHelper.captureToFile(cached, thumbDest)) {
-                return Result.success(mediaCacheRepository.thumbnailIfCached(canonicalPath))
+            if (cached.isFile && cached.length() > 0L) {
+                val ok = if (isVideo) {
+                    VideoThumbnailHelper.captureToFile(cached, staging)
+                } else {
+                    cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
+                }
+                if (ok) commitIfReady()?.let { return Result.success(it) }
             }
         }
 
         val itemId = row.oneDriveItemId
         if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
-            oneDriveRepository.downloadThumbnailToFile(itemId, thumbDest).onSuccess {
-                if (thumbDest.length() > 0L) {
-                    return Result.success(thumbDest)
+            oneDriveRepository.downloadThumbnailToFile(itemId, staging).onSuccess {
+                if (staging.length() > 0L) {
+                    commitIfReady()?.let { return Result.success(it) }
                 }
             }
         }
+        staging.delete()
         return Result.success(null)
     }
 
@@ -1116,9 +1126,6 @@ class SyncCoordinator(
             if (!target.isFile || target.length() <= 0L) {
                 return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
             }
-            syncMetadataDao.upsert(
-                row.copy(cachedFilePath = target.absolutePath, lastError = null),
-            )
             target
         }
 
@@ -1194,7 +1201,6 @@ class SyncCoordinator(
             )
         }
         syncMetadataDao.upsert(updated)
-        mediaCacheRepository.thumbFile(row.canonicalPath).delete()
         runCatching { ensureThumbnailCachedOnIo(row.canonicalPath) }
         return Result.success(sourceFile)
     }

@@ -25,8 +25,36 @@ class MediaCacheRepository(context: Context) {
     }
 
     fun thumbFile(canonicalPath: String): File {
-        val safe = canonicalPath.replace('/', '_').replace(':', '_')
+        val safe = safeFileName(canonicalPath)
         return File(thumbsDir, safe)
+    }
+
+    fun thumbStagingFile(canonicalPath: String): File {
+        return File(thumbsDir, safeFileName(canonicalPath) + ".new")
+    }
+
+    /** Substitui a miniatura só quando a nova já foi gravada (evita “buraco” na grade). */
+    fun commitThumbnail(stagingFile: File, canonicalPath: String): File? {
+        if (!stagingFile.isFile || stagingFile.length() <= 0L) {
+            stagingFile.delete()
+            return null
+        }
+        val dest = thumbFile(canonicalPath)
+        dest.parentFile?.mkdirs()
+        if (dest.exists() && !dest.delete()) {
+            stagingFile.inputStream().buffered().use { input ->
+                dest.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            stagingFile.delete()
+            return dest.takeIf { it.length() > 0L }
+        }
+        if (!stagingFile.renameTo(dest)) {
+            stagingFile.inputStream().buffered().use { input ->
+                dest.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            stagingFile.delete()
+        }
+        return dest.takeIf { it.isFile && it.length() > 0L }
     }
 
     fun hasOriginal(canonicalPath: String): Boolean = originalFile(canonicalPath).exists()
