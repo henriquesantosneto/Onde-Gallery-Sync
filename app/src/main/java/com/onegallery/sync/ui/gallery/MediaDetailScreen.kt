@@ -80,16 +80,16 @@ fun MediaDetailScreen(
     var activePageError by remember { mutableStateOf<String?>(null) }
 
     val bottomSheetState = rememberStandardBottomSheetState(
-        initialValue = SheetValue.PartiallyExpanded,
-        skipHiddenState = true,
+        initialValue = SheetValue.Hidden,
+        skipHiddenState = false,
     )
     val bottomSheetScaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = bottomSheetState,
         snackbarHostState = snackbarHostState,
     )
     val sheetScope = rememberCoroutineScope()
-    val detailsSheetExpanded by remember {
-        derivedStateOf { bottomSheetState.currentValue == SheetValue.Expanded }
+    val detailsSheetVisible by remember {
+        derivedStateOf { bottomSheetState.currentValue != SheetValue.Hidden }
     }
 
     ImmersiveSystemBarsEffect(immersive)
@@ -106,9 +106,24 @@ fun MediaDetailScreen(
         return
     }
 
+    val contextItems = remember(
+        liveItems,
+        state.albumFilter,
+        state.locationFilter,
+        initialCanonicalPath,
+    ) {
+        detailContextItems(
+            allItems = liveItems,
+            albumFilter = state.albumFilter,
+            locationFilter = state.locationFilter,
+            anchorPath = initialCanonicalPath,
+        )
+    }
+
     val frozenPaths = remember { mutableStateListOf<String>() }
-    LaunchedEffect(liveItems) {
-        val paths = liveItems.map { it.canonicalPath }
+    LaunchedEffect(contextItems, state.selectionMode) {
+        if (state.selectionMode) return@LaunchedEffect
+        val paths = contextItems.map { it.canonicalPath }
         if (frozenPaths.isEmpty()) {
             frozenPaths.addAll(paths)
             return@LaunchedEffect
@@ -123,7 +138,12 @@ fun MediaDetailScreen(
         }
     }
 
-    val pagerPaths = if (frozenPaths.isNotEmpty()) frozenPaths.toList() else liveItems.map { it.canonicalPath }
+    val pagerPaths = when {
+        state.selectionMode && state.selectedPaths.isNotEmpty() ->
+            state.selectedPaths.toList()
+        frozenPaths.isNotEmpty() -> frozenPaths.toList()
+        else -> contextItems.map { it.canonicalPath }
+    }
     val initialPage = pagerPaths.indexOf(initialCanonicalPath).coerceAtLeast(0)
     val pagerState = rememberPagerState(
         initialPage = initialPage.coerceIn(0, (pagerPaths.size - 1).coerceAtLeast(0)),
@@ -165,24 +185,30 @@ fun MediaDetailScreen(
         if (!embeddedDetailsSheet) return@LaunchedEffect
         showAdvancedDetails = false
         activePageError = null
-        if (bottomSheetState.currentValue == SheetValue.Expanded) {
-            bottomSheetState.partialExpand()
+        if (bottomSheetState.currentValue != SheetValue.Hidden) {
+            bottomSheetState.hide()
         }
     }
 
     LaunchedEffect(bottomSheetState.currentValue) {
-        if (bottomSheetState.currentValue != SheetValue.Expanded) {
+        if (bottomSheetState.currentValue == SheetValue.Hidden) {
             showAdvancedDetails = false
         }
     }
 
     LaunchedEffect(immersive, multiSelection) {
-        if (!embeddedDetailsSheet && bottomSheetState.currentValue != SheetValue.PartiallyExpanded) {
-            bottomSheetState.partialExpand()
+        if (!embeddedDetailsSheet && bottomSheetState.currentValue != SheetValue.Hidden) {
+            bottomSheetState.hide()
         }
     }
 
     val chromeVisible = !immersive
+
+    val filmstripItems = remember(pagerPaths, liveItems, contextItems) {
+        val pool = liveItems.ifEmpty { contextItems }
+        pagerPaths.mapNotNull { path -> pool.find { it.canonicalPath == path } }
+    }
+    val showFilmstrip = chromeVisible && !state.selectionMode && filmstripItems.size > 1
 
     val topBar: @Composable () -> Unit = {
         if (chromeVisible) {
@@ -262,7 +288,9 @@ fun MediaDetailScreen(
                             showDetails = detailPaths.isNotEmpty(),
                             onDetails = {
                                 if (embeddedDetailsSheet) {
-                                    sheetScope.launch { bottomSheetState.expand() }
+                                    sheetScope.launch {
+                                        bottomSheetState.expand()
+                                    }
                                 } else {
                                     showMediaDetailsModal = true
                                 }
@@ -277,60 +305,77 @@ fun MediaDetailScreen(
     }
 
     val pagerContent: @Composable (PaddingValues) -> Unit = { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(if (chromeVisible) padding else PaddingValues()),
         ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled,
-                key = { page -> pagerPaths[page] },
-            ) { page ->
-                val path = pagerPaths[page]
-                val live = liveItems.find { it.canonicalPath == path }
-                MediaDetailPage(
-                    canonicalPath = path,
-                    liveItem = live,
-                    isActivePage = page == pagerState.currentPage,
-                    syncCoordinator = syncCoordinator,
-                    mediaCacheRepository = mediaCacheRepository,
-                    immersive = immersive,
-                    onToggleImmersive = { immersive = !immersive },
-                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
-                    onActivePageError = { err ->
-                        if (page == pagerState.currentPage) {
-                            activePageError = err
-                        }
-                    },
+            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+                HorizontalPager(
+                    state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                )
-            }
-
-            if (immersive) {
-                IconButton(
-                    onClick = { immersive = false },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.45f)),
-                ) {
-                    Icon(
-                        Icons.Outlined.FullscreenExit,
-                        contentDescription = "Sair da tela cheia",
-                        tint = Color.White,
+                    userScrollEnabled = pagerScrollEnabled,
+                    key = { page -> pagerPaths[page] },
+                ) { page ->
+                    val path = pagerPaths[page]
+                    val live = liveItems.find { it.canonicalPath == path }
+                    MediaDetailPage(
+                        canonicalPath = path,
+                        liveItem = live,
+                        isActivePage = page == pagerState.currentPage,
+                        syncCoordinator = syncCoordinator,
+                        mediaCacheRepository = mediaCacheRepository,
+                        immersive = immersive,
+                        onToggleImmersive = { immersive = !immersive },
+                        onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
+                        onActivePageError = { err ->
+                            if (page == pagerState.currentPage) {
+                                activePageError = err
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
-                Text(
-                    "Deslize para a esquerda ou direita · pinça com dois dedos para zoom",
-                    color = Color.White.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
-                        .background(Color.Black.copy(alpha = 0.35f))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+
+                if (immersive) {
+                    IconButton(
+                        onClick = { immersive = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.45f)),
+                    ) {
+                        Icon(
+                            Icons.Outlined.FullscreenExit,
+                            contentDescription = "Sair da tela cheia",
+                            tint = Color.White,
+                        )
+                    }
+                    Text(
+                        "Deslize para a esquerda ou direita · pinça com dois dedos para zoom",
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 16.dp)
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+            }
+            if (showFilmstrip) {
+                MediaDetailFilmstrip(
+                    items = filmstripItems,
+                    currentCanonicalPath = currentPath,
+                    onSelectPath = { path ->
+                        val index = pagerPaths.indexOf(path)
+                        if (index >= 0) {
+                            sheetScope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
+                        }
+                    },
+                    syncCoordinator = syncCoordinator,
                 )
             }
         }
@@ -339,20 +384,26 @@ fun MediaDetailScreen(
     if (embeddedDetailsSheet) {
         BottomSheetScaffold(
             scaffoldState = bottomSheetScaffoldState,
-            sheetPeekHeight = 56.dp,
+            sheetPeekHeight = 0.dp,
             sheetContainerColor = Color(0xFF0D0D0D),
             sheetContentColor = Color.White,
-            sheetDragHandle = { BottomSheetDefaults.DragHandle() },
+            sheetDragHandle = {
+                if (detailsSheetVisible) {
+                    BottomSheetDefaults.DragHandle()
+                }
+            },
             sheetContent = {
-                MediaDetailSamsungSheet(
-                    info = detailInfo,
-                    loading = detailLoading,
-                    error = activePageError,
-                    showAdvanced = showAdvancedDetails,
-                    onToggleAdvanced = { showAdvancedDetails = !showAdvancedDetails },
-                    showExpandedContent = detailsSheetExpanded,
-                    contentOnDark = true,
-                )
+                if (detailsSheetVisible) {
+                    MediaDetailSamsungSheet(
+                        info = detailInfo,
+                        loading = detailLoading,
+                        error = activePageError,
+                        showAdvanced = showAdvancedDetails,
+                        onToggleAdvanced = { showAdvancedDetails = !showAdvancedDetails },
+                        showExpandedContent = true,
+                        contentOnDark = true,
+                    )
+                }
             },
             snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
             topBar = topBar,
