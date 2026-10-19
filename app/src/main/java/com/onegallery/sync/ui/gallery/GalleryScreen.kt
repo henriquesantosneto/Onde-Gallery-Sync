@@ -21,9 +21,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
@@ -439,7 +436,7 @@ private fun MediaThumbnail(
             )
         }
         if (item.showCloudBadge) {
-            CloudBadge(
+            GalleryCloudBadge(
                 state = cloudBadgeState(item),
                 iconSize = overlayIconSize,
                 modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
@@ -455,28 +452,3 @@ private fun MediaThumbnail(
     }
 }
 
-private fun cloudBadgeState(item: GalleryDisplayItem): CloudSyncState {
-    if (item.localReleasedForSpace && item.localUri == null && item.oneDriveItemId != null) {
-        return CloudSyncState.CLOUD_ONLY
-    }
-    return item.cloudState
-}
-
-@Composable
-private fun CloudBadge(
-    state: CloudSyncState,
-    iconSize: Dp,
-    modifier: Modifier = Modifier,
-) {
-    val icon = when (state) {
-        CloudSyncState.SYNCED -> Icons.Outlined.CloudDone
-        CloudSyncState.CLOUD_ONLY, CloudSyncState.PENDING_DOWNLOAD -> Icons.Outlined.CloudDownload
-        CloudSyncState.PENDING_UPLOAD -> Icons.Outlined.Cloud
-        else -> Icons.Outlined.Cloud
-    }
-    Icon(
-        icon,
-        contentDescription = state.name,
-        modifier = modifier.size(iconSize),
-    )
-}

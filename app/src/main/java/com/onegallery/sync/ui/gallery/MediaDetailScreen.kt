@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -364,7 +365,7 @@ private fun MediaDetailPage(
     }
 
     val display = item
-    val cloudLabel = liveItem?.cloudState?.name ?: display?.cloudState?.name
+    val statusItem = liveItem ?: display
 
     Box(
         modifier = modifier
@@ -386,17 +387,28 @@ private fun MediaDetailPage(
                         .fillMaxWidth()
                         .weight(1f)
                     val playback = display.playbackUri()
+                    val overlayItem = statusItem ?: display
                     when {
                         display.kind == MediaKind.VIDEO && playback != null -> {
-                            VideoPlayerView(
-                                uri = playback,
+                            MediaDetailMediaShell(
+                                item = overlayItem,
+                                recalling = loadingFull,
                                 modifier = mediaModifier,
-                                playWhenReady = true,
-                                onZoomActiveChanged = onZoomActiveChanged,
-                            )
+                            ) {
+                                VideoPlayerView(
+                                    uri = playback,
+                                    modifier = Modifier.fillMaxSize(),
+                                    playWhenReady = true,
+                                    onZoomActiveChanged = onZoomActiveChanged,
+                                )
+                            }
                         }
                         display.kind == MediaKind.VIDEO -> {
-                            Box(modifier = mediaModifier, contentAlignment = Alignment.Center) {
+                            MediaDetailMediaShell(
+                                item = overlayItem,
+                                recalling = loadingFull,
+                                modifier = mediaModifier,
+                            ) {
                                 ZoomableMediaContainer(
                                     resetKey = canonicalPath,
                                     modifier = Modifier.fillMaxSize(),
@@ -411,47 +423,47 @@ private fun MediaDetailPage(
                                         contentScale = ContentScale.Fit,
                                     )
                                 }
-                                if (loadingFull) {
-                                    CircularProgressIndicator()
-                                }
                             }
                         }
                         display.detailPreviewModel() != null -> {
-                            ZoomableImageContent(
-                                model = display.detailPreviewModel(),
-                                contentDescription = display.displayName,
+                            MediaDetailMediaShell(
+                                item = overlayItem,
+                                recalling = loadingFull,
                                 modifier = mediaModifier,
-                                contentScale = ContentScale.Fit,
-                                onZoomActiveChanged = onZoomActiveChanged,
-                                onSingleTap = onToggleImmersive,
-                            )
+                            ) {
+                                ZoomableImageContent(
+                                    model = display.detailPreviewModel(),
+                                    contentDescription = display.displayName,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit,
+                                    onZoomActiveChanged = onZoomActiveChanged,
+                                    onSingleTap = onToggleImmersive,
+                                )
+                            }
                         }
                         else -> {
-                            Box(
+                            MediaDetailMediaShell(
+                                item = overlayItem,
+                                recalling = loadingFull,
                                 modifier = mediaModifier,
-                                contentAlignment = Alignment.Center,
                             ) {
-                                Text("Recuperando da nuvem…")
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    MediaThumbnailImage(
+                                        item = display,
+                                        syncCoordinator = syncCoordinator,
+                                        contentDescription = display.displayName,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                }
                             }
                         }
                     }
 
                     if (showChrome) {
-                        Text(
-                            cloudLabel ?: "",
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(vertical = 6.dp),
-                        )
-                        if (loadingFull) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                CircularProgressIndicator(strokeWidth = 2.dp)
-                                Text("Recuperando da nuvem…")
-                            }
-                        }
                         if (error != null) {
                             Text(
                                 error ?: "",
@@ -467,6 +479,19 @@ private fun MediaDetailPage(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MediaDetailMediaShell(
+    item: GalleryDisplayItem,
+    recalling: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(modifier = modifier) {
+        content()
+        MediaDetailCloudOverlay(item = item, recalling = recalling)
     }
 }
 
