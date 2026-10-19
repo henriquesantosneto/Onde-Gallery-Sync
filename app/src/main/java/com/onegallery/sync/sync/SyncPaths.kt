@@ -5,12 +5,64 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 object SyncPaths {
+    /** Pastas conhecidas do WhatsApp (Android/media/.../Media/…). Ficam na raiz do espelho OneGallerySync. */
+    private val whatsAppMediaLeafFolders = listOf(
+        "WhatsApp Images",
+        "WhatsApp Video",
+        "WhatsApp Animated Gifs",
+        "WhatsApp Audio",
+        "WhatsApp Documents",
+        "WhatsApp Stickers",
+        "WhatsApp Profile Photos",
+        "WhatsApp Voice Notes",
+        "Private",
+        "Sent",
+    )
+
     fun canonicalFromLocal(item: LocalMediaItem): String {
-        val rel = item.relativePath
+        return syncRelativePath(item.relativePath, item.displayName)
+    }
+
+    /**
+     * Caminho lógico de sync (e álbum) encurtado: WhatsApp deixa de usar
+     * `Android/media/com.whatsapp/WhatsApp/Media/…` e vira `WhatsApp Images/…` na raiz.
+     */
+    fun syncRelativePath(relativePath: String?, displayName: String): String {
+        val rel = relativePath
             ?.trim('/')
             ?.replace('\\', '/')
             .orEmpty()
-        return if (rel.isEmpty()) item.displayName else "$rel/${item.displayName}"
+        val raw = if (rel.isEmpty()) displayName else "$rel/$displayName"
+        return shortenWhatsAppPath(raw)
+    }
+
+    internal fun shortenWhatsAppPath(fullPath: String): String {
+        val normalized = fullPath.trim('/').replace('\\', '/')
+        if (!normalized.contains("whatsapp", ignoreCase = true)) {
+            return normalized
+        }
+        val segments = normalized.split('/').filter { it.isNotBlank() }
+        if (segments.isEmpty()) return normalized
+        val fileName = segments.last()
+
+        whatsAppMediaLeafFolders.firstOrNull { leaf ->
+            segments.any { it.equals(leaf, ignoreCase = true) }
+        }?.let { leaf ->
+            return "$leaf/$fileName"
+        }
+
+        val whatsAppIndex = segments.indexOfLast { it.equals("WhatsApp", ignoreCase = true) }
+        if (whatsAppIndex >= 0 && whatsAppIndex < segments.lastIndex) {
+            val tail = segments.drop(whatsAppIndex)
+            return if (tail.size <= 2) {
+                tail.joinToString("/")
+            } else {
+                // Ex.: Pictures/WhatsApp/Sent → WhatsApp/Sent/arquivo
+                tail.joinToString("/")
+            }
+        }
+
+        return normalized
     }
 
     fun drivePathFromCanonical(canonicalPath: String, baseFolderPath: String = SyncPolicy.ONEDRIVE_MIRROR_ROOT): String {

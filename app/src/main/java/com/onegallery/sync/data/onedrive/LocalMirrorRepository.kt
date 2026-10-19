@@ -2,6 +2,7 @@ package com.onegallery.sync.data.onedrive
 
 import android.content.Context
 import android.os.Environment
+import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import java.io.File
 
@@ -64,7 +65,9 @@ class LocalMirrorRepository(private val context: Context) {
             if (child.isDirectory) {
                 listRecursive(root, child, out)
             } else if (child.isFile) {
-                val canonical = root.toURI().relativize(child.toURI()).path.trim('/')
+                val canonical = SyncPaths.shortenWhatsAppPath(
+                    root.toURI().relativize(child.toURI()).path.trim('/'),
+                )
                 out.add(
                     RemoteDriveFile(
                         itemId = child.absolutePath,

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
+import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import java.io.File
 
@@ -47,7 +48,7 @@ class SaOneDriveRepository(
                     RemoteDriveFile(
                         itemId = doc.uri.toString(),
                         name = doc.name.orEmpty(),
-                        canonicalPath = path,
+                        canonicalPath = SyncPaths.shortenWhatsAppPath(path),
                         modifiedAtEpoch = doc.lastModified()?.div(1000L),
                         sizeBytes = doc.length(),
                     ),

@@ -426,8 +426,16 @@ class SyncCoordinator(
                 }
                 val canonical = SyncPaths.canonicalFromLocal(item)
                 seenPaths.add(canonical)
-                val existing = syncMetadataDao.getByCanonicalPath(canonical)
+                val existingByPath = syncMetadataDao.getByCanonicalPath(canonical)
+                val existingByLocal = syncMetadataDao.getByLocalId(item.id)
+                val existing = existingByPath ?: existingByLocal
+                if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
+                    seenPaths.add(existingByLocal.canonicalPath)
+                }
                 syncMetadataDao.upsert(mergeLocalIntoEntity(item, canonical, existing))
+                if (existingByLocal != null && existingByLocal.canonicalPath != canonical) {
+                    syncMetadataDao.deleteByCanonicalPath(existingByLocal.canonicalPath)
+                }
             }
             ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)

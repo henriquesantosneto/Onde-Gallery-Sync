@@ -335,7 +335,7 @@ class OneDriveRepository(
                             RemoteDriveFile(
                                 itemId = item.id,
                                 name = item.name,
-                                canonicalPath = childPrefix,
+                                canonicalPath = SyncPaths.shortenWhatsAppPath(childPrefix),
                                 modifiedAtEpoch = parseGraphTime(item.lastModifiedDateTime),
                                 sizeBytes = item.size,
                             ),
