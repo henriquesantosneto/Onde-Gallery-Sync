@@ -1,12 +1,12 @@
-OneGallery Sync — APK 0.8.44 (versionCode 100)
+OneGallery Sync — APK 0.8.45 (versionCode 101)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.44-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.45-debug/OneGallerySync-debug.apk
 
 Novidades nesta versão:
-- Mapa: botão Minha localização não crasha mais (centraliza câmera sem LocationComponent)
-- v0.8.43: sync sem baixar original da nuvem (só miniatura até abrir a mídia)
+- Indexação local mais rápida (SQLite em lote, GPS do MediaStore, backfill pesado só no sync)
+- v0.8.44: mapa Minha localização sem crash
 
 Hash Azure (Assinatura): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
