@@ -1038,6 +1038,11 @@ class SyncCoordinator(
 
     /** Baixa da nuvem (se preciso) e restaura na galeria do Android. */
     suspend fun recallOriginalToDevice(canonicalPath: String): Result<File> {
+        if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+            withContext(Dispatchers.Main.immediate) {
+                oneDriveRepository.ensureGraphSession()
+            }.getOrElse { return Result.failure(it) }
+        }
         return withContext(Dispatchers.IO) {
             val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
             mutex.withLock {
@@ -1067,10 +1072,6 @@ class SyncCoordinator(
         val itemId = row.oneDriveItemId
             ?: return Result.failure(IllegalStateException("Sem referência OneDrive"))
 
-        if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
-            oneDriveRepository.ensureGraphSession().getOrElse { return Result.failure(it) }
-        }
-
         val cachedOnDisk = row.cachedFilePath
             ?.let { path -> File(path).takeIf { it.isFile && it.length() > 0L } }
         val sourceFile = if (cachedOnDisk != null) {
@@ -1080,27 +1081,17 @@ class SyncCoordinator(
                 return Result.failure(IllegalStateException("Offline — conecte-se para baixar o original"))
             }
             val target = mediaCacheRepository.originalFile(canonicalPath)
-            setActiveSyncItem(
-                ActiveSyncItem(
-                    canonicalPath = row.canonicalPath,
-                    displayName = row.displayName,
-                    operationLabel = "Recuperando da nuvem…",
-                ),
-            )
-            try {
-                downloadRemoteFile(
-                    remoteId = itemId,
-                    target = target,
-                    canonicalPath = row.canonicalPath,
-                    displayName = row.displayName,
-                    operationLabel = "Recuperando da nuvem…",
-                    honorSyncCancel = false,
-                ).getOrElse { error ->
-                    propagateCancellation(error)
-                    return Result.failure(error)
-                }
-            } finally {
-                setActiveSyncItem(null)
+            downloadRemoteFile(
+                remoteId = itemId,
+                target = target,
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                operationLabel = "Recuperando da nuvem…",
+                honorSyncCancel = false,
+                updateSyncUi = false,
+            ).getOrElse { error ->
+                propagateCancellation(error)
+                return Result.failure(error)
             }
             if (!target.isFile || target.length() <= 0L) {
                 return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
@@ -1128,7 +1119,6 @@ class SyncCoordinator(
         row: SyncMetadataEntity,
         sourceFile: File,
     ): Result<File> {
-        val location = mediaLocationResolver.resolveFromFile(sourceFile)
         val kind = if (GalleryMapper.isVideoFileName(row.displayName)) {
             com.onegallery.sync.data.local.MediaKind.VIDEO
         } else {
@@ -1136,9 +1126,6 @@ class SyncCoordinator(
         }
         var updated = row.copy(
             cachedFilePath = sourceFile.absolutePath,
-            locationLabel = location?.label ?: row.locationLabel,
-            latitude = location?.latitude ?: row.latitude,
-            longitude = location?.longitude ?: row.longitude,
             lastError = null,
         )
         if (!hasLocalOriginalOnDevice(updated)) {
@@ -2241,9 +2228,10 @@ class SyncCoordinator(
         displayName: String,
         operationLabel: String,
         honorSyncCancel: Boolean = true,
+        updateSyncUi: Boolean = true,
     ): Result<Unit> {
         val onProgress: ((Long, Long?) -> Unit)? =
-            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+            if (updateSyncUi && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
                 val job = coroutineContext[Job]
                 { done, total ->
                     if (honorSyncCancel && shouldCancelActiveSyncTransfer(job)) {

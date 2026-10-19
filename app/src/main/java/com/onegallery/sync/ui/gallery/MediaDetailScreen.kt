@@ -49,7 +49,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -301,15 +302,19 @@ private fun MediaDetailPage(
 
     suspend fun loadFullOriginalForViewing() {
         if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
-        loadingFull = true
-        error = null
-        syncCoordinator.recallOriginalToDevice(canonicalPath)
-            .onSuccess {
-                syncCoordinator.ensureThumbnailCached(canonicalPath)
-                refreshDisplayItem()
-            }
-            .onFailure { err -> error = err.message }
-        loadingFull = false
+        withContext(Dispatchers.Main.immediate) {
+            loadingFull = true
+            error = null
+        }
+        val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
+        result.onSuccess {
+            syncCoordinator.ensureThumbnailCached(canonicalPath)
+            refreshDisplayItem()
+        }
+        withContext(Dispatchers.Main.immediate) {
+            result.onFailure { err -> error = err.message }
+            loadingFull = false
+        }
     }
 
     LaunchedEffect(canonicalPath) {

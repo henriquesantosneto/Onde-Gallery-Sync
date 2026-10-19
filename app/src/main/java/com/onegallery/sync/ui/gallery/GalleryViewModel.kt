@@ -382,19 +382,15 @@ class GalleryViewModel(
         }
     }
 
-    /** Inicia recall (original da nuvem) ao abrir a foto — idempotente com a tela de detalhe. */
+    /** Prefetch opcional ao tocar na grade; a tela de detalhe faz o recall completo. */
     fun recallOriginalWhenOpening(canonicalPath: String) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return@withContext
-                syncCoordinator.recallOriginalToDevice(canonicalPath)
-                    .onSuccess { syncCoordinator.ensureThumbnailCached(canonicalPath) }
-                    .onFailure { err ->
-                        if (err.message != null) {
-                            actionMessage.value = err.message
-                        }
-                    }
-            }
+            if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return@launch
+            syncCoordinator.recallOriginalToDevice(canonicalPath)
+                .onSuccess { syncCoordinator.ensureThumbnailCached(canonicalPath) }
+                .onFailure { err ->
+                    err.message?.let { msg -> actionMessage.value = msg }
+                }
         }
     }
 }
