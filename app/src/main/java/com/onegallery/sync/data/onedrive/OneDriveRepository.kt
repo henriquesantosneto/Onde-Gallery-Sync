@@ -18,6 +18,10 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.io.File
 import java.io.InputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -216,6 +220,53 @@ class OneDriveRepository(
         }
     }
 
+    /** Download direto (stream único) — mais estável para recall / visualização sob demanda. */
+    suspend fun downloadItemContentToFile(itemId: String, destination: File): Result<Unit> {
+        return runWithToken { token ->
+            val auth = "Bearer $token"
+            val temp = File(destination.absolutePath + ".recall.part")
+            temp.parentFile?.mkdirs()
+            try {
+                graphApi.downloadItemContent(auth, itemId).use { body ->
+                    temp.outputStream().buffered().use { out ->
+                        body.byteStream().buffered().use { input ->
+                            val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val read = input.read(buffer)
+                                if (read <= 0) break
+                                out.write(buffer, 0, read)
+                            }
+                        }
+                    }
+                }
+                if (!temp.isFile || temp.length() <= 0L) {
+                    error("Download da nuvem veio vazio.")
+                }
+                if (destination.exists()) destination.delete()
+                if (!temp.renameTo(destination)) {
+                    temp.inputStream().buffered().use { input ->
+                        destination.outputStream().buffered().use { output ->
+                            val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val read = input.read(buffer)
+                                if (read <= 0) break
+                                output.write(buffer, 0, read)
+                            }
+                        }
+                    }
+                    temp.delete()
+                }
+                File(destination.absolutePath + ".part").delete()
+                File(destination.absolutePath + ".part.meta").delete()
+            } catch (t: Throwable) {
+                temp.delete()
+                throw t
+            }
+        }
+    }
+
     suspend fun downloadThumbnailToFile(itemId: String, destination: File): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()
@@ -297,6 +348,7 @@ class OneDriveRepository(
 
     private companion object {
         const val EXIF_PROBE_BYTES = 512 * 1024L
+        const val STREAM_BUFFER_BYTES = 64 * 1024
     }
 
     suspend fun deleteRemoteItem(itemId: String): Result<Unit> {
@@ -351,7 +403,9 @@ class OneDriveRepository(
     }
 
     private suspend fun <T> runWithToken(block: suspend (String) -> T): Result<T> {
-        return runWithTokenInternal(block, allowRetryAfter401 = true)
+        return withContext(Dispatchers.IO) {
+            runWithTokenInternal(block, allowRetryAfter401 = true)
+        }
     }
 
     private suspend fun <T> runWithTokenInternal(

@@ -207,6 +207,7 @@ fun MediaDetailScreen(
                 MediaDetailPage(
                     canonicalPath = path,
                     liveItem = live,
+                    isActivePage = page == pagerState.currentPage,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     viewModel = viewModel,
@@ -279,6 +280,7 @@ fun MediaDetailScreen(
 private fun MediaDetailPage(
     canonicalPath: String,
     liveItem: GalleryDisplayItem?,
+    isActivePage: Boolean,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     viewModel: GalleryViewModel,
@@ -320,14 +322,35 @@ private fun MediaDetailPage(
     }
 
     LaunchedEffect(canonicalPath) {
-        if (item == null) loading = true
-        error = null
-        refreshDisplayItem()
-        syncCoordinator.ensureThumbnailCached(canonicalPath)
-        refreshDisplayItem()
-        loading = false
-        if (syncCoordinator.needsOriginalRecall(canonicalPath)) {
-            loadFullOriginalForViewing()
+        try {
+            if (item == null) loading = true
+            error = null
+            refreshDisplayItem()
+            syncCoordinator.ensureThumbnailCached(canonicalPath)
+            refreshDisplayItem()
+            loading = false
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            error = failure.message ?: failure.javaClass.simpleName
+            loading = false
+            loadingFull = false
+        }
+    }
+
+    LaunchedEffect(canonicalPath, isActivePage) {
+        if (!isActivePage) return@LaunchedEffect
+        try {
+            if (syncCoordinator.needsOriginalRecall(canonicalPath)) {
+                loadFullOriginalForViewing()
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            withContext(Dispatchers.Main.immediate) {
+                error = failure.message ?: failure.javaClass.simpleName
+                loadingFull = false
+            }
         }
     }
 

@@ -1055,7 +1055,13 @@ class SyncCoordinator(
         return withContext(Dispatchers.IO) {
             val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
             mutex.withLock {
-                downloadOriginalOnDemandLocked(canonicalPath)
+                try {
+                    downloadOriginalOnDemandLocked(canonicalPath)
+                } catch (cancelled: CancellationException) {
+                    Result.failure(IllegalStateException("Recuperação cancelada."))
+                } catch (unexpected: Throwable) {
+                    Result.failure(unexpected)
+                }
             }
         }
     }
@@ -1098,17 +1104,26 @@ class SyncCoordinator(
                 operationLabel = "Recuperando da nuvem…",
                 honorSyncCancel = false,
                 updateSyncUi = false,
+                useSimpleStreamDownload = true,
             ).getOrElse { error ->
-                propagateCancellation(error)
-                return Result.failure(error)
+                return Result.failure(
+                    error.takeUnless { it is CancellationException }
+                        ?: IllegalStateException("Download cancelado."),
+                )
             }
             if (!target.isFile || target.length() <= 0L) {
                 return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
             }
+            syncMetadataDao.upsert(
+                row.copy(cachedFilePath = target.absolutePath, lastError = null),
+            )
             target
         }
 
-        return restoreRecalledOriginalToDevice(row, sourceFile)
+        return restoreRecalledOriginalToDevice(
+            syncMetadataDao.getByCanonicalPath(canonicalPath) ?: row,
+            sourceFile,
+        )
     }
 
     private fun hasLocalOriginalOnDevice(row: SyncMetadataEntity): Boolean {
@@ -1144,8 +1159,10 @@ class SyncCoordinator(
                 kind = kind,
                 sourceFile = sourceFile,
             ).getOrElse { error ->
-                propagateCancellation(error)
-                return Result.failure(error)
+                return Result.failure(
+                    error.takeUnless { it is CancellationException }
+                        ?: IllegalStateException("Importação cancelada."),
+                )
             }
             updated = updated.copy(
                 localMediaId = imported.id,
@@ -2238,6 +2255,7 @@ class SyncCoordinator(
         operationLabel: String,
         honorSyncCancel: Boolean = true,
         updateSyncUi: Boolean = true,
+        useSimpleStreamDownload: Boolean = false,
     ): Result<Unit> {
         val onProgress: ((Long, Long?) -> Unit)? =
             if (updateSyncUi && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
@@ -2263,7 +2281,11 @@ class SyncCoordinator(
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.downloadToFile(remoteId, target)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.downloadToFile(remoteId, target)
-            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.downloadToFile(remoteId, target, onProgress)
+            SyncMode.ONEDRIVE_GRAPH -> if (useSimpleStreamDownload) {
+                oneDriveRepository.downloadItemContentToFile(remoteId, target)
+            } else {
+                oneDriveRepository.downloadToFile(remoteId, target, onProgress)
+            }
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
         }
     }

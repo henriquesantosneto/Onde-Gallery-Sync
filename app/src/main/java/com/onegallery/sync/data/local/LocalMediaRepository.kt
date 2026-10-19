@@ -124,12 +124,14 @@ class LocalMediaRepository(private val context: Context) {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
-        val uri = context.contentResolver.insert(collection, values)
-            ?: return Result.failure(IllegalStateException("Não foi possível criar entrada na galeria."))
+        var insertedUri: Uri? = null
         return runCatching {
+            val uri = context.contentResolver.insert(collection, values)
+                ?: throw IllegalStateException("Não foi possível criar entrada na galeria.")
+            insertedUri = uri
             context.contentResolver.openOutputStream(uri, "w")?.use { output ->
                 sourceFile.inputStream().use { input -> input.copyTo(output) }
-            } ?: error("Não foi possível gravar na galeria.")
+            } ?: throw IllegalStateException("Não foi possível gravar na galeria.")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val done = ContentValues().apply {
                     put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -152,7 +154,9 @@ class LocalMediaRepository(private val context: Context) {
                 mimeType = mime,
             )
         }.onFailure {
-            runCatching { context.contentResolver.delete(uri, null, null) }
+            insertedUri?.let { pending ->
+                runCatching { context.contentResolver.delete(pending, null, null) }
+            }
         }
     }
 

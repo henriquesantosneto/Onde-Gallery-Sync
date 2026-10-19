@@ -27,10 +27,16 @@ fun ZoomableImageContent(
     ) {
         if (model != null) {
             val context = LocalContext.current
-            val request = remember(model) {
+            val decodeMaxPx = remember(context) {
+                val m = context.resources.displayMetrics
+                (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
+            }
+            val request = remember(model, decodeMaxPx) {
                 ImageRequest.Builder(context)
                     .data(model)
+                    .size(decodeMaxPx)
                     .crossfade(true)
+                    .allowHardware(false)
                     .build()
             }
             AsyncImage(
