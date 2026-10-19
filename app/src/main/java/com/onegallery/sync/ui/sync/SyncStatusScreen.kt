@@ -133,6 +133,7 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
+                        val activeItem = coordinatorState.activeItem
                         if (coordinatorState.isRunning) {
                             LinearProgressIndicator(
                                 modifier = Modifier
@@ -146,24 +147,20 @@ fun SyncStatusScreen(
                             ) {
                                 CircularProgressIndicator(strokeWidth = 2.dp)
                                 Text(
-                                    coordinatorState.activeItem?.operationLabel
-                                        ?: coordinatorState.activityHeadline.ifBlank {
-                                            when {
-                                                coordinatorState.lastMessage.contains(
-                                                    "Cancelando",
-                                                    ignoreCase = true,
-                                                ) -> "Cancelando…"
-                                                else ->
-                                                    coordinatorState.progressPhase.runningHeadlineFallback()
-                                            }
-                                        },
+                                    when {
+                                        activeItem != null -> activeItem.operationLabel
+                                        coordinatorState.lastMessage.contains(
+                                            "Cancelando",
+                                            ignoreCase = true,
+                                        ) -> "Cancelando…"
+                                        else -> "Em andamento…"
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                             }
                         }
                         val queueCap = if (coordinatorState.isRunning) 10 else 8
                         val queueInStatus = queueForUi.take(queueCap)
-                        val activeItem = coordinatorState.activeItem
                         val activeMissingFromList = coordinatorState.isRunning &&
                             activeItem != null &&
                             queueInStatus.none { it.canonicalPath == activeItem.canonicalPath }
@@ -192,30 +189,18 @@ fun SyncStatusScreen(
                                     )
                                 }
                             }
-                        } else if (coordinatorState.isRunning) {
+                        } else if (coordinatorState.isRunning && coordinatorState.activityDetail.isBlank()) {
                             val phaseHint = when (coordinatorState.progressPhase) {
-                                SyncProgressPhase.RECONCILING_LOCAL ->
-                                    "Comparando cada item local com a nuvem e gerando miniaturas quando necessário."
-                                SyncProgressPhase.REGISTERING_CLOUD_ONLY ->
-                                    "Incluindo no índice arquivos que existem só no OneDrive."
                                 SyncProgressPhase.LISTING_REMOTE ->
-                                    "Varrendo subpastas via Microsoft Graph (pode levar vários minutos)."
-                                SyncProgressPhase.BACKFILL_GPS,
-                                SyncProgressPhase.BACKFILL_CAPTURE_DATE,
-                                ->
-                                    "Metadados extras para mapa e ordenação; há limite por passagem na nuvem."
-                                SyncProgressPhase.PREFETCH_THUMBNAILS ->
-                                    "Grava previews no aparelho — não baixa fotos/vídeos completos."
+                                    "Varrendo todas as subpastas no OneDrive (pode levar vários minutos). " +
+                                        "Não mostramos subpasta a subpasta — só a pasta raiz de sync acima."
                                 SyncProgressPhase.SANITIZING_INDEX ->
                                     "Última checagem de entradas duplicadas ou órfãs."
-                                else ->
-                                    coordinatorState.activityDetail.ifBlank {
-                                        "Aguarde — etapa em andamento."
-                                    }
+                                else -> null
                             }
-                            if (phaseHint.isNotBlank()) {
+                            phaseHint?.let { hint ->
                                 Text(
-                                    phaseHint,
+                                    hint,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 12.dp),
