@@ -295,6 +295,9 @@ fun PlacesMapScreen(
                     .aspectRatio(1.2f)
                     .clickable {
                         selectedPin = null
+                        if (item.needsCloudOriginalRecall()) {
+                            viewModel.recallOriginalWhenOpening(item.canonicalPath)
+                        }
                         val encoded = URLEncoder.encode(
                             item.canonicalPath,
                             StandardCharsets.UTF_8.name(),

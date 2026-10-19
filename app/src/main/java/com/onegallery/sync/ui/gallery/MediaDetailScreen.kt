@@ -305,9 +305,7 @@ private fun MediaDetailPage(
 
     suspend fun loadFullOriginalForViewing() {
         val current = item ?: return
-        val hasLocalOriginal = current.localUri != null &&
-            current.cloudState != CloudSyncState.PENDING_DOWNLOAD
-        if (hasLocalOriginal || current.cachedOriginal?.exists() == true) return
+        if (!current.needsCloudOriginalRecall()) return
         loadingFull = true
         error = null
         syncCoordinator.downloadOriginalOnDemand(canonicalPath)
@@ -326,6 +324,9 @@ private fun MediaDetailPage(
         syncCoordinator.ensureThumbnailCached(canonicalPath)
         refreshDisplayItem()
         loading = false
+        if (item?.needsCloudOriginalRecall() == true) {
+            loadFullOriginalForViewing()
+        }
     }
 
     val display = item
@@ -396,7 +397,7 @@ private fun MediaDetailPage(
                                 modifier = mediaModifier,
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("Original na nuvem — use o botão abaixo para baixar.")
+                                Text("Recuperando da nuvem…")
                             }
                         }
                     }
@@ -410,18 +411,28 @@ private fun MediaDetailPage(
                         if (error != null) {
                             Text(error ?: "", color = MaterialTheme.colorScheme.error)
                         }
-                        if (display.localUri == null && display.cachedOriginal == null) {
-                            Button(
-                                onClick = { scope.launch { loadFullOriginalForViewing() } },
-                                enabled = !loadingFull,
-                            ) {
-                                Text(
-                                    if (display.kind == MediaKind.VIDEO) {
-                                        "Reproduzir (carregar da nuvem)"
-                                    } else {
-                                        "Visualizar em tamanho real"
-                                    },
-                                )
+                        if (display.needsCloudOriginalRecall()) {
+                            if (loadingFull) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CircularProgressIndicator(strokeWidth = 2.dp)
+                                    Text("Recuperando da nuvem…")
+                                }
+                            } else {
+                                Button(
+                                    onClick = { scope.launch { loadFullOriginalForViewing() } },
+                                ) {
+                                    Text(
+                                        if (display.kind == MediaKind.VIDEO) {
+                                            "Tentar reproduzir de novo"
+                                        } else {
+                                            "Recuperar da nuvem"
+                                        },
+                                    )
+                                }
                             }
                         }
                         RowWithActions(

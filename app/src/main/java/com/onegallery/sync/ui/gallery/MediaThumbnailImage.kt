@@ -37,7 +37,10 @@ fun GalleryDisplayItem.playbackUri(): android.net.Uri? {
     return null
 }
 
-fun GalleryDisplayItem.detailPreviewModel(): Any? = thumbnailModel
+fun GalleryDisplayItem.detailPreviewModel(): Any? {
+    cachedOriginal?.takeIf { it.exists() }?.let { return it }
+    return thumbnailModel
+}
 
 fun GalleryDisplayItem.withCachedThumb(file: File): GalleryDisplayItem =
     copy(cachedPlaceholderThumb = file)

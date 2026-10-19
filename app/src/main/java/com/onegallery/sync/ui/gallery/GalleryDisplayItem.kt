@@ -41,4 +41,13 @@ data class GalleryDisplayItem(
 
     val showSyncedBadge: Boolean
         get() = cloudState == CloudSyncState.SYNCED
+
+    /** Original completo ainda não está no aparelho (só miniatura / placeholder). */
+    fun needsCloudOriginalRecall(): Boolean {
+        val hasLocalOriginal = localUri != null &&
+            cloudState != CloudSyncState.PENDING_DOWNLOAD
+        if (hasLocalOriginal) return false
+        if (cachedOriginal?.exists() == true) return false
+        return oneDriveItemId != null
+    }
 }

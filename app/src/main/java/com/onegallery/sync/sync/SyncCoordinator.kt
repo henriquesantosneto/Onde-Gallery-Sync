@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -140,6 +141,7 @@ class SyncCoordinator(
     /** Cache da passagem atual de indexação (evita re-varrer MediaStore no backfill). */
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
     private val longTaskMutex = Mutex()
+    private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
 
     private fun setSyncProgress(
@@ -1000,6 +1002,13 @@ class SyncCoordinator(
     }
 
     suspend fun downloadOriginalOnDemand(canonicalPath: String): Result<File> {
+        val mutex = onDemandOriginalMutexes.getOrPut(canonicalPath) { Mutex() }
+        return mutex.withLock {
+            downloadOriginalOnDemandLocked(canonicalPath)
+        }
+    }
+
+    private suspend fun downloadOriginalOnDemandLocked(canonicalPath: String): Result<File> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
 
@@ -1025,7 +1034,7 @@ class SyncCoordinator(
             ActiveSyncItem(
                 canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
-                operationLabel = "Baixando da nuvem…",
+                operationLabel = "Recuperando da nuvem…",
             ),
         )
         return try {
@@ -1034,7 +1043,7 @@ class SyncCoordinator(
                 target = target,
                 canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
-                operationLabel = "Baixando da nuvem…",
+                operationLabel = "Recuperando da nuvem…",
             ).map {
                 val location = mediaLocationResolver.resolveFromFile(target)
                 syncMetadataDao.upsert(
