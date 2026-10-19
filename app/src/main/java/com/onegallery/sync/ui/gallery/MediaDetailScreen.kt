@@ -1,9 +1,8 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,7 +25,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,8 +62,8 @@ fun MediaDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
     var showDetailsSheet by remember { mutableStateOf(false) }
-    /** true = foto em tela cheia (padrão); false = barra superior e gestos de detalhe (toque na imagem). */
-    var immersive by remember { mutableStateOf(true) }
+    /** true = oculta barras e carrossel (toque na foto alterna). */
+    var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -72,11 +71,10 @@ fun MediaDetailScreen(
 
     val pagerScope = rememberCoroutineScope()
 
-    ImmersiveSystemBarsEffect(immersive)
-
-    LaunchedEffect(state.selectionMode) {
-        if (state.selectionMode) immersive = false
-    }
+    ImmersiveSystemBarsEffect(
+        immersive = immersive,
+        edgeToEdgeWithVisibleBars = !immersive,
+    )
 
     LaunchedEffect(state.actionMessage) {
         state.actionMessage?.let { msg ->
@@ -162,127 +160,67 @@ fun MediaDetailScreen(
         val pool = liveItems.ifEmpty { contextItems }
         pagerPaths.mapNotNull { path -> pool.find { it.canonicalPath == path } }
     }
-    val showFilmstrip = !state.selectionMode && filmstripItems.size > 1
+    val showFilmstrip = chromeVisible && !state.selectionMode && filmstripItems.size > 1
 
-    val topBar: @Composable () -> Unit = {
-        if (chromeVisible) {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            when {
-                                state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
-                                else -> currentItem?.displayName ?: "Mídia"
-                            },
-                            maxLines = 1,
-                        )
-                        if (!state.selectionMode) {
-                            Text(
-                                "${pagerState.currentPage + 1} / ${pagerPaths.size}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
-                    }
-                },
-                actions = {
-                    if (!state.selectionMode && currentItem != null) {
-                        IconButton(onClick = { immersive = true }) {
-                            Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
-                        }
-                    }
-                    if (state.selectionMode) {
-                        IconButton(onClick = { showMoveDialog = true }) {
-                            Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
-                        }
-                        if (state.selectedPaths.isNotEmpty()) {
-                            MediaGalleryOverflowMenuButton(
-                                expanded = showOverflowMenu,
-                                onExpandedChange = { showOverflowMenu = it },
-                                showDetails = detailPaths.isNotEmpty(),
-                                onDetails = { openDetailsSheet() },
-                                onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
-                                onDelete = { showDeleteConfirm = true },
-                                deleteLabel = "Excluir tudo",
-                            )
-                        }
-                        TextButton(onClick = { viewModel.clearSelection() }) {
-                            Text("Cancelar")
-                        }
-                    } else if (currentPath != null) {
-                        IconButton(onClick = { viewModel.toggleSelection(currentPath) }) {
-                            Icon(
-                                if (currentSelected) Icons.Outlined.CheckCircle
-                                else Icons.Outlined.RadioButtonUnchecked,
-                                contentDescription = "Selecionar",
-                            )
-                        }
-                        MediaGalleryOverflowMenuButton(
-                            expanded = showOverflowMenu,
-                            onExpandedChange = { showOverflowMenu = it },
-                            showDetails = detailPaths.isNotEmpty(),
-                            onDetails = { openDetailsSheet() },
-                            onFreeSpace = { viewModel.releaseSingle(currentPath) },
-                            onDelete = { showDeleteConfirm = true },
-                        )
-                    }
-                },
-            )
-        }
+    val barTitle = when {
+        state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+        else -> currentItem?.displayName ?: "Mídia"
+    }
+    val barSubtitle = if (!state.selectionMode && pagerPaths.size > 1) {
+        "${pagerState.currentPage + 1} / ${pagerPaths.size}"
+    } else {
+        null
     }
 
-    val pagerContent: @Composable (PaddingValues) -> Unit = { padding ->
-        Column(
+    Scaffold(
+        contentWindowInsets = ZeroScaffoldContentInsets,
+        containerColor = Color.Black,
+        snackbarHost = {
+            if (chromeVisible) {
+                SnackbarHost(snackbarHostState)
+            }
+        },
+    ) { _ ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .openDetailsOnSwipeUp(
                     enabled = swipeUpForDetails,
                     onSwipeUp = { openDetailsSheet() },
-                )
-                .padding(if (chromeVisible) padding else PaddingValues()),
+                ),
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize(),
-            ) {
-                HorizontalPager(
-                    state = pagerState,
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = pagerScrollEnabled,
+                key = { page -> pagerPaths[page] },
+            ) { page ->
+                val path = pagerPaths[page]
+                val live = liveItems.find { it.canonicalPath == path }
+                MediaDetailPage(
+                    canonicalPath = path,
+                    liveItem = live,
+                    isActivePage = page == pagerState.currentPage,
+                    syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    onToggleImmersive = { immersive = !immersive },
+                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
+                    onActivePageError = { err ->
+                        if (page == pagerState.currentPage) {
+                            activePageError = err
+                        }
+                    },
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = pagerScrollEnabled,
-                    key = { page -> pagerPaths[page] },
-                ) { page ->
-                    val path = pagerPaths[page]
-                    val live = liveItems.find { it.canonicalPath == path }
-                    MediaDetailPage(
-                        canonicalPath = path,
-                        liveItem = live,
-                        isActivePage = page == pagerState.currentPage,
-                        syncCoordinator = syncCoordinator,
-                        mediaCacheRepository = mediaCacheRepository,
-                        immersive = immersive,
-                        onToggleImmersive = { immersive = !immersive },
-                        onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
-                        onActivePageError = { err ->
-                            if (page == pagerState.currentPage) {
-                                activePageError = err
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-
+                )
             }
+
             if (showFilmstrip) {
                 MediaDetailFilmstrip(
                     items = filmstripItems,
                     currentCanonicalPath = currentPath,
-                    modifier = Modifier.navigationBarsPadding(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding(),
                     onSelectPath = { path ->
                         val index = pagerPaths.indexOf(path)
                         if (index >= 0) {
@@ -294,15 +232,78 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                 )
             }
-        }
-    }
 
-    Scaffold(
-        contentWindowInsets = ZeroScaffoldContentInsets,
-        snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
-        topBar = topBar,
-    ) { padding ->
-        pagerContent(padding)
+            if (chromeVisible) {
+                MediaDetailTransparentTopBar(
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    title = barTitle,
+                    subtitle = barSubtitle,
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
+                        }
+                    },
+                    actions = {
+                        if (!state.selectionMode && currentItem != null) {
+                            IconButton(onClick = { immersive = true }) {
+                                Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
+                            }
+                        }
+                        if (state.selectionMode) {
+                            IconButton(onClick = { showMoveDialog = true }) {
+                                Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
+                            }
+                            if (state.selectedPaths.isNotEmpty()) {
+                                MediaGalleryOverflowMenuButton(
+                                    expanded = showOverflowMenu,
+                                    onExpandedChange = { showOverflowMenu = it },
+                                    showDetails = detailPaths.isNotEmpty(),
+                                    onDetails = { openDetailsSheet() },
+                                    onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
+                                    onDelete = { showDeleteConfirm = true },
+                                    deleteLabel = "Excluir tudo",
+                                )
+                            }
+                            TextButton(onClick = { viewModel.clearSelection() }) {
+                                Text("Cancelar", color = Color.White)
+                            }
+                        } else if (currentPath != null) {
+                            IconButton(onClick = { viewModel.toggleSelection(currentPath) }) {
+                                Icon(
+                                    if (currentSelected) Icons.Outlined.CheckCircle
+                                    else Icons.Outlined.RadioButtonUnchecked,
+                                    contentDescription = "Selecionar",
+                                )
+                            }
+                            MediaGalleryOverflowMenuButton(
+                                expanded = showOverflowMenu,
+                                onExpandedChange = { showOverflowMenu = it },
+                                showDetails = detailPaths.isNotEmpty(),
+                                onDetails = { openDetailsSheet() },
+                                onFreeSpace = { viewModel.releaseSingle(currentPath) },
+                                onDelete = { showDeleteConfirm = true },
+                            )
+                        }
+                    },
+                )
+            }
+
+            if (immersive) {
+                IconButton(
+                    onClick = { immersive = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                ) {
+                    Icon(
+                        Icons.Outlined.FullscreenExit,
+                        contentDescription = "Mostrar barras",
+                        tint = Color.White,
+                    )
+                }
+            }
+        }
     }
 
     if (showDetailsSheet && detailPaths.isNotEmpty()) {
@@ -364,7 +365,6 @@ private fun MediaDetailPage(
     isActivePage: Boolean,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
-    immersive: Boolean,
     onToggleImmersive: () -> Unit,
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
@@ -451,10 +451,7 @@ private fun MediaDetailPage(
     val display = item
     val statusItem = liveItem ?: display
 
-    Box(
-        modifier = modifier
-            .padding(if (immersive) PaddingValues() else PaddingValues(horizontal = 4.dp)),
-    ) {
+    Box(modifier = modifier) {
         when {
             loading && display == null -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -529,9 +526,11 @@ private fun MediaDetailPage(
                                 recalling = loadingFull,
                                 modifier = mediaModifier,
                             ) {
-                                Box(
+                                ZoomableMediaContainer(
+                                    resetKey = canonicalPath,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center,
+                                    onZoomActiveChanged = onZoomActiveChanged,
+                                    onSingleTap = onToggleImmersive,
                                 ) {
                                     MediaThumbnailImage(
                                         item = display,
