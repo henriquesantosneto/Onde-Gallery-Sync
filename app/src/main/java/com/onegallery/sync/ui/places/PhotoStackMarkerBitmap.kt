@@ -2,7 +2,6 @@ package com.onegallery.sync.ui.places
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -28,6 +27,10 @@ object PhotoStackMarkerBitmap {
         items: List<GalleryDisplayItem>,
         syncCoordinator: SyncCoordinator,
     ): Bitmap = withContext(Dispatchers.Default) {
+        if (items.size == 1) {
+            val path = items.first().canonicalPath
+            MapMarkerBitmapCache.get(path)?.let { return@withContext it }
+        }
         val density = context.resources.displayMetrics.density
         val cardW = 52f * density
         val cardH = 52f * density
@@ -64,6 +67,9 @@ object PhotoStackMarkerBitmap {
                 top = 4f * density,
                 density = density,
             )
+        }
+        if (items.size == 1) {
+            MapMarkerBitmapCache.put(items.first().canonicalPath, output)
         }
         output
     }
@@ -103,7 +109,7 @@ object PhotoStackMarkerBitmap {
     private suspend fun decodeModel(context: Context, model: Any): Bitmap? {
         return when (model) {
             is Bitmap -> model
-            is java.io.File -> BitmapFactory.decodeFile(model.absolutePath)
+            is java.io.File -> ExifOrientedBitmap.decodeFile(model.absolutePath, maxEdgePx = 128)
             else -> {
                 val loader: ImageLoader = context.imageLoader
                 val request = ImageRequest.Builder(context)

@@ -37,8 +37,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -109,7 +109,8 @@ fun PlacesMapScreen(
         }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val pins = remember(state.geoItems) { buildPhotoMapPins(state.geoItems) }
+    val pinSignature = remember(state.geoItems) { buildPhotoMapPinSignature(state.geoItems) }
+    val pins = remember(pinSignature) { buildPhotoMapPins(state.geoItems) }
     var selectedPin by remember { mutableStateOf<PhotoMapPin?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
@@ -206,6 +207,7 @@ fun PlacesMapScreen(
                     PlacesMapView(
                         modifier = Modifier.fillMaxSize(),
                         pins = pins,
+                        pinSignature = pinSignature,
                         syncCoordinator = syncCoordinator,
                         deviceLocationGranted = deviceLocationGranted,
                         locateUserRequest = locateUserRequest,
@@ -336,6 +338,7 @@ private fun animateCameraToPhotoPins(map: MapLibreMap, pins: List<PhotoMapPin>) 
 @Composable
 private fun PlacesMapView(
     pins: List<PhotoMapPin>,
+    pinSignature: String,
     syncCoordinator: SyncCoordinator,
     deviceLocationGranted: Boolean,
     locateUserRequest: Int,
@@ -351,10 +354,9 @@ private fun PlacesMapView(
     }
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
-    val markers = remember { mutableStateListOf<Marker>() }
-    val markerToPin = remember { mutableStateMapOf<Marker, PhotoMapPin>() }
+    val markerByPath = remember { mutableStateMapOf<String, Pair<Marker, PhotoMapPin>>() }
     var mapInitialized by remember { mutableStateOf(false) }
-    var initialCameraApplied by remember { mutableStateOf(false) }
+    var initialCameraApplied by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -412,24 +414,24 @@ private fun PlacesMapView(
         }
     }
 
-    LaunchedEffect(pins, mapRef, styleReady, syncCoordinator) {
+    LaunchedEffect(pinSignature, mapRef, styleReady, syncCoordinator) {
         val map = mapRef ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         map.setOnMarkerClickListener { marker ->
-            markerToPin[marker]?.let { onPinSelected(it) }
+            markerByPath.values.firstOrNull { it.first == marker }?.second?.let { onPinSelected(it) }
             true
         }
-        markers.forEach { map.removeMarker(it) }
-        markers.clear()
-        markerToPin.clear()
-        val iconFactory = IconFactory.getInstance(context)
-        withContext(Dispatchers.IO) {
-            pins.forEach { pin ->
-                syncCoordinator.ensureThumbnailCached(pin.item.canonicalPath)
-            }
+        val pinByPath = pins.associateBy { it.item.canonicalPath }
+        val stalePaths = markerByPath.keys.filter { it !in pinByPath }
+        stalePaths.forEach { path ->
+            markerByPath[path]?.first?.let { map.removeMarker(it) }
+            markerByPath.remove(path)
         }
+        val iconFactory = IconFactory.getInstance(context)
+        val toAdd = pinByPath.filterKeys { it !in markerByPath }
+        if (toAdd.isEmpty()) return@LaunchedEffect
         val markerArt = withContext(Dispatchers.Default) {
-            pins.map { pin ->
+            toAdd.values.map { pin ->
                 val bitmap = PhotoStackMarkerBitmap.create(
                     context = context,
                     items = listOf(pin.item),
@@ -443,6 +445,8 @@ private fun PlacesMapView(
             }
         }
         markerArt.forEach { (pin, stackBitmap, title) ->
+            val path = pin.item.canonicalPath
+            if (path in markerByPath) return@forEach
             val added = map.addMarker(
                 org.maplibre.android.annotations.MarkerOptions()
                     .position(LatLng(pin.latitude, pin.longitude))
@@ -450,8 +454,7 @@ private fun PlacesMapView(
                     .snippet(pin.item.displayName)
                     .icon(iconFactory.fromBitmap(stackBitmap)),
             )
-            markers.add(added)
-            markerToPin[added] = pin
+            markerByPath[path] = added to pin
         }
     }
 
