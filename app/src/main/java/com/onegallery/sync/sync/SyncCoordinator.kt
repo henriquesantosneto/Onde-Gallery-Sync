@@ -585,6 +585,10 @@ class SyncCoordinator(
                         }
                     }
 
+                    val retryTransfers = applyPendingBidirectionalTransfers(remoteByPath)
+                    uploaded += retryTransfers.first
+                    downloaded += retryTransfers.second
+
                     remoteByPath.forEach { (path, remote) ->
                         ensureSyncMayContinue()
                         if (path in knownPaths) return@forEach
@@ -1252,13 +1256,60 @@ class SyncCoordinator(
         if (row.localMediaId == null) {
             return base.copy(cloudState = CloudSyncState.CLOUD_ONLY)
         }
+        val lastKnownRemote = row.remoteModifiedAt
+        val remoteChangedSinceSync = lastKnownRemote != null &&
+            remoteTs > lastKnownRemote + SYNC_TIMESTAMP_TOLERANCE_SEC
         val localNewerThanCloud = localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         val remoteNewerThanLocal = remoteTs > localTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         return when {
             localNewerThanCloud -> base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
-            remoteNewerThanLocal -> base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+            remoteNewerThanLocal || (remoteChangedSinceSync && !localNewerThanCloud) ->
+                base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
             else -> base.copy(cloudState = CloudSyncState.SYNCED)
         }
+    }
+
+    /** Reaplica fila pendente após o merge principal (ex.: falha de rede na mesma execução). */
+    private suspend fun applyPendingBidirectionalTransfers(
+        remoteByPath: Map<String, RemoteDriveFile>,
+    ): Pair<Int, Int> {
+        var uploaded = 0
+        var downloaded = 0
+        val pending = syncMetadataDao.getAll().filter { row ->
+            row.localMediaId != null &&
+                row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
+                (
+                    row.cloudState == CloudSyncState.PENDING_UPLOAD ||
+                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                    )
+        }
+        for (row in pending) {
+            ensureSyncMayContinue()
+            val remote = remoteByPath[row.canonicalPath]
+            when (row.cloudState) {
+                CloudSyncState.PENDING_UPLOAD ->
+                    uploaded += if (remote == null) uploadLocalRow(row) else {
+                        val merged = reconcileWithRemote(row, remote)
+                        syncMetadataDao.upsert(merged)
+                        if (merged.cloudState == CloudSyncState.PENDING_UPLOAD) {
+                            uploadLocalRow(merged)
+                        } else {
+                            0
+                        }
+                    }
+                CloudSyncState.PENDING_DOWNLOAD -> if (remote != null) {
+                    val merged = reconcileWithRemote(row, remote)
+                    syncMetadataDao.upsert(merged)
+                    if (merged.cloudState == CloudSyncState.PENDING_DOWNLOAD) {
+                        downloaded += downloadLocalRow(merged, remote)
+                    }
+                } else {
+                    Unit
+                }
+                else -> Unit
+            }
+        }
+        return uploaded to downloaded
     }
 
     private suspend fun reconcileMissingLocalItems(seenPaths: Set<String>) {
