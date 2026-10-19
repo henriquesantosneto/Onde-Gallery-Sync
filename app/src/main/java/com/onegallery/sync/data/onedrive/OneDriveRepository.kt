@@ -76,6 +76,8 @@ class OneDriveRepository(
         return authManager.accessTokenForGraph()
     }
 
+    suspend fun ensureGraphSession(): Result<Unit> = authManager.ensureGraphSession()
+
     fun syncRootLabel(): String? = graphFolderPreferences.displayLabel
 
     fun isSyncRootConfigured(): Boolean = graphFolderPreferences.isConfigured()

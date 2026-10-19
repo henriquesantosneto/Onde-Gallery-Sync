@@ -42,19 +42,12 @@ import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.sync.ActiveSyncItem
 import com.onegallery.sync.sync.SyncQueueDisplayRow
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import com.onegallery.sync.R
-import com.onegallery.sync.auth.MsalAuthManager
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncStatusScreen(
     syncCoordinator: SyncCoordinator,
     syncPreferences: SyncPreferences,
-    authManager: MsalAuthManager,
-    onMicrosoftSignIn: () -> Unit,
 ) {
-    val authState by authManager.state.collectAsStateWithLifecycle()
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
     val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
@@ -70,9 +63,6 @@ fun SyncStatusScreen(
         metadata.filter { syncCoordinator.shouldShowAttentionItem(it) }.take(25)
     }
     var clearingErrors by remember { mutableStateOf(false) }
-    val needsMicrosoftSignIn = syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH &&
-        !authState.isSignedIn &&
-        !authState.isCheckingStoredAccount
     val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
         when {
             coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
@@ -118,24 +108,6 @@ fun SyncStatusScreen(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(top = 4.dp),
                             )
-                        }
-                        if (needsMicrosoftSignIn) {
-                            Text(
-                                "Conta Microsoft desconectada ou sessão expirada. " +
-                                    "Entre de novo para sincronizar com o OneDrive.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
-                            Button(
-                                onClick = onMicrosoftSignIn,
-                                enabled = !coordinatorState.isRunning,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                            ) {
-                                Text(stringResource(R.string.auth_sign_in))
-                            }
                         }
                         if (coordinatorState.isRunning) {
                             LinearProgressIndicator(

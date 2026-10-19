@@ -12,8 +12,11 @@ import com.microsoft.identity.client.Prompt
 import com.microsoft.identity.client.PublicClientApplication
 import com.microsoft.identity.client.exception.MsalException
 import com.onegallery.sync.BuildConfig
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -38,6 +41,9 @@ class MsalAuthManager(
 
     private val _state = MutableStateFlow(AuthState())
     val state: StateFlow<AuthState> = _state.asStateFlow()
+
+    private val _interactionRequired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val interactionRequired: SharedFlow<Unit> = _interactionRequired.asSharedFlow()
 
     private var client: ISingleAccountPublicClientApplication? = null
     private var configFile: File? = null
@@ -109,7 +115,7 @@ class MsalAuthManager(
             lower.contains("no refresh token")
         ) {
             "\n\n— Sessão expirada —\n" +
-                "Em Ajustes → saia da conta Microsoft e entre de novo (ou use Escolher pasta na nuvem)."
+                "Em Ajustes → Entrar com Microsoft (ou saia e entre de novo)."
         } else {
             ""
         }
@@ -312,6 +318,18 @@ class MsalAuthManager(
      * Token para Microsoft Graph. Sempre tenta renovação silenciosa via MSAL
      * (refresh token), em vez de reutilizar access token expirado em memória.
      */
+    fun requestInteractiveSignIn() {
+        _interactionRequired.tryEmit(Unit)
+    }
+
+    /** Inicializa MSAL (se preciso) e renova token em silêncio. */
+    suspend fun ensureGraphSession(): Result<Unit> {
+        if (client == null) {
+            initialize().getOrElse { return Result.failure(it) }
+        }
+        return accessTokenForGraph().map { }
+    }
+
     suspend fun accessTokenForGraph(): Result<String> {
         return acquireTokenSilent()
     }
@@ -320,7 +338,11 @@ class MsalAuthManager(
         val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
         val account = withContext(Dispatchers.IO) {
             msal.currentAccount?.currentAccount
-        } ?: return Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
+        } ?: run {
+            _state.value = _state.value.copy(isSignedIn = false, isCheckingStoredAccount = false)
+            requestInteractiveSignIn()
+            return Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
+        }
         return withContext(Dispatchers.Main.immediate) {
             suspendCancellableCoroutine { cont ->
                 val params = AcquireTokenSilentParameters.Builder()
@@ -345,7 +367,14 @@ class MsalAuthManager(
                                 exception.message,
                                 scopes.joinToString(", "),
                             )
-                            _state.value = _state.value.copy(lastError = msg)
+                            val needsUi = MsalAuthInteraction.needsInteractiveSignIn(exception)
+                            _state.value = _state.value.copy(
+                                lastError = msg,
+                                isSignedIn = if (needsUi) false else _state.value.isSignedIn,
+                            )
+                            if (needsUi) {
+                                requestInteractiveSignIn()
+                            }
                             if (cont.isActive) {
                                 cont.resume(Result.failure(IllegalStateException(msg, exception)))
                             }

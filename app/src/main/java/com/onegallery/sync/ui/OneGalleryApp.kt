@@ -178,6 +178,11 @@ fun OneGalleryApp(
         setupDone = syncPreferences.hasCompletedSetup
     }
 
+    LaunchedEffect(setupDone, syncPreferences.syncMode) {
+        if (!setupDone || syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return@LaunchedEffect
+        authManager.ensureGraphSession()
+    }
+
     LaunchedEffect(Unit) {
         val permissions = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -226,6 +231,15 @@ fun OneGalleryApp(
     fun openCloudFolderPicker() {
         postSignInStepOrdinal = CloudSetupStep.Browse.ordinal
         setCloudSetupStep(CloudSetupStep.SignIn)
+    }
+
+    LaunchedEffect(Unit) {
+        authManager.interactionRequired.collect {
+            if (cloudSetupStepOrdinal == CloudSetupStep.Hidden.ordinal) {
+                postSignInStepOrdinal = CloudSetupStep.Hidden.ordinal
+                setCloudSetupStep(CloudSetupStep.SignIn)
+            }
+        }
     }
 
     if (cloudSetupStep == CloudSetupStep.Browse) {
@@ -398,8 +412,6 @@ fun OneGalleryApp(
                 SyncStatusScreen(
                     syncCoordinator = syncCoordinator,
                     syncPreferences = syncPreferences,
-                    authManager = authManager,
-                    onMicrosoftSignIn = { openMicrosoftSignIn() },
                 )
             }
             composable(MainTab.Settings.route) {

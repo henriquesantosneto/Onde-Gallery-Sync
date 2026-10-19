@@ -596,9 +596,16 @@ class SyncCoordinator(
                     )
                     return Result.failure(IllegalStateException("Pasta na nuvem não escolhida"))
                 }
-                oneDriveRepository.accessToken().getOrElse {
+                oneDriveRepository.ensureGraphSession().getOrElse {
                     _state.value = _state.value.copy(
-                        lastMessage = "Faça login Microsoft para sync na nuvem.",
+                        lastMessage = if (com.onegallery.sync.auth.MsalAuthInteraction
+                                .needsInteractiveSignIn(it)
+                        ) {
+                            "Login Microsoft necessário — abrindo tela de entrada… " +
+                                "Se não abrir, use Ajustes → Entrar com Microsoft."
+                        } else {
+                            it.message ?: "Não foi possível renovar a sessão Microsoft."
+                        },
                     )
                     return Result.failure(it)
                 }
