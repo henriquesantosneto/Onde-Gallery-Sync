@@ -2,15 +2,12 @@ package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -23,23 +20,29 @@ import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +54,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -66,9 +70,23 @@ fun MediaDetailScreen(
     val liveItems = state.items
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
-    var showMediaDetails by remember { mutableStateOf(false) }
+    var showMediaDetailsModal by remember { mutableStateOf(false) }
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
+    var showAdvancedDetails by remember { mutableStateOf(false) }
+    var detailInfo by remember { mutableStateOf<MediaDetailInfo?>(null) }
+    var detailLoading by remember { mutableStateOf(false) }
+    var activePageError by remember { mutableStateOf<String?>(null) }
+
+    val bottomSheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded,
+        skipHiddenState = true,
+    )
+    val bottomSheetScaffoldState = rememberBottomSheetScaffoldState(
+        bottomSheetState = bottomSheetState,
+        snackbarHostState = snackbarHostState,
+    )
+    val sheetScope = rememberCoroutineScope()
 
     ImmersiveSystemBarsEffect(immersive)
 
@@ -116,82 +134,136 @@ fun MediaDetailScreen(
         else -> emptyList()
     }
 
+    val multiSelection = state.selectionMode && state.selectedPaths.size > 1
+    val embeddedDetailsSheet = !immersive && !multiSelection && currentPath != null
+
+    LaunchedEffect(currentPath, liveItems, embeddedDetailsSheet) {
+        if (!embeddedDetailsSheet || currentPath == null) {
+            detailInfo = null
+            detailLoading = false
+            return@LaunchedEffect
+        }
+        detailLoading = true
+        showAdvancedDetails = false
+        detailInfo = withContext(Dispatchers.Default) {
+            val entity = syncCoordinator.getMetadata(currentPath) ?: return@withContext null
+            val display = liveItems.find { it.canonicalPath == currentPath }
+                ?: GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
+            buildMediaDetailInfo(entity, display)
+        }
+        detailLoading = false
+    }
+
+    LaunchedEffect(pagerState.currentPage, embeddedDetailsSheet) {
+        if (!embeddedDetailsSheet) return@LaunchedEffect
+        showAdvancedDetails = false
+        activePageError = null
+        if (bottomSheetState.currentValue == SheetValue.Expanded) {
+            bottomSheetState.partialExpand()
+        }
+    }
+
+    LaunchedEffect(immersive, multiSelection) {
+        if (!embeddedDetailsSheet && bottomSheetState.currentValue != SheetValue.PartiallyExpanded) {
+            bottomSheetState.partialExpand()
+        }
+    }
+
     val chromeVisible = !immersive
 
-    Scaffold(
-        snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
-        topBar = {
-            if (chromeVisible) {
-                TopAppBar(
-                    title = {
-                        Column {
+    val topBar: @Composable () -> Unit = {
+        if (chromeVisible) {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            when {
+                                state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+                                else -> currentItem?.displayName ?: "Mídia"
+                            },
+                            maxLines = 1,
+                        )
+                        if (!state.selectionMode && !embeddedDetailsSheet) {
+                            val dateLine = currentItem?.sortTimestamp?.let(::formatMediaCaptureDate).orEmpty()
+                            val locationLine = currentItem?.locationLabel
+                            val subtitle = listOfNotNull(locationLine, dateLine.takeIf { it.isNotBlank() })
+                                .joinToString(" · ")
+                                .ifBlank {
+                                    "${pagerState.currentPage + 1} / ${pagerPaths.size} · deslize para navegar"
+                                }
                             Text(
-                                when {
-                                    state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
-                                    else -> currentItem?.displayName ?: "Mídia"
-                                },
-                                maxLines = 1,
+                                subtitle,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
                             )
-                            if (!state.selectionMode) {
-                                val dateLine = currentItem?.sortTimestamp?.let(::formatMediaCaptureDate).orEmpty()
-                                val locationLine = currentItem?.locationLabel
-                                val subtitle = listOfNotNull(locationLine, dateLine.takeIf { it.isNotBlank() })
-                                    .joinToString(" · ")
-                                    .ifBlank {
-                                        "${pagerState.currentPage + 1} / ${pagerPaths.size} · deslize para navegar"
+                        } else if (!state.selectionMode && embeddedDetailsSheet) {
+                            Text(
+                                "${pagerState.currentPage + 1} / ${pagerPaths.size}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
+                    }
+                },
+                actions = {
+                    if (detailPaths.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                if (embeddedDetailsSheet) {
+                                    sheetScope.launch {
+                                        if (bottomSheetState.currentValue == SheetValue.Expanded) {
+                                            bottomSheetState.partialExpand()
+                                        } else {
+                                            bottomSheetState.expand()
+                                        }
                                     }
-                                Text(
-                                    subtitle,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                )
-                            }
+                                } else {
+                                    showMediaDetailsModal = true
+                                }
+                            },
+                        ) {
+                            Icon(Icons.Outlined.Info, contentDescription = "Detalhes")
                         }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
+                    }
+                    if (!state.selectionMode && currentItem != null) {
+                        IconButton(onClick = { immersive = true }) {
+                            Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
                         }
-                    },
-                    actions = {
-                        if (detailPaths.isNotEmpty()) {
-                            IconButton(onClick = { showMediaDetails = true }) {
-                                Icon(Icons.Outlined.Info, contentDescription = "Detalhes")
-                            }
+                    }
+                    if (state.selectionMode) {
+                        IconButton(onClick = { showMoveDialog = true }) {
+                            Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
-                        if (!state.selectionMode && currentItem != null) {
-                            IconButton(onClick = { immersive = true }) {
-                                Icon(Icons.Outlined.Fullscreen, contentDescription = "Tela cheia")
-                            }
+                        IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
+                            Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
                         }
-                        if (state.selectionMode) {
-                            IconButton(onClick = { showMoveDialog = true }) {
-                                Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
-                            }
-                            IconButton(onClick = { viewModel.releaseLocalSpaceSelected() }) {
-                                Icon(Icons.Outlined.CloudOff, contentDescription = "Liberar espaço")
-                            }
-                            IconButton(onClick = { viewModel.deleteSelected() }) {
-                                Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
-                            }
-                            TextButton(onClick = { viewModel.clearSelection() }) {
-                                Text("Cancelar")
-                            }
-                        } else if (currentPath != null) {
-                            IconButton(onClick = { viewModel.toggleSelection(currentPath) }) {
-                                Icon(
-                                    if (currentSelected) Icons.Outlined.CheckCircle
-                                    else Icons.Outlined.RadioButtonUnchecked,
-                                    contentDescription = "Selecionar",
-                                )
-                            }
+                        IconButton(onClick = { viewModel.deleteSelected() }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Excluir tudo")
                         }
-                    },
-                )
-            }
-        },
-    ) { padding ->
+                        TextButton(onClick = { viewModel.clearSelection() }) {
+                            Text("Cancelar")
+                        }
+                    } else if (currentPath != null) {
+                        IconButton(onClick = { viewModel.toggleSelection(currentPath) }) {
+                            Icon(
+                                if (currentSelected) Icons.Outlined.CheckCircle
+                                else Icons.Outlined.RadioButtonUnchecked,
+                                contentDescription = "Selecionar",
+                            )
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    val pagerContent: @Composable (PaddingValues) -> Unit = { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -211,12 +283,14 @@ fun MediaDetailScreen(
                     isActivePage = page == pagerState.currentPage,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
-                    viewModel = viewModel,
-                    onRemoved = onBack,
                     immersive = immersive,
-                    showChrome = chromeVisible,
                     onToggleImmersive = { immersive = !immersive },
                     onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
+                    onActivePageError = { err ->
+                        if (page == pagerState.currentPage) {
+                            activePageError = err
+                        }
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -249,13 +323,48 @@ fun MediaDetailScreen(
         }
     }
 
-    if (showMediaDetails && detailPaths.isNotEmpty()) {
+    if (embeddedDetailsSheet) {
+        BottomSheetScaffold(
+            scaffoldState = bottomSheetScaffoldState,
+            sheetPeekHeight = 128.dp,
+            sheetDragHandle = { BottomSheetDefaults.DragHandle() },
+            sheetContent = {
+                MediaDetailSamsungSheet(
+                    info = detailInfo,
+                    loading = detailLoading,
+                    error = activePageError,
+                    showAdvanced = showAdvancedDetails,
+                    onToggleAdvanced = { showAdvancedDetails = !showAdvancedDetails },
+                    onDelete = {
+                        currentPath?.let { path -> viewModel.deleteSingle(path, onBack) }
+                    },
+                    onFreeSpace = {
+                        currentPath?.let(viewModel::releaseSingle)
+                    },
+                    showActions = true,
+                )
+            },
+            snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
+            topBar = topBar,
+        ) { padding ->
+            pagerContent(padding)
+        }
+    } else {
+        Scaffold(
+            snackbarHost = { if (chromeVisible) SnackbarHost(snackbarHostState) },
+            topBar = topBar,
+        ) { padding ->
+            pagerContent(padding)
+        }
+    }
+
+    if (showMediaDetailsModal && detailPaths.isNotEmpty()) {
         MediaDetailsBottomSheet(
             canonicalPaths = detailPaths,
             displayItems = liveItems,
             syncCoordinator = syncCoordinator,
             mediaCacheRepository = mediaCacheRepository,
-            onDismiss = { showMediaDetails = false },
+            onDismiss = { showMediaDetailsModal = false },
         )
     }
 
@@ -284,12 +393,10 @@ private fun MediaDetailPage(
     isActivePage: Boolean,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
-    viewModel: GalleryViewModel,
-    onRemoved: () -> Unit,
     immersive: Boolean,
-    showChrome: Boolean,
     onToggleImmersive: () -> Unit,
     onZoomActiveChanged: (Boolean) -> Unit,
+    onActivePageError: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var item by remember(canonicalPath) { mutableStateOf<GalleryDisplayItem?>(null) }
@@ -364,6 +471,12 @@ private fun MediaDetailPage(
         }
     }
 
+    LaunchedEffect(error, isActivePage) {
+        if (isActivePage) {
+            onActivePageError(error)
+        }
+    }
+
     val display = item
     val statusItem = liveItem ?: display
 
@@ -379,13 +492,11 @@ private fun MediaDetailPage(
                 Text("Item não encontrado.", modifier = Modifier.align(Alignment.Center))
             }
             else -> {
-                Column(
+                Box(
                     modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                    contentAlignment = Alignment.Center,
                 ) {
-                    val mediaModifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
+                    val mediaModifier = Modifier.fillMaxSize()
                     val playback = display.playbackUri()
                     val overlayItem = statusItem ?: display
                     when {
@@ -462,20 +573,6 @@ private fun MediaDetailPage(
                             }
                         }
                     }
-
-                    if (showChrome) {
-                        if (error != null) {
-                            Text(
-                                error ?: "",
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            )
-                        }
-                        RowWithActions(
-                            onDeleteAll = { viewModel.deleteSingle(canonicalPath, onRemoved) },
-                            onFreeSpace = { viewModel.releaseSingle(canonicalPath) },
-                        )
-                    }
                 }
             }
         }
@@ -492,22 +589,5 @@ private fun MediaDetailMediaShell(
     Box(modifier = modifier) {
         content()
         MediaDetailCloudOverlay(item = item, recalling = recalling)
-    }
-}
-
-@Composable
-private fun RowWithActions(onDeleteAll: () -> Unit, onFreeSpace: () -> Unit) {
-    Row(
-        modifier = Modifier.padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        TextButton(onClick = onFreeSpace) {
-            Icon(Icons.Outlined.CloudOff, contentDescription = null)
-            Text(" Liberar espaço")
-        }
-        TextButton(onClick = onDeleteAll) {
-            Icon(Icons.Outlined.Delete, contentDescription = null)
-            Text(" Excluir tudo")
-        }
     }
 }
