@@ -51,6 +51,8 @@ fun MediaSamsungDetailsContent(
     modifier: Modifier = Modifier,
     error: String? = null,
     footer: (@Composable () -> Unit)? = null,
+    contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
+    showAdvancedToggle: Boolean = true,
 ) {
     val context = LocalContext.current
     var infos by remember(canonicalPaths) { mutableStateOf<List<MediaDetailInfo>>(emptyList()) }
@@ -84,6 +86,8 @@ fun MediaSamsungDetailsContent(
                 info = infos.first(),
                 error = error,
                 modifier = modifier,
+                contentLevel = contentLevel,
+                showAdvancedToggle = showAdvancedToggle,
             )
             footer?.invoke()
         }
@@ -121,6 +125,8 @@ private fun SamsungDetailBlock(
     info: MediaDetailInfo,
     error: String?,
     modifier: Modifier = Modifier,
+    contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
+    showAdvancedToggle: Boolean = true,
 ) {
     var showAdvanced by remember(info.displayName) { mutableStateOf(false) }
     MediaDetailSamsungSheet(
@@ -130,6 +136,8 @@ private fun SamsungDetailBlock(
         showAdvanced = showAdvanced,
         onToggleAdvanced = { showAdvanced = !showAdvanced },
         showExpandedContent = true,
+        contentLevel = contentLevel,
+        showAdvancedToggle = showAdvancedToggle,
         contentOnDark = true,
         modifier = modifier,
     )

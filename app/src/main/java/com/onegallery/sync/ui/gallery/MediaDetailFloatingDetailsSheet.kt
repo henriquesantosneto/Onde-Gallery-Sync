@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -22,14 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.sync.SyncCoordinator
 
 /**
- * Painel de detalhes abaixo da foto: ocupa fração da tela e empurra a imagem para cima
- * (sem scrim sobre a foto).
+ * Painel de detalhes abaixo da foto: altura definida pelo arraste do usuário.
  */
 @Composable
 fun MediaDetailPushDetailsSheet(
@@ -37,16 +39,25 @@ fun MediaDetailPushDetailsSheet(
     displayItems: List<GalleryDisplayItem>,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
-    onDismiss: () -> Unit,
+    panelFraction: Float,
+    onPanelFractionChange: (Float) -> Unit,
+    onPanelDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (canonicalPaths.isEmpty()) return
+    if (canonicalPaths.isEmpty() || panelFraction <= 0f) return
 
-    BackHandler(onBack = onDismiss)
+    BackHandler(onBack = {
+        onPanelFractionChange(0f)
+        onPanelDragEnd()
+    })
 
-    val density = LocalDensity.current
-    val dismissDragThresholdPx = with(density) { 96.dp.toPx() }
-    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+    val configuration = LocalConfiguration.current
+    val screenHeightPx = with(LocalDensity.current) {
+        configuration.screenHeightDp.dp.toPx()
+    }
+    val contentLevel = contentLevelForPanelFraction(panelFraction)
+    val scroll = rememberScrollState()
+    var dragStartFraction by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = modifier
@@ -58,20 +69,15 @@ fun MediaDetailPushDetailsSheet(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(onDismiss) {
+                .pointerInput(panelFraction) {
                     detectVerticalDragGestures(
-                        onDragStart = { dragOffsetPx = 0f },
-                        onDragEnd = {
-                            if (dragOffsetPx > dismissDragThresholdPx) {
-                                onDismiss()
-                            }
-                            dragOffsetPx = 0f
-                        },
-                        onDragCancel = { dragOffsetPx = 0f },
+                        onDragStart = { dragStartFraction = panelFraction },
+                        onDragEnd = { onPanelDragEnd() },
+                        onDragCancel = { onPanelDragEnd() },
                     ) { _, dragAmount ->
-                        if (dragAmount > 0f) {
-                            dragOffsetPx += dragAmount
-                        }
+                        val next = (dragStartFraction - dragAmount / screenHeightPx)
+                            .coerceIn(0f, MediaDetailSheetAnchors.FULL)
+                        onPanelFractionChange(next)
                     }
                 }
                 .padding(top = 10.dp, bottom = 6.dp),
@@ -85,14 +91,26 @@ fun MediaDetailPushDetailsSheet(
                     .background(Color.White.copy(alpha = 0.35f)),
             )
         }
-        MediaSamsungDetailsContent(
-            canonicalPaths = canonicalPaths,
-            displayItems = displayItems,
-            syncCoordinator = syncCoordinator,
-            mediaCacheRepository = mediaCacheRepository,
+        val scrollModifier = if (contentLevel == MediaDetailContentLevel.Full) {
+            Modifier.verticalScroll(scroll)
+        } else {
+            Modifier
+        }
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 24.dp),
-        )
+                .padding(top = 24.dp)
+                .then(scrollModifier),
+        ) {
+            MediaSamsungDetailsContent(
+                canonicalPaths = canonicalPaths,
+                displayItems = displayItems,
+                syncCoordinator = syncCoordinator,
+                mediaCacheRepository = mediaCacheRepository,
+                contentLevel = contentLevel,
+                showAdvancedToggle = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }

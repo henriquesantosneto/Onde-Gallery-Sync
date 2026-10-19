@@ -32,9 +32,15 @@ fun MediaDetailSamsungSheet(
     showAdvanced: Boolean,
     onToggleAdvanced: () -> Unit,
     showExpandedContent: Boolean = true,
+    contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
+    showAdvancedToggle: Boolean = true,
     contentOnDark: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val effectiveAdvanced = showAdvanced || contentLevel == MediaDetailContentLevel.Full
+    val showStandardBody = contentLevel == MediaDetailContentLevel.Standard ||
+        contentLevel == MediaDetailContentLevel.Full
+    val showPeekOnly = contentLevel == MediaDetailContentLevel.Peek
     val primaryText = if (contentOnDark) Color.White else MaterialTheme.colorScheme.onSurface
     val secondaryText = if (contentOnDark) {
         Color.White.copy(alpha = 0.62f)
@@ -93,6 +99,23 @@ fun MediaDetailSamsungSheet(
                     fontWeight = FontWeight.SemiBold,
                     color = primaryText,
                 )
+                if (showPeekOnly) {
+                    Text(
+                        info.capturedAtFriendly.takeIf { it.isNotBlank() } ?: info.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = secondaryText,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        "Continue puxando para cima para ver tudo",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = secondaryText.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+
+                if (!showStandardBody) return@Column
+
                 Text(
                     info.displayName,
                     style = MaterialTheme.typography.bodySmall,
@@ -149,22 +172,25 @@ fun MediaDetailSamsungSheet(
                     )
                 }
 
-                TextButton(
-                    onClick = onToggleAdvanced,
-                    modifier = Modifier.padding(top = 12.dp),
-                ) {
-                    Icon(
-                        if (showAdvanced) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                        contentDescription = null,
-                        tint = if (contentOnDark) Color.White else MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        if (showAdvanced) " Ocultar mais informações" else " Mais informações",
-                        color = if (contentOnDark) Color.White.copy(alpha = 0.9f) else MaterialTheme.colorScheme.primary,
-                    )
+                if (showAdvancedToggle && contentLevel != MediaDetailContentLevel.Full) {
+                    TextButton(
+                        onClick = onToggleAdvanced,
+                        modifier = Modifier.padding(top = 12.dp),
+                    ) {
+                        Icon(
+                            if (showAdvanced) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            tint = if (contentOnDark) Color.White else MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            if (showAdvanced) " Ocultar mais informações" else " Mais informações",
+                            color = if (contentOnDark) Color.White.copy(alpha = 0.9f)
+                                else MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
 
-                if (showAdvanced) {
+                if (effectiveAdvanced) {
                     HorizontalDivider(
                         modifier = Modifier.padding(vertical = 8.dp),
                         color = if (contentOnDark) {

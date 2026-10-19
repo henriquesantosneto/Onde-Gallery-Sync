@@ -1,7 +1,5 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -32,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
@@ -52,8 +53,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private const val DETAILS_PANEL_SCREEN_FRACTION = 0.56f
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -68,7 +67,9 @@ fun MediaDetailScreen(
     val liveItems = state.items
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
-    var showDetailsSheet by remember { mutableStateOf(false) }
+    var detailsSettleFraction by remember { mutableFloatStateOf(0f) }
+    var detailsDragFraction by remember { mutableFloatStateOf(0f) }
+    var detailsDragging by remember { mutableStateOf(false) }
     /** true = oculta barras e carrossel (toque na foto alterna). */
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
@@ -166,15 +167,30 @@ fun MediaDetailScreen(
     val swipeUpForDetails = !immersive && !multiSelection && currentPath != null
 
     LaunchedEffect(pagerState.currentPage) {
-        showDetailsSheet = false
+        detailsSettleFraction = 0f
+        detailsDragFraction = 0f
+        detailsDragging = false
         activePageError = null
     }
 
-    fun openDetailsSheet() {
+    fun openDetailsToPeek() {
         if (detailPaths.isNotEmpty()) {
-            showDetailsSheet = true
+            detailsSettleFraction = MediaDetailSheetAnchors.PEEK
+            detailsDragFraction = MediaDetailSheetAnchors.PEEK
         }
     }
+
+    fun snapDetailsPanel() {
+        val snapped = MediaDetailSheetAnchors.snap(detailsDragFraction)
+        detailsSettleFraction = snapped
+        detailsDragFraction = snapped
+    }
+
+    val detailsDisplayFraction = rememberMediaDetailSheetFraction(
+        settleTarget = detailsSettleFraction,
+        dragFraction = detailsDragFraction,
+        dragging = detailsDragging,
+    )
 
     val chromeVisible = !immersive
 
@@ -182,12 +198,7 @@ fun MediaDetailScreen(
         val pool = if (liveItems.isNotEmpty()) itemsByPath else contextItems.associateBy { it.canonicalPath }
         pagerPaths.mapNotNull { path -> pool[path] }
     }
-    val detailsPanelOpen = showDetailsSheet && detailPaths.isNotEmpty()
-    val detailsPanelFraction by animateFloatAsState(
-        targetValue = if (detailsPanelOpen) DETAILS_PANEL_SCREEN_FRACTION else 0f,
-        animationSpec = tween(durationMillis = 280),
-        label = "detailsPanelFraction",
-    )
+    val detailsPanelOpen = detailsDisplayFraction > 0.05f && detailPaths.isNotEmpty()
     val showFilmstrip = chromeVisible &&
         !state.selectionMode &&
         !detailsPanelOpen &&
@@ -212,14 +223,32 @@ fun MediaDetailScreen(
             }
         },
     ) { _ ->
-        val detailsVisible = detailsPanelOpen || detailsPanelFraction > 0.02f
-        val photoHeightFraction = (1f - detailsPanelFraction).coerceIn(0.15f, 1f)
+        val configuration = LocalConfiguration.current
+        val screenHeightPx = with(LocalDensity.current) {
+            configuration.screenHeightDp.dp.toPx()
+        }
+        val detailsVisible = detailsDisplayFraction > 0.02f
+        val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .openDetailsOnSwipeUp(
-                    enabled = swipeUpForDetails && !detailsPanelOpen,
-                    onSwipeUp = { openDetailsSheet() },
+                .draggableDetailsFromPhoto(
+                    enabled = swipeUpForDetails &&
+                        detailsDisplayFraction < MediaDetailSheetAnchors.FULL - 0.02f,
+                    startFraction = detailsDisplayFraction,
+                    screenHeightPx = screenHeightPx,
+                    onDragStart = {
+                        detailsDragging = true
+                        detailsDragFraction = detailsDisplayFraction
+                    },
+                    onDragFraction = { fraction ->
+                        detailsDragging = true
+                        detailsDragFraction = fraction
+                    },
+                    onDragEnd = {
+                        detailsDragging = false
+                        snapDetailsPanel()
+                    },
                 ),
         ) {
             Box(
@@ -297,7 +326,7 @@ fun MediaDetailScreen(
                                     expanded = showOverflowMenu,
                                     onExpandedChange = { showOverflowMenu = it },
                                     showDetails = detailPaths.isNotEmpty(),
-                                    onDetails = { openDetailsSheet() },
+                                    onDetails = { openDetailsToPeek() },
                                     onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
                                     onDelete = { showDeleteConfirm = true },
                                     deleteLabel = "Excluir tudo",
@@ -318,7 +347,7 @@ fun MediaDetailScreen(
                                 expanded = showOverflowMenu,
                                 onExpandedChange = { showOverflowMenu = it },
                                 showDetails = detailPaths.isNotEmpty(),
-                                onDetails = { openDetailsSheet() },
+                                onDetails = { openDetailsToPeek() },
                                 onFreeSpace = { viewModel.releaseSingle(currentPath) },
                                 onDelete = { showDeleteConfirm = true },
                             )
@@ -350,11 +379,21 @@ fun MediaDetailScreen(
                     displayItems = liveItems,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
-                    onDismiss = { showDetailsSheet = false },
+                    panelFraction = detailsDisplayFraction,
+                    onPanelFractionChange = { fraction ->
+                        detailsDragging = true
+                        detailsDragFraction = fraction
+                    },
+                    onPanelDragEnd = {
+                        detailsDragging = false
+                        snapDetailsPanel()
+                    },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .fillMaxHeight(detailsPanelFraction.coerceIn(0.15f, 0.88f)),
+                        .fillMaxHeight(
+                            detailsDisplayFraction.coerceIn(0.08f, MediaDetailSheetAnchors.FULL),
+                        ),
                 )
             }
         }
