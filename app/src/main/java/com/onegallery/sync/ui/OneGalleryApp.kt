@@ -26,6 +26,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.onegallery.sync.ui.theme.OneGalleryEdgeToEdgeEffect
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -142,6 +143,7 @@ fun OneGalleryApp(
     galleryPreferences: GalleryPreferences,
     mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
 ) {
+    OneGalleryEdgeToEdgeEffect()
     var setupDone by rememberSaveable { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var cloudSetupStepOrdinal by rememberSaveable { mutableStateOf(CloudSetupStep.Hidden.ordinal) }
     var postSignInStepOrdinal by rememberSaveable {

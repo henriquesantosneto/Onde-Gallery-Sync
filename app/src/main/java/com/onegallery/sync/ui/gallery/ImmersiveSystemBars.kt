@@ -36,7 +36,7 @@ fun ImmersiveSystemBarsEffect(
             }
             onDispose {
                 controller.show(WindowInsetsCompat.Type.systemBars())
-                WindowCompat.setDecorFitsSystemWindows(window, true)
+                WindowCompat.setDecorFitsSystemWindows(window, false)
                 controller.isAppearanceLightStatusBars = true
                 controller.isAppearanceLightNavigationBars = true
             }
