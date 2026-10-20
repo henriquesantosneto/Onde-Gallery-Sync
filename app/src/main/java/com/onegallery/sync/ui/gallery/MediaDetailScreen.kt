@@ -32,9 +32,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -250,42 +250,34 @@ fun MediaDetailScreen(
         }
         val detailsVisible = detailsDisplayFraction > 0.02f
         val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
-        val panelFractionBase = {
-            if (detailsDragging) detailsDragFraction else detailsSettleFraction
+        val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
+        gestureBaseFraction.floatValue = if (detailsDragging) {
+            detailsDragFraction
+        } else {
+            detailsSettleFraction
         }
-        val panelClosed = detailsSettleFraction < 0.05f && !detailsDragging
+        val panelDragBaseFraction = gestureBaseFraction.floatValue
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
                     .align(Alignment.TopCenter)
-                    .then(
-                        if (swipeUpForDetails && panelClosed && detailPaths.isNotEmpty()) {
-                            Modifier
-                                .openDetailsOnSwipeUp(
-                                    enabled = true,
-                                    onSwipeUp = { openDetailsToSimple() },
-                                )
-                                .detailPanelVerticalDrag(
-                                    enabled = true,
-                                    screenHeightPx = screenHeightPx,
-                                    fractionBase = panelFractionBase,
-                                    onDragStart = {
-                                        detailsDragging = true
-                                        detailsDragFraction = panelFractionBase()
-                                    },
-                                    onDragFraction = { fraction ->
-                                        detailsDragging = true
-                                        detailsDragFraction = fraction
-                                    },
-                                    onDragEnd = { velocityY ->
-                                        snapDetailsPanel(velocityY)
-                                        detailsDragging = false
-                                    },
-                                )
-                        } else {
-                            Modifier
+                    .draggableDetailPanelHeight(
+                        enabled = swipeUpForDetails && pagerScrollEnabled && detailPaths.isNotEmpty(),
+                        screenHeightPx = screenHeightPx,
+                        fractionBaseState = gestureBaseFraction,
+                        onDragStart = {
+                            detailsDragging = true
+                            detailsDragFraction = gestureBaseFraction.floatValue
+                        },
+                        onDragFraction = { fraction ->
+                            detailsDragging = true
+                            detailsDragFraction = fraction
+                        },
+                        onDragEnd = { velocityY ->
+                            snapDetailsPanel(velocityY)
+                            detailsDragging = false
                         },
                     ),
             ) {
@@ -401,34 +393,6 @@ fun MediaDetailScreen(
             }
             }
 
-            if (swipeUpForDetails && panelClosed && detailPaths.isNotEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .navigationBarsPadding()
-                        .padding(bottom = if (showFilmstrip) 72.dp else 0.dp)
-                        .detailPanelVerticalDrag(
-                            enabled = true,
-                            screenHeightPx = screenHeightPx,
-                            fractionBase = panelFractionBase,
-                            onDragStart = {
-                                detailsDragging = true
-                                detailsDragFraction = panelFractionBase()
-                            },
-                            onDragFraction = { fraction ->
-                                detailsDragging = true
-                                detailsDragFraction = fraction
-                            },
-                            onDragEnd = { velocityY ->
-                                snapDetailsPanel(velocityY)
-                                detailsDragging = false
-                            },
-                        ),
-                )
-            }
-
             if (detailsVisible && detailPaths.isNotEmpty()) {
                 MediaDetailPushDetailsSheet(
                     canonicalPaths = detailPaths,
@@ -436,10 +400,11 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     panelFraction = detailsDisplayFraction,
+                    panelDragBaseFraction = panelDragBaseFraction,
                     contentLevel = detailsContentLevel,
                     onPanelDragStart = {
                         detailsDragging = true
-                        detailsDragFraction = panelFractionBase()
+                        detailsDragFraction = gestureBaseFraction.floatValue
                     },
                     onPanelFractionChange = { fraction ->
                         detailsDragging = true

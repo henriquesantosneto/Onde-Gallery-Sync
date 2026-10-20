@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -14,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +32,7 @@ fun MediaDetailPushDetailsSheet(
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     panelFraction: Float,
+    panelDragBaseFraction: Float,
     contentLevel: MediaDetailContentLevel,
     onPanelFractionChange: (Float) -> Unit,
     onPanelDragEnd: (velocityYPxPerSec: Float) -> Unit,
@@ -48,11 +50,13 @@ fun MediaDetailPushDetailsSheet(
     val screenHeightPx = with(LocalDensity.current) {
         configuration.screenHeightDp.dp.toPx()
     }
-    val fractionBase = { panelFraction }
-    val panelDragModifier = Modifier.detailPanelVerticalDrag(
+    val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
+    gestureBaseFraction.floatValue = panelDragBaseFraction
+
+    fun panelDragModifier() = Modifier.draggableDetailPanelHeight(
         enabled = true,
         screenHeightPx = screenHeightPx,
-        fractionBase = fractionBase,
+        fractionBaseState = gestureBaseFraction,
         onDragStart = onPanelDragStart,
         onDragFraction = onPanelFractionChange,
         onDragEnd = onPanelDragEnd,
@@ -69,7 +73,7 @@ fun MediaDetailPushDetailsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .then(panelDragModifier)
+                .then(panelDragModifier())
                 .padding(top = 10.dp, bottom = 6.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -96,7 +100,7 @@ fun MediaDetailPushDetailsSheet(
                 showAdvancedToggle = false,
                 scrollContentInternally = false,
                 scrollBelowMapOnly = canonicalPaths.size == 1,
-                firstSectionDragModifier = panelDragModifier,
+                firstSectionDragModifier = panelDragModifier(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(),
