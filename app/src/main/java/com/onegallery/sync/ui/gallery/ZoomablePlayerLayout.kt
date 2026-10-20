@@ -163,19 +163,11 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * Um único [ScaleGestureDetector.onTouchEvent] por [MotionEvent] — repetir no
-     * intercept/onTouch quebra a pinça de forma intermitente.
+     * Um [ScaleGestureDetector.onTouchEvent] por evento; pinça/pan tratados aqui antes do filho.
      */
     private fun handleZoomTouch(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
         if (!inPinchGesture(event)) {
-            if (event.actionMasked == MotionEvent.ACTION_UP ||
-                event.actionMasked == MotionEvent.ACTION_CANCEL
-            ) {
-                if (abs(scale - 1f) < 0.02f) {
-                    onZoomActiveChanged?.invoke(false)
-                }
-            }
             return false
         }
         parent?.requestDisallowInterceptTouchEvent(true)
@@ -190,22 +182,13 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
         if (handleZoomTouch(event)) {
             return true
         }
-        parent?.requestDisallowInterceptTouchEvent(false)
+        val ended = event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        if (ended && abs(scale - 1f) < 0.02f) {
+            onZoomActiveChanged?.invoke(false)
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
         return super.dispatchTouchEvent(event)
-    }
-
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN && ev.pointerCount >= 2) {
-            parent?.requestDisallowInterceptTouchEvent(true)
-            return true
-        }
-        if (scaleDetector.isInProgress || ev.pointerCount >= 2) {
-            return true
-        }
-        if (scale > 1.02f && ev.actionMasked == MotionEvent.ACTION_MOVE) {
-            return true
-        }
-        return false
     }
 
     fun resetZoom() {

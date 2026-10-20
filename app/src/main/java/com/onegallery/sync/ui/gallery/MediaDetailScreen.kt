@@ -653,9 +653,7 @@ private fun MediaDetailPage(
                             ) {
                                 VideoPlayerView(
                                     uri = playback,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .then(detailPanelDragModifier),
+                                    modifier = Modifier.fillMaxSize(),
                                     playWhenReady = true,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                 )
