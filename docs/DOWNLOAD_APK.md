@@ -12,6 +12,8 @@ https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.5
 
 Repositório: https://github.com/henriquesantosneto/Onde-Gallery-Sync
 
+**Importante:** o link direto só funciona se o repositório for **público** (ou se você estiver logado no GitHub com acesso). Repositório privado devolve 404 no telemóvel.
+
 ## Publicar manualmente
 
 ```bash
