@@ -414,15 +414,14 @@ private fun PlacesMapView(
         if (mountingPins) {
             CircularProgressIndicator(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(10.dp)
-                    .size(22.dp)
+                    .align(Alignment.Center)
+                    .size(40.dp)
                     .background(
-                        Color.Black.copy(alpha = 0.45f),
-                        shape = MaterialTheme.shapes.small,
+                        Color.Black.copy(alpha = 0.5f),
+                        shape = MaterialTheme.shapes.medium,
                     )
-                    .padding(5.dp),
-                strokeWidth = 2.dp,
+                    .padding(10.dp),
+                strokeWidth = 3.dp,
                 color = Color.White,
             )
         }
