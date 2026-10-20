@@ -38,7 +38,7 @@ fun AlbumGridCoverImage(
     album: MediaAlbum,
     isPlace: Boolean,
     fallbackCover: Any?,
-    coverRefreshEpoch: Long,
+    coverRevision: Long,
     resolveLiveCover: suspend (MediaAlbum) -> LiveAlbumCover,
     contentDescription: String,
     modifier: Modifier = Modifier,
@@ -47,7 +47,7 @@ fun AlbumGridCoverImage(
     var displayModel by remember(album.bucketId) { mutableStateOf<Any?>(fallbackCover) }
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(false) }
     var coverCacheKey by remember(album.bucketId) { mutableStateOf(album.bucketId) }
-    var lastAppliedRefreshEpoch by remember(album.bucketId) { mutableLongStateOf(0L) }
+    var lastAppliedRevision by remember(album.bucketId) { mutableLongStateOf(0L) }
 
     LaunchedEffect(album.bucketId, fallbackCover) {
         if (displayModel == null && fallbackCover != null) {
@@ -55,9 +55,9 @@ fun AlbumGridCoverImage(
         }
     }
 
-    LaunchedEffect(album.bucketId, coverRefreshEpoch) {
-        if (coverRefreshEpoch == 0L || coverRefreshEpoch == lastAppliedRefreshEpoch) return@LaunchedEffect
-        lastAppliedRefreshEpoch = coverRefreshEpoch
+    LaunchedEffect(album.bucketId, coverRevision) {
+        if (coverRevision == 0L || coverRevision == lastAppliedRevision) return@LaunchedEffect
+        lastAppliedRevision = coverRevision
         applyLiveAlbumCover(
             album = album,
             resolveLiveCover = resolveLiveCover,

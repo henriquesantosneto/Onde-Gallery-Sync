@@ -11,6 +11,7 @@ import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.VideoThumbnailHelper
+import com.onegallery.sync.ui.gallery.AlbumCoverBucketKeys
 import com.onegallery.sync.ui.gallery.AlbumCoverThumbnailPlanner
 import com.onegallery.sync.ui.gallery.GalleryMapper
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -148,12 +150,12 @@ class SyncCoordinator(
     private val longTaskMutex = Mutex()
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
-    private var thumbGalleryRefreshJob: Job? = null
-    private var lastAlbumCoverRefreshWallMs = 0L
+    private var albumCoverRevisionJob: Job? = null
+    private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
 
     init {
-        mediaCacheRepository.onThumbnailCommitted = {
-            scheduleDebouncedGalleryRefreshAfterThumbnail()
+        mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
+            scheduleAlbumCoverRevisionForPath(canonicalPath)
         }
     }
 
@@ -461,37 +463,48 @@ class SyncCoordinator(
     private val _galleryDisplayRefreshEpoch = MutableStateFlow(0L)
     val galleryDisplayRefreshEpoch: StateFlow<Long> = _galleryDisplayRefreshEpoch.asStateFlow()
 
+    private val _albumCoverRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val albumCoverRevisions: StateFlow<Map<String, Long>> = _albumCoverRevisions.asStateFlow()
+
     fun notifyGalleryDisplayRefresh() {
         _galleryDisplayRefreshEpoch.value = System.nanoTime()
     }
 
-    private fun scheduleDebouncedGalleryRefreshAfterThumbnail() {
-        val phase = _state.value.progressPhase
-        if (_state.value.isRunning &&
-            (
-                phase == SyncProgressPhase.PREFETCH_THUMBNAILS ||
-                    phase == SyncProgressPhase.BACKFILL_GPS ||
-                    phase == SyncProgressPhase.BACKFILL_CAPTURE_DATE
-                )
-        ) {
-            return
-        }
+    /** Estilo galeria: só os álbuns afetados, após miniatura local gravada (lote curto). */
+    private fun scheduleAlbumCoverRevisionForPath(canonicalPath: String) {
+        pendingAlbumCoverPaths.add(canonicalPath)
         val scope = backgroundScope ?: return
-        thumbGalleryRefreshJob?.cancel()
-        thumbGalleryRefreshJob = scope.launch {
-            delay(THUMB_GALLERY_REFRESH_DEBOUNCE_MS)
-            val now = System.currentTimeMillis()
-            if (now - lastAlbumCoverRefreshWallMs < THUMB_GALLERY_REFRESH_MIN_INTERVAL_MS) return@launch
-            lastAlbumCoverRefreshWallMs = now
-            notifyGalleryDisplayRefresh()
+        albumCoverRevisionJob?.cancel()
+        albumCoverRevisionJob = scope.launch(Dispatchers.IO) {
+            delay(ALBUM_COVER_REVISION_COALESCE_MS)
+            val paths = pendingAlbumCoverPaths.toList()
+            pendingAlbumCoverPaths.removeAll(paths.toSet())
+            bumpAlbumCoverRevisionsForPaths(paths)
         }
     }
 
-    private fun flushDebouncedGalleryRefreshAfterThumbnail() {
-        thumbGalleryRefreshJob?.cancel()
-        thumbGalleryRefreshJob = null
-        lastAlbumCoverRefreshWallMs = System.currentTimeMillis()
-        notifyGalleryDisplayRefresh()
+    private suspend fun bumpAlbumCoverRevisionsForPaths(paths: List<String>) {
+        if (paths.isEmpty()) return
+        val keys = linkedSetOf<String>()
+        paths.forEach { path ->
+            val row = syncMetadataDao.getByCanonicalPath(path) ?: return@forEach
+            keys.addAll(AlbumCoverBucketKeys.forEntity(row))
+        }
+        if (keys.isEmpty()) return
+        val stamp = System.nanoTime()
+        _albumCoverRevisions.update { current ->
+            val next = current.toMutableMap()
+            keys.forEach { next[it] = stamp }
+            next
+        }
+    }
+
+    private suspend fun flushPendingAlbumCoverRevisions() {
+        albumCoverRevisionJob?.cancel()
+        albumCoverRevisionJob = null
+        val paths = pendingAlbumCoverPaths.toList()
+        pendingAlbumCoverPaths.clear()
+        bumpAlbumCoverRevisionsForPaths(paths)
     }
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
     val pendingOperationCount: Flow<Int> = syncMetadataDao.observePendingCount()
@@ -2277,7 +2290,7 @@ class SyncCoordinator(
                 },
             )
         }
-        flushDebouncedGalleryRefreshAfterThumbnail()
+        flushPendingAlbumCoverRevisions()
     }
 
     private suspend fun runMissingThumbnailPrefetch(
@@ -2707,8 +2720,7 @@ class SyncCoordinator(
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280
-        const val THUMB_GALLERY_REFRESH_DEBOUNCE_MS = 1_200L
-        const val THUMB_GALLERY_REFRESH_MIN_INTERVAL_MS = 4_000L
+        const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GPS_BACKFILL_ROUNDS = 4
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 250

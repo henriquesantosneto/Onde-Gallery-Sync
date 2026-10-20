@@ -49,8 +49,8 @@ data class GalleryUiState(
     val actionMessage: String? = null,
     /** Itens com coordenadas GPS (mapa de locais). */
     val geoItems: List<GalleryDisplayItem> = emptyList(),
-    /** Sinal para recarregar capas visíveis na grade de álbuns (miniaturas novas no disco). */
-    val albumCoverRefreshEpoch: Long = 0L,
+    /** Revisão por álbum (`bucketId` → nanoTime) após miniatura local gravada. */
+    val albumCoverRevisions: Map<String, Long> = emptyMap(),
 )
 
 private data class SelectionSlice(
@@ -99,7 +99,7 @@ class GalleryViewModel(
     private val selectedAlbumTitles = MutableStateFlow<Set<String>>(emptySet())
 
     private val albumCoverLocalIndex = AlbumCoverLocalIndex()
-    private var lastAlbumCoverRefreshEpoch = 0L
+    private var lastAlbumCoverRevisions: Map<String, Long> = emptyMap()
     @Volatile
     private var latestLibraryItems: List<GalleryDisplayItem> = emptyList()
 
@@ -152,12 +152,14 @@ class GalleryViewModel(
     val state: StateFlow<GalleryUiState> = combine(
         librarySnapshot,
         uiControls,
-        syncCoordinator.galleryDisplayRefreshEpoch,
-    ) { snapshot, controls, coverRefreshEpoch ->
-        if (coverRefreshEpoch != lastAlbumCoverRefreshEpoch) {
-            lastAlbumCoverRefreshEpoch = coverRefreshEpoch
-            albumCoverLocalIndex.invalidateAfterThumbnailBatch()
+        syncCoordinator.albumCoverRevisions,
+    ) { snapshot, controls, coverRevisions ->
+        coverRevisions.forEach { (key, stamp) ->
+            if (lastAlbumCoverRevisions[key] != stamp) {
+                albumCoverLocalIndex.invalidateKey(key)
+            }
         }
+        lastAlbumCoverRevisions = coverRevisions
         val allItems = snapshot.allItems
         latestLibraryItems = allItems
         val userAlbums = snapshot.userAlbums
@@ -198,7 +200,7 @@ class GalleryViewModel(
             error = controls.error,
             actionMessage = controls.message,
             geoItems = allItems.filter { it.latitude != null && it.longitude != null },
-            albumCoverRefreshEpoch = coverRefreshEpoch,
+            albumCoverRevisions = coverRevisions,
         )
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
@@ -481,7 +483,7 @@ private fun buildAlbums(
             photoCount = photoCount,
             videoCount = videoCount,
             coverModel = albumCoverLocalIndex.coverModelForKey(
-                cacheKey = "folder:$title",
+                cacheKey = "album:$title",
                 items = items,
                 mediaCacheRepository = mediaCacheRepository,
             ),

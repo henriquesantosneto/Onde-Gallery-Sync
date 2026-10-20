@@ -318,7 +318,7 @@ fun AlbumsScreen(
                                     selected = selected,
                                     selectionMode = !isPlace && state.albumSelectionMode,
                                     gesturesEnabled = !gridPinch.blockItemGestures,
-                                    coverRefreshEpoch = state.albumCoverRefreshEpoch,
+                                    coverRevision = state.albumCoverRevisions[entry.album.bucketId] ?: 0L,
                                     resolveLiveCover = viewModel::liveAlbumCoverFor,
                                     onClick = {
                                         if (!isPlace && state.albumSelectionMode) {
@@ -484,7 +484,7 @@ private fun AlbumGridTile(
     selected: Boolean,
     selectionMode: Boolean,
     gesturesEnabled: Boolean = true,
-    coverRefreshEpoch: Long,
+    coverRevision: Long,
     resolveLiveCover: suspend (MediaAlbum) -> LiveAlbumCover,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -512,7 +512,7 @@ private fun AlbumGridTile(
                 album = album,
                 isPlace = isPlace,
                 fallbackCover = album.coverModel,
-                coverRefreshEpoch = coverRefreshEpoch,
+                coverRevision = coverRevision,
                 resolveLiveCover = resolveLiveCover,
                 contentDescription = album.title,
             )

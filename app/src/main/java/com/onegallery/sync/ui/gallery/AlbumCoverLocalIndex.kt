@@ -23,6 +23,10 @@ class AlbumCoverLocalIndex {
         byKey.clear()
     }
 
+    fun invalidateKey(cacheKey: String) {
+        byKey.remove(cacheKey)
+    }
+
     fun coverModelForKey(
         cacheKey: String,
         items: List<GalleryDisplayItem>,

@@ -9,9 +9,9 @@ class MediaCacheRepository(context: Context) {
     private val thumbsDir = File(context.cacheDir, "thumbs").apply { mkdirs() }
     private val thumbExistsCache = ConcurrentHashMap<String, Boolean>()
 
-    /** Disparado após cada miniatura gravada; o app faz debounce antes de refrescar capas. */
+    /** Disparado após cada miniatura gravada (`canonicalPath` do item). */
     @Volatile
-    var onThumbnailCommitted: (() -> Unit)? = null
+    var onThumbnailCommitted: ((canonicalPath: String) -> Unit)? = null
 
     fun originalFile(canonicalPath: String): File {
         val safe = safeFileName(canonicalPath)
@@ -63,7 +63,7 @@ class MediaCacheRepository(context: Context) {
         val committed = dest.takeIf { it.isFile && it.length() > 0L }
         if (committed != null) {
             thumbExistsCache[canonicalPath] = true
-            onThumbnailCommitted?.invoke()
+            onThumbnailCommitted?.invoke(canonicalPath)
         }
         return committed
     }
