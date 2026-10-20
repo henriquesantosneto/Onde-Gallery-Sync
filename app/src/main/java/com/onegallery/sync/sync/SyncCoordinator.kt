@@ -936,23 +936,23 @@ class SyncCoordinator(
                         "Ordenação por data na galeria; nuvem limitada por sync.",
                     )
                     backfillMissingCaptureTimes()
+                    val seenLocalIds = indexPassLocalItemsById.keys
+                    val seenLocalPaths = indexPassLocalItemsById.values.map {
+                        SyncPaths.canonicalFromLocal(it)
+                    }.toSet()
                     indexPassLocalItemsById = emptyMap()
                     drainRemainingRunQueueBeforePrefetch()
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
-                        "Baixando miniaturas da nuvem…",
-                        "Só previews — originais continuam sob demanda.",
+                        "Gerando e baixando miniaturas…",
+                        "Grade e mapa — originais completos sob demanda.",
                     )
-                    prefetchCloudThumbnails()
+                    prefetchMissingThumbnails()
                     setSyncProgress(
                         SyncProgressPhase.SANITIZING_INDEX,
                         "Verificando consistência do índice…",
                         "Remove entradas obsoletas e alinha com aparelho/nuvem.",
                     )
-                    val seenLocalIds = indexPassLocalItemsById.keys
-                    val seenLocalPaths = indexPassLocalItemsById.values.map {
-                        SyncPaths.canonicalFromLocal(it)
-                    }.toSet()
                     val sanitized = runIndexSanitizePass(
                         seenLocalCanonicalPaths = seenLocalPaths,
                         seenLocalMediaIds = seenLocalIds,
@@ -988,6 +988,20 @@ class SyncCoordinator(
                             if (gpsNote != null) {
                                 append("\n")
                                 append(gpsNote)
+                            }
+                            val missingThumb = countIndexedMissingThumbnails()
+                            val missingGps = countIndexedMissingGps()
+                            if (missingThumb > 0) {
+                                append(
+                                    "\nMiniaturas pendentes: $missingThumb — sincronize de novo " +
+                                        "ou abra o item para gerar.",
+                                )
+                            }
+                            if (missingGps > 0) {
+                                append(
+                                    "\nSem GPS no índice: $missingGps — confira permissão " +
+                                        "“Localização das mídias” e sincronize de novo.",
+                                )
                             }
                         },
                     )
@@ -1749,18 +1763,53 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun buildThumbnailPrefetchEntities(maxPerRun: Int): List<SyncMetadataEntity> {
-        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return emptyList()
-        if (!networkMonitor.isOnline()) return emptyList()
+    private fun rowCanBuildThumbnail(row: SyncMetadataEntity): Boolean {
+        if (row.oneDriveItemId != null) return true
+        if (row.localMediaId != null) return true
+        if (!row.localContentUri.isNullOrBlank()) return true
+        if (!row.cachedFilePath.isNullOrBlank()) return true
+        return false
+    }
+
+    private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
         return syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
-                row.oneDriveItemId != null &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null
+                mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
+                    rowCanBuildThumbnail(row)
             }
             .sortedWith(syncQueueEntityComparator)
             .take(maxPerRun)
             .toList()
+    }
+
+    private suspend fun countIndexedMissingThumbnails(): Int {
+        return syncMetadataDao.getAll().count { row ->
+            mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
+                rowCanBuildThumbnail(row)
+        }
+    }
+
+    private suspend fun countIndexedMissingGps(): Int {
+        return syncMetadataDao.getAll().count { row ->
+            row.latitude == null &&
+                row.longitude == null &&
+                (
+                    row.localMediaId != null || row.localContentUri != null ||
+                        row.cachedFilePath != null || row.oneDriveItemId != null
+                    )
+        }
+    }
+
+    private fun thumbnailOperationLabel(row: SyncMetadataEntity): String {
+        val hasLocalSource = row.localMediaId != null ||
+            !row.localContentUri.isNullOrBlank() ||
+            !row.cachedFilePath.isNullOrBlank()
+        return if (row.oneDriveItemId != null && !hasLocalSource) {
+            "Baixando miniatura da nuvem…"
+        } else {
+            "Gerando miniatura…"
+        }
     }
 
     private fun reconcileWithRemote(row: SyncMetadataEntity, remote: RemoteDriveFile): SyncMetadataEntity {
@@ -2095,8 +2144,8 @@ class SyncCoordinator(
             if (!longTaskMutex.tryLock()) return@launch
             try {
                 if (syncCancelRequested.get()) return@launch
-                val rows = buildThumbnailPrefetchEntities(maxPerRun = 96)
-                val cached = runCloudThumbnailPrefetch(rows, honorSyncCancel = false)
+                val rows = buildMissingThumbnailEntities(maxPerRun = 96)
+                val cached = runMissingThumbnailPrefetch(rows, honorSyncCancel = false)
                 if (cached > 0) {
                     val prefix = _state.value.lastMessage.substringBefore("\n")
                     _state.value = _state.value.copy(
@@ -2110,16 +2159,36 @@ class SyncCoordinator(
         registerManagedSyncJob(job)
     }
 
-    /** Miniaturas da nuvem para grade/mapa/álbuns — sem baixar originais. */
-    private suspend fun prefetchCloudThumbnails(maxPerRun: Int = 200) {
-        val rows = buildThumbnailPrefetchEntities(maxPerRun)
-        if (rows.isNotEmpty()) {
+    /** Miniaturas locais + nuvem para grade/mapa — várias levas na mesma sync. */
+    private suspend fun prefetchMissingThumbnails(
+        batchSize: Int = THUMB_PREFETCH_BATCH,
+        maxTotalPerSync: Int = THUMB_PREFETCH_MAX_TOTAL,
+    ) {
+        var totalCached = 0
+        var round = 0
+        val maxRounds = (maxTotalPerSync / batchSize).coerceAtLeast(1) + 2
+        while (round < maxRounds && totalCached < maxTotalPerSync) {
+            ensureNotCancelled()
+            val rows = buildMissingThumbnailEntities(batchSize)
+            if (rows.isEmpty()) break
             setRunQueueFromEntities(rows)
+            val batchCached = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
+            totalCached += batchCached
+            round++
+            if (batchCached == 0) break
         }
-        runCloudThumbnailPrefetch(rows, honorSyncCancel = true)
+        if (totalCached > 0) {
+            val remaining = countIndexedMissingThumbnails()
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas",
+                "$totalCached gerada(s)/baixada(s) nesta sync" +
+                    if (remaining > 0) " · $remaining ainda pendente(s)." else ".",
+            )
+        }
     }
 
-    private suspend fun runCloudThumbnailPrefetch(
+    private suspend fun runMissingThumbnailPrefetch(
         rows: List<SyncMetadataEntity>,
         honorSyncCancel: Boolean,
     ): Int {
@@ -2132,8 +2201,8 @@ class SyncCoordinator(
             if (_state.value.isRunning) {
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Baixando miniaturas da nuvem…",
-                    "${index + 1}/${rows.size} nesta passagem · $cached salvas em cache.",
+                    "Gerando e baixando miniaturas…",
+                    "${index + 1}/${rows.size} nesta leva · $cached salvas em cache.",
                     alsoUpdateLastMessage = false,
                 )
             }
@@ -2142,24 +2211,54 @@ class SyncCoordinator(
                 ActiveSyncItem(
                     canonicalPath = row.canonicalPath,
                     displayName = row.displayName,
-                    operationLabel = "Baixando miniatura da nuvem…",
+                    operationLabel = thumbnailOperationLabel(row),
                 ),
             )
             ensureThumbnailCached(row.canonicalPath).getOrNull()?.let { cached++ }
             setActiveSyncItem(null)
             removeFromRunQueue(row.canonicalPath)
         }
-        if (cached > 0 && honorSyncCancel) {
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas da nuvem",
-                "$cached de ${rows.size} nesta passagem (originais não baixados).",
-            )
-        }
         return cached
     }
 
     private suspend fun backfillMissingGpsLocations() {
+        var totalIndexed = 0
+        var hitLimit = false
+        repeat(GPS_BACKFILL_ROUNDS) {
+            val outcome = backfillMissingGpsLocationsOnce(
+                maxLocalProbesPerRun = GPS_LOCAL_BATCH,
+                maxCloudProbesPerRun = GPS_CLOUD_BATCH,
+            )
+            totalIndexed += outcome.indexed
+            hitLimit = hitLimit || outcome.hitProbeLimit
+            if (outcome.indexed == 0) return@repeat
+        }
+        if (totalIndexed > 0) {
+            val remaining = countIndexedMissingGps()
+            val suffix = when {
+                remaining > 0 && hitLimit ->
+                    " · $remaining ainda sem GPS (sincronize de novo ou verifique permissão de mídia)."
+                remaining > 0 ->
+                    " · $remaining sem GPS nos arquivos ou na nuvem."
+                else -> "."
+            }
+            setSyncProgress(
+                SyncProgressPhase.BACKFILL_GPS,
+                "Localização GPS",
+                "$totalIndexed item(ns) indexado(s)$suffix",
+            )
+        }
+    }
+
+    private data class GpsBackfillBatchOutcome(
+        val indexed: Int,
+        val hitProbeLimit: Boolean,
+    )
+
+    private suspend fun backfillMissingGpsLocationsOnce(
+        maxLocalProbesPerRun: Int,
+        maxCloudProbesPerRun: Int,
+    ): GpsBackfillBatchOutcome {
         val rows = syncMetadataDao.getAll().filter { row ->
             row.latitude == null && row.longitude == null &&
                 (
@@ -2167,11 +2266,9 @@ class SyncCoordinator(
                         row.cachedFilePath != null || row.oneDriveItemId != null
                     )
         }
-        if (rows.isEmpty()) return
+        if (rows.isEmpty()) return GpsBackfillBatchOutcome(0, false)
         var cloudProbes = 0
         var localProbes = 0
-        val maxCloudProbesPerRun = 200
-        val maxLocalProbesPerRun = 400
         var indexed = 0
         val candidates = rows.size
         rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
@@ -2184,13 +2281,15 @@ class SyncCoordinator(
                             SyncProgressPhase.BACKFILL_GPS,
                             "Indexando localização (GPS)…",
                             "Analisados $index/$candidates · $indexed com GPS · " +
-                                "local $localProbes/${maxLocalProbesPerRun} · " +
-                                "nuvem $cloudProbes/${maxCloudProbesPerRun}.",
+                                "local $localProbes/$maxLocalProbesPerRun · " +
+                                "nuvem $cloudProbes/$maxCloudProbesPerRun.",
                             alsoUpdateLastMessage = false,
                         )
                     }
                 }
-                val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
+                val hasLocal = row.localMediaId != null ||
+                    row.localContentUri != null ||
+                    row.cachedFilePath != null
                 val resolved = when {
                     hasLocal && localProbes < maxLocalProbesPerRun -> {
                         localProbes++
@@ -2216,18 +2315,8 @@ class SyncCoordinator(
                 )
                 indexed++
             }
-        if (indexed > 0) {
-            val suffix = buildString {
-                if (localProbes >= maxLocalProbesPerRun || cloudProbes >= maxCloudProbesPerRun) {
-                    append(" (limite nesta passagem; sincronize de novo para o restante)")
-                }
-            }
-            setSyncProgress(
-                SyncProgressPhase.BACKFILL_GPS,
-                "Localização GPS",
-                "$indexed item(ns) indexado(s)$suffix",
-            )
-        }
+        val hitLimit = localProbes >= maxLocalProbesPerRun || cloudProbes >= maxCloudProbesPerRun
+        return GpsBackfillBatchOutcome(indexed, hitLimit)
     }
 
     private suspend fun probeCloudExifCaptureTime(oneDriveItemId: String): Long? {
@@ -2524,6 +2613,11 @@ class SyncCoordinator(
     private companion object {
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
+        const val THUMB_PREFETCH_BATCH = 280
+        const val THUMB_PREFETCH_MAX_TOTAL = 1680
+        const val GPS_BACKFILL_ROUNDS = 4
+        const val GPS_LOCAL_BATCH = 500
+        const val GPS_CLOUD_BATCH = 250
     }
 }
 
