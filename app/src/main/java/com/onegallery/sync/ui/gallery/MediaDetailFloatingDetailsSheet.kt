@@ -37,14 +37,16 @@ fun MediaDetailPushDetailsSheet(
     onPanelFractionChange: (Float) -> Unit,
     onPanelDragEnd: (velocityYPxPerSec: Float) -> Unit,
     onPanelDragStart: () -> Unit = {},
+    /** Quando true, o botão Voltar do sistema cancela a seleção (prioridade sobre fechar o painel). */
+    deferBackToSelectionHandler: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     if (canonicalPaths.isEmpty() || panelFraction <= 0f) return
 
-    BackHandler(onBack = {
+    BackHandler(enabled = !deferBackToSelectionHandler) {
         onPanelFractionChange(0f)
         onPanelDragEnd(0f)
-    })
+    }
 
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(LocalDensity.current) {

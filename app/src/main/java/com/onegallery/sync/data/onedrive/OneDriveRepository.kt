@@ -35,6 +35,13 @@ data class RemoteDriveFile(
     val sizeBytes: Long?,
 )
 
+data class RemoteDriveListing(
+    val files: List<RemoteDriveFile>,
+    /** true = só alterações desde o último sync (Graph delta). */
+    val incremental: Boolean,
+    val deltaChangeCount: Int = 0,
+)
+
 data class OneDriveBrowseEntry(
     val id: String,
     val name: String,
@@ -156,14 +163,154 @@ class OneDriveRepository(
         }
     }
 
-    suspend fun listMirrorFiles(): Result<List<RemoteDriveFile>> {
+    suspend fun listMirrorFiles(indexBaseline: List<RemoteDriveFile> = emptyList()): Result<RemoteDriveListing> {
         return runWithToken { token ->
-            val rootId = ensureMirrorRootFolder().getOrThrow()
-            val allItems = listFilesRecursive(token, rootId)
-            allItems.filter { item ->
-                SyncPolicy.shouldIncludeLocalItem(item.canonicalPath, item.name)
+            listMirrorFilesWithDelta(token, indexBaseline)
+        }
+    }
+
+    private suspend fun listMirrorFilesWithDelta(
+        token: String,
+        indexBaseline: List<RemoteDriveFile>,
+    ): RemoteDriveListing {
+        val rootId = configuredSyncRootItemId()
+        val savedDelta = graphFolderPreferences.driveDeltaLink
+        return try {
+            if (savedDelta != null) {
+                val delta = collectDriveDeltaPages(token, savedDelta)
+                graphFolderPreferences.driveDeltaLink = delta.deltaLink
+                RemoteDriveListing(
+                    files = mergeRemoteBaseline(indexBaseline, delta),
+                    incremental = true,
+                    deltaChangeCount = deltaChangeCount(delta),
+                )
+            } else {
+                val delta = collectDriveDeltaPages(token, rootId, initialFromItemId = true)
+                graphFolderPreferences.driveDeltaLink = delta.deltaLink
+                RemoteDriveListing(
+                    files = mergeRemoteBaseline(emptyList(), delta),
+                    incremental = false,
+                    deltaChangeCount = deltaChangeCount(delta),
+                )
+            }
+        } catch (http: HttpException) {
+            if (savedDelta != null && (http.code() == 410 || http.code() == 404)) {
+                graphFolderPreferences.clearDriveDeltaLink()
+                val delta = collectDriveDeltaPages(token, rootId, initialFromItemId = true)
+                graphFolderPreferences.driveDeltaLink = delta.deltaLink
+                RemoteDriveListing(
+                    files = mergeRemoteBaseline(emptyList(), delta),
+                    incremental = false,
+                    deltaChangeCount = deltaChangeCount(delta),
+                )
+            } else {
+                throw http
             }
         }
+    }
+
+    private fun configuredSyncRootItemId(): String {
+        if (graphFolderPreferences.isConfigured()) {
+            return graphFolderPreferences.syncRootItemId!!
+        }
+        throw IllegalStateException("Pasta na nuvem não configurada")
+    }
+
+    private data class DriveDeltaAccum(
+        val changedFiles: MutableList<RemoteDriveFile>,
+        val removedItemIds: MutableSet<String>,
+        var deltaLink: String?,
+    )
+
+    private suspend fun collectDriveDeltaPages(
+        token: String,
+        start: String,
+        initialFromItemId: Boolean = false,
+    ): DriveDeltaAccum {
+        val auth = "Bearer $token"
+        val acc = DriveDeltaAccum(mutableListOf(), mutableSetOf(), null)
+        var nextLink: String? = null
+        var started = false
+        while (true) {
+            val page = when {
+                !started && initialFromItemId ->
+                    graphApi.listFolderDeltaInitial(auth, start)
+                !started ->
+                    graphApi.listDriveNext(start, auth)
+                nextLink != null ->
+                    graphApi.listDriveNext(nextLink!!, auth)
+                else -> break
+            }
+            started = true
+            page.value.forEach { item ->
+                if (item.deleted != null) {
+                    acc.removedItemIds.add(item.id)
+                    return@forEach
+                }
+                if (item.file == null) return@forEach
+                val canonical = canonicalPathForDriveItem(item) ?: return@forEach
+                if (!SyncPolicy.shouldIncludeLocalItem(canonical, item.name)) return@forEach
+                acc.changedFiles.add(
+                    RemoteDriveFile(
+                        itemId = item.id,
+                        name = item.name,
+                        canonicalPath = canonical,
+                        modifiedAtEpoch = parseGraphTime(item.lastModifiedDateTime),
+                        sizeBytes = item.size,
+                    ),
+                )
+            }
+            nextLink = page.nextLink
+            if (page.deltaLink != null) {
+                acc.deltaLink = page.deltaLink
+            }
+            if (nextLink == null) break
+        }
+        if (acc.deltaLink.isNullOrBlank()) {
+            error("Graph delta terminou sem @odata.deltaLink")
+        }
+        return acc
+    }
+
+    private fun deltaChangeCount(delta: DriveDeltaAccum): Int {
+        return delta.changedFiles.size + delta.removedItemIds.size
+    }
+
+    private fun mergeRemoteBaseline(
+        baseline: List<RemoteDriveFile>,
+        delta: DriveDeltaAccum,
+    ): List<RemoteDriveFile> {
+        val byPath = baseline.associateBy { it.canonicalPath }.toMutableMap()
+        if (delta.removedItemIds.isNotEmpty()) {
+            byPath.entries.removeIf { it.value.itemId in delta.removedItemIds }
+        }
+        delta.changedFiles.forEach { file ->
+            byPath.entries.removeIf { entry ->
+                entry.value.itemId == file.itemId && entry.key != file.canonicalPath
+            }
+            byPath[file.canonicalPath] = file
+        }
+        return byPath.values.toList()
+    }
+
+    private fun canonicalPathForDriveItem(item: DriveItem): String? {
+        val parentPath = item.parentReference?.path ?: return null
+        val syncRoot = graphFolderPreferences.syncRootDrivePath?.trim('/')
+            ?: SyncPolicy.ONEDRIVE_MIRROR_ROOT
+        val decoded = java.net.URLDecoder.decode(parentPath, StandardCharsets.UTF_8.name())
+        val rootMarker = "root:"
+        val idx = decoded.indexOf(rootMarker, ignoreCase = true)
+        if (idx < 0) return null
+        val drivePath = decoded.substring(idx + rootMarker.length).trim('/')
+        val parentRel = when {
+            syncRoot.isBlank() -> drivePath
+            drivePath.equals(syncRoot, ignoreCase = true) -> ""
+            drivePath.startsWith("$syncRoot/", ignoreCase = true) ->
+                drivePath.substring(syncRoot.length + 1)
+            else -> return null
+        }
+        val raw = if (parentRel.isBlank()) item.name else "$parentRel/${item.name}"
+        return SyncPaths.shortenWhatsAppPath(raw)
     }
 
     suspend fun uploadLocalFile(

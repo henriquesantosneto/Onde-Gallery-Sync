@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -97,6 +98,10 @@ fun GalleryScreen(
             snackbarHostState.showSnackbar(msg)
             viewModel.clearActionMessage()
         }
+    }
+
+    BackHandler(enabled = state.selectionMode) {
+        viewModel.clearSelection()
     }
 
     var browseFilterWasActive by remember(requiresActiveBrowseFilter) { mutableStateOf(false) }

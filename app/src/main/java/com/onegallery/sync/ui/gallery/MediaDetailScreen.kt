@@ -3,6 +3,8 @@ package com.onegallery.sync.ui.gallery
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -233,8 +236,21 @@ fun MediaDetailScreen(
         else -> detailsSettleFraction > 0.05f
     } && detailPaths.isNotEmpty()
 
-    BackHandler(enabled = state.selectionMode && !detailsPanelOpen) {
+    BackHandler(enabled = state.selectionMode) {
         viewModel.clearSelection()
+    }
+
+    fun handlePhotoSelectionCircleTap() {
+        val path = currentPath ?: return
+        if (state.selectionMode) {
+            if (currentSelected && state.selectedPaths.size == 1) {
+                viewModel.clearSelection()
+            } else {
+                viewModel.toggleSelection(path)
+            }
+        } else {
+            viewModel.enterSelectionMode(path)
+        }
     }
     val showFilmstrip = chromeVisible &&
         !state.selectionMode &&
@@ -324,6 +340,25 @@ fun MediaDetailScreen(
                         if (panelPullEnabled) panelDragModifier() else Modifier,
                     ),
             ) {
+            if (currentPath != null && (state.selectionMode || chromeVisible)) {
+                val circleInteraction = remember { MutableInteractionSource() }
+                Icon(
+                    imageVector = if (currentSelected) Icons.Outlined.CheckCircle
+                    else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = "Selecionar foto",
+                    tint = if (currentSelected) MaterialTheme.colorScheme.primary else Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(start = 12.dp, top = if (chromeVisible) 56.dp else 12.dp)
+                        .clickable(
+                            interactionSource = circleInteraction,
+                            indication = null,
+                            onClick = { handlePhotoSelectionCircleTap() },
+                        )
+                        .padding(8.dp),
+                )
+            }
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -485,6 +520,7 @@ fun MediaDetailScreen(
                         snapDetailsPanel(velocityY)
                         detailsDragging = false
                     },
+                    deferBackToSelectionHandler = state.selectionMode,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()

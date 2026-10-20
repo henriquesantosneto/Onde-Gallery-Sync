@@ -357,7 +357,7 @@ class SyncCoordinator(
                         }
                         else -> if (networkMonitor.isOnline()) {
                             remoteListingAvailable = true
-                            listRemoteFiles().getOrThrow().associateBy { it.canonicalPath }.keys
+                            listRemoteFiles().getOrThrow().files.map { it.canonicalPath }.toSet()
                         } else {
                             remoteListingAvailable = false
                             emptySet()
@@ -858,12 +858,17 @@ class SyncCoordinator(
                         oneDriveRepository.syncRootLabel()?.let { "Pasta: $it" }
                             ?: "Aguarde — pode demorar com bibliotecas grandes.",
                     )
-                    val remoteFiles = listRemoteFiles().getOrThrow()
+                    val remoteListing = listRemoteFiles().getOrThrow()
+                    val remoteFiles = remoteListing.files
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
                     setSyncProgress(
                         SyncProgressPhase.LISTING_REMOTE,
-                        "Listagem na nuvem concluída",
-                        "${remoteFiles.size} arquivo(s) na pasta de sync.",
+                        if (remoteListing.incremental) "Nuvem atualizada (delta)" else "Listagem na nuvem concluída",
+                        if (remoteListing.incremental) {
+                            "${remoteListing.changedCount} alteração(ões) · ${remoteFiles.size} arquivo(s) no índice."
+                        } else {
+                            "${remoteFiles.size} arquivo(s) na pasta de sync."
+                        },
                     )
 
                     var uploaded = 0
@@ -2769,12 +2774,46 @@ class SyncCoordinator(
         return runCatching { java.time.Instant.parse(value).epochSecond }.getOrNull()
     }
 
-    private suspend fun listRemoteFiles(): Result<List<RemoteDriveFile>> {
+    private data class RemoteListingSnapshot(
+        val files: List<RemoteDriveFile>,
+        val incremental: Boolean,
+        val changedCount: Int,
+    )
+
+    private fun remoteBaselineFromIndex(rows: List<SyncMetadataEntity>): List<RemoteDriveFile> {
+        return rows.mapNotNull { row ->
+            val remoteId = row.oneDriveItemId ?: return@mapNotNull null
+            RemoteDriveFile(
+                itemId = remoteId,
+                name = row.displayName,
+                canonicalPath = row.canonicalPath,
+                modifiedAtEpoch = row.remoteModifiedAt,
+                sizeBytes = null,
+            )
+        }
+    }
+
+    private suspend fun listRemoteFiles(): Result<RemoteListingSnapshot> {
         return when (syncPreferences.syncMode) {
-            SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.listMirrorFiles()
-            SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.listMirrorFiles()
-            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.listMirrorFiles()
-            SyncMode.LOCAL_ONLY -> Result.success(emptyList())
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.listMirrorFiles().map { files ->
+                RemoteListingSnapshot(files = files, incremental = false, changedCount = files.size)
+            }
+            SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.listMirrorFiles().map { files ->
+                RemoteListingSnapshot(files = files, incremental = false, changedCount = files.size)
+            }
+            SyncMode.ONEDRIVE_GRAPH -> {
+                val baseline = remoteBaselineFromIndex(syncMetadataDao.getAll())
+                oneDriveRepository.listMirrorFiles(baseline).map { listing ->
+                    RemoteListingSnapshot(
+                        files = listing.files,
+                        incremental = listing.incremental,
+                        changedCount = listing.deltaChangeCount,
+                    )
+                }
+            }
+            SyncMode.LOCAL_ONLY -> Result.success(
+                RemoteListingSnapshot(files = emptyList(), incremental = false, changedCount = 0),
+            )
         }
     }
 

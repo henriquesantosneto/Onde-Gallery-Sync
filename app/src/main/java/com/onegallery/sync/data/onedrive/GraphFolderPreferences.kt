@@ -27,11 +27,26 @@ class GraphFolderPreferences(context: Context) {
     }
 
     fun setSyncRoot(itemId: String, driveRelativePath: String, label: String) {
+        val previousItem = syncRootItemId
+        val previousPath = syncRootDrivePath?.trim('/')
+        val nextPath = driveRelativePath.trim('/')
         prefs.edit()
             .putString(KEY_ITEM_ID, itemId)
-            .putString(KEY_DRIVE_PATH, driveRelativePath.trim('/'))
+            .putString(KEY_DRIVE_PATH, nextPath)
             .putString(KEY_LABEL, label)
             .apply()
+        if (previousItem != itemId || previousPath != nextPath) {
+            clearDriveDeltaLink()
+        }
+    }
+
+    /** Token @odata.deltaLink do Graph para listagem incremental da pasta de sync. */
+    var driveDeltaLink: String?
+        get() = prefs.getString(KEY_DRIVE_DELTA_LINK, null)
+        set(value) = prefs.edit().putString(KEY_DRIVE_DELTA_LINK, value?.trim()?.ifBlank { null }).apply()
+
+    fun clearDriveDeltaLink() {
+        prefs.edit().remove(KEY_DRIVE_DELTA_LINK).apply()
     }
 
     fun clear() {
@@ -42,5 +57,6 @@ class GraphFolderPreferences(context: Context) {
         private const val KEY_ITEM_ID = "sync_root_item_id"
         private const val KEY_DRIVE_PATH = "sync_root_drive_path"
         private const val KEY_LABEL = "sync_root_label"
+        private const val KEY_DRIVE_DELTA_LINK = "sync_root_drive_delta_link"
     }
 }

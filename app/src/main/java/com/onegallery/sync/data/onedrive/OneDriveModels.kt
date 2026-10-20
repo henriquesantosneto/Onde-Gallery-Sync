@@ -5,6 +5,7 @@ import com.squareup.moshi.Json
 data class DriveItemCollection(
     val value: List<DriveItem> = emptyList(),
     @Json(name = "@odata.nextLink") val nextLink: String? = null,
+    @Json(name = "@odata.deltaLink") val deltaLink: String? = null,
 )
 
 data class DriveItem(
@@ -15,6 +16,11 @@ data class DriveItem(
     val folder: DriveFolderFacet?,
     val lastModifiedDateTime: String?,
     val parentReference: ParentReference?,
+    val deleted: DeletedItemFacet? = null,
+)
+
+data class DeletedItemFacet(
+    val state: String? = null,
 )
 
 data class DriveFileFacet(

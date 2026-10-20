@@ -32,6 +32,13 @@ interface GraphApiService {
         @Query("\$top") top: Int = 200,
     ): DriveItemCollection
 
+    @GET("v1.0/me/drive/items/{itemId}/delta")
+    suspend fun listFolderDeltaInitial(
+        @Header("Authorization") authorization: String,
+        @Path("itemId") itemId: String,
+        @Query("\$top") top: Int = 200,
+    ): DriveItemCollection
+
     @GET
     suspend fun listDriveNext(
         @Url url: String,
