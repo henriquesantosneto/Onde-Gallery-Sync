@@ -1,7 +1,9 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.offset
@@ -19,11 +21,15 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +52,13 @@ data class FastScrollMarker(
     val label: String,
     val kind: FastScrollMarkerKind,
 )
+
+/** Espaço reservado na grade (barra repousando). */
+val GalleryFastScrollRailWidth = 32.dp
+
+private val GalleryFastScrollRailWidthActive = 56.dp
+private val GalleryFastScrollTrackWidthIdle = 8.dp
+private val GalleryFastScrollTrackWidthActive = 14.dp
 
 /** Marcadores da barra lateral a partir dos cabeçalhos da grade (ano / mês / dia). */
 fun buildGalleryFastScrollMarkers(
@@ -99,8 +112,6 @@ fun labelForFastScrollGridPosition(
     return null
 }
 
-val GalleryFastScrollRailWidth = 28.dp
-
 @Composable
 fun GalleryTimelineFastScrollRail(
     gridState: LazyGridState,
@@ -111,20 +122,53 @@ fun GalleryTimelineFastScrollRail(
     enabled: Boolean = true,
 ) {
     if (!enabled || entries.size < 12) return
-
     val markers = remember(entries, timelineGrouping) {
         buildGalleryFastScrollMarkers(entries, timelineGrouping)
     }
     if (markers.isEmpty()) return
 
+    GridFastScrollRail(
+        gridState = gridState,
+        itemCount = entries.size,
+        lastIndex = entries.lastIndex,
+        markers = markers,
+        modifier = modifier,
+        labelForScrollIndex = { index ->
+            labelForFastScrollGridPosition(entries, index, gridScale)
+        },
+    )
+}
+
+@Composable
+fun GridFastScrollRail(
+    gridState: LazyGridState,
+    itemCount: Int,
+    lastIndex: Int,
+    markers: List<FastScrollMarker>,
+    labelForScrollIndex: (Int) -> String?,
+    modifier: Modifier = Modifier,
+) {
+    if (itemCount < 8 || markers.isEmpty()) return
+
     val scope = rememberCoroutineScope()
     var railHeightPx by remember { mutableFloatStateOf(0f) }
+    val railHeightState = rememberUpdatedState(railHeightPx)
     var dragging by remember { mutableStateOf(false) }
     var dragLabel by remember { mutableStateOf<String?>(null) }
+    var dragThumbFraction by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
-    val thumbPadPx = with(density) { 12.dp.toPx() }
+    val thumbPadPx = with(density) { 20.dp.toPx() }
 
-    val thumbFraction by remember(gridState, entries, gridScale) {
+    val containerWidth by animateDpAsState(
+        targetValue = if (dragging) GalleryFastScrollRailWidthActive else GalleryFastScrollRailWidth,
+        label = "fastScrollRailWidth",
+    )
+    val trackWidth by animateDpAsState(
+        targetValue = if (dragging) GalleryFastScrollTrackWidthActive else GalleryFastScrollTrackWidthIdle,
+        label = "fastScrollTrackWidth",
+    )
+
+    val scrollThumbFraction by remember(gridState, itemCount) {
         derivedStateOf {
             val info = gridState.layoutInfo
             if (info.totalItemsCount <= 1) return@derivedStateOf 0f
@@ -132,21 +176,32 @@ fun GalleryTimelineFastScrollRail(
             anchor.toFloat() / (info.totalItemsCount - 1).coerceAtLeast(1)
         }
     }
+    val thumbFraction = if (dragging) dragThumbFraction else scrollThumbFraction
 
-    fun scrollToFraction(fraction: Float) {
+    fun resolveScrollIndex(fraction: Float): Int {
         val clamped = fraction.coerceIn(0f, 1f)
-        val targetIndex = (clamped * (entries.lastIndex)).roundToInt()
-        val snapped = markers.minByOrNull { abs(it.itemIndex - targetIndex) }?.itemIndex ?: targetIndex
-        dragLabel = labelForFastScrollGridPosition(entries, snapped, gridScale)
-            ?: markers.minByOrNull { abs(it.itemIndex - targetIndex) }?.label
+        val targetIndex = (clamped * lastIndex.coerceAtLeast(0)).roundToInt()
+        return markers.minByOrNull { abs(it.itemIndex - targetIndex) }?.itemIndex ?: targetIndex
+    }
+
+    fun applyScrollAtFraction(fraction: Float, animate: Boolean) {
+        val clamped = fraction.coerceIn(0f, 1f)
+        dragThumbFraction = clamped
+        val scrollIndex = resolveScrollIndex(clamped).coerceIn(0, lastIndex)
+        dragLabel = labelForScrollIndex(scrollIndex)
+            ?: markers.minByOrNull { abs(it.itemIndex - scrollIndex) }?.label
         scope.launch {
-            gridState.animateScrollToItem(snapped.coerceIn(0, entries.lastIndex))
+            if (animate) {
+                gridState.animateScrollToItem(scrollIndex)
+            } else {
+                gridState.scrollToItem(scrollIndex)
+            }
         }
     }
 
     Box(
         modifier = modifier
-            .width(GalleryFastScrollRailWidth)
+            .width(containerWidth)
             .fillMaxHeight()
             .onSizeChanged { railHeightPx = it.height.toFloat() },
     ) {
@@ -154,52 +209,61 @@ fun GalleryTimelineFastScrollRail(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(6.dp)
-                .padding(vertical = 8.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                .width(trackWidth)
+                .padding(vertical = 12.dp)
+                .clip(RoundedCornerShape(trackWidth / 2))
+                .background(
+                    MaterialTheme.colorScheme.onSurface.copy(
+                        alpha = if (dragging) 0.22f else 0.14f,
+                    ),
+                ),
         )
 
         if (railHeightPx > 0f) {
-            val thumbY = (thumbFraction * railHeightPx).roundToInt()
+            val maxThumbY = (railHeightPx - thumbPadPx).coerceAtLeast(0f)
+            val thumbY = (thumbFraction * maxThumbY).roundToInt()
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .offset {
-                        IntOffset(0, thumbY.coerceIn(0, (railHeightPx - thumbPadPx).toInt()))
-                    }
-                    .width(8.dp)
-                    .padding(end = 1.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .offset { IntOffset(0, thumbY) }
+                    .width(trackWidth + 2.dp)
+                    .clip(RoundedCornerShape(6.dp))
                     .background(
                         MaterialTheme.colorScheme.primary.copy(
-                            alpha = if (dragging) 0.95f else 0.55f,
+                            alpha = if (dragging) 1f else 0.65f,
                         ),
                     )
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = if (dragging) 10.dp else 7.dp),
             )
         }
 
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .pointerInput(entries, markers, gridScale) {
-                    detectVerticalDragGestures(
-                        onDragStart = { offset ->
-                            dragging = true
-                            if (railHeightPx > 0f) {
-                                scrollToFraction(offset.y / railHeightPx)
+                .pointerInput(itemCount, markers, lastIndex) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        dragging = true
+                        val height = railHeightState.value
+                        if (height > 0f) {
+                            applyScrollAtFraction(down.position.y / height, animate = false)
+                        }
+                        var accumulatedY = down.position.y
+                        while (true) {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            val delta = change.positionChange()
+                            if (delta != Offset.Zero) {
+                                change.consume()
                             }
-                        },
-                        onDragEnd = { dragging = false },
-                        onDragCancel = { dragging = false },
-                        onVerticalDrag = { change, _ ->
-                            change.consume()
-                            if (railHeightPx > 0f) {
-                                scrollToFraction(change.position.y / railHeightPx)
+                            accumulatedY = (accumulatedY + delta.y).coerceIn(0f, height)
+                            if (height > 0f) {
+                                applyScrollAtFraction(accumulatedY / height, animate = false)
                             }
-                        },
-                    )
+                        }
+                        dragging = false
+                    }
                 },
         )
 
@@ -208,19 +272,19 @@ fun GalleryTimelineFastScrollRail(
             Surface(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(end = GalleryFastScrollRailWidth + 4.dp),
-                shape = RoundedCornerShape(8.dp),
+                    .padding(end = containerWidth + 6.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = MaterialTheme.colorScheme.inverseSurface,
-                shadowElevation = 4.dp,
+                shadowElevation = 6.dp,
             ) {
                 Text(
                     text = bubbleLabel,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.inverseOnSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 )
             }
         }
