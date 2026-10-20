@@ -1001,8 +1001,8 @@ class SyncCoordinator(
                             val missingGps = countIndexedMissingGps()
                             if (missingThumb > 0) {
                                 append(
-                                    "\nMiniaturas pendentes: $missingThumb — sincronize de novo " +
-                                        "ou abra o item para gerar.",
+                                    "\nMiniaturas pendentes: $missingThumb — " +
+                                        "alguns itens falharam ou o sync foi interrompido.",
                                 )
                             }
                             if (missingGps > 0) {
@@ -2199,37 +2199,44 @@ class SyncCoordinator(
         setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Capas dos álbuns…",
-            "${paths.size} álbum(s) · 1 miniatura cada; demais na rolagem.",
+            "${paths.size} álbum(s) sem capa · 1 miniatura prioritária cada.",
             alsoUpdateLastMessage = false,
         )
         runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
     }
 
-    /** Miniaturas locais + nuvem para grade/mapa — várias levas na mesma sync. */
-    private suspend fun prefetchMissingThumbnails(
-        batchSize: Int = THUMB_PREFETCH_BATCH,
-        maxTotalPerSync: Int = THUMB_PREFETCH_MAX_TOTAL,
-    ) {
+    /** Todas as miniaturas faltantes (local + nuvem), em levas até esgotar o índice. */
+    private suspend fun prefetchMissingThumbnails(batchSize: Int = THUMB_PREFETCH_BATCH) {
+        val pendingAtStart = countIndexedMissingThumbnails()
+        if (pendingAtStart == 0) return
         var totalCached = 0
         var round = 0
-        val maxRounds = (maxTotalPerSync / batchSize).coerceAtLeast(1) + 2
-        while (round < maxRounds && totalCached < maxTotalPerSync) {
+        val maxRounds = (pendingAtStart / batchSize) + 8
+        while (round < maxRounds) {
             ensureNotCancelled()
             val rows = buildMissingThumbnailEntities(batchSize)
             if (rows.isEmpty()) break
             setRunQueueFromEntities(rows)
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas na galeria…",
+                "${totalCached.coerceAtLeast(0)} de ~$pendingAtStart · leva ${round + 1}.",
+                alsoUpdateLastMessage = false,
+            )
             val batchCached = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
             totalCached += batchCached
             round++
             if (batchCached == 0) break
         }
-        if (totalCached > 0) {
-            val remaining = countIndexedMissingThumbnails()
+        val remaining = countIndexedMissingThumbnails()
+        if (totalCached > 0 || remaining > 0) {
             setSyncProgress(
                 SyncProgressPhase.PREFETCH_THUMBNAILS,
                 "Miniaturas",
-                "$totalCached gerada(s)/baixada(s) nesta sync" +
-                    if (remaining > 0) " · $remaining ainda pendente(s)." else ".",
+                when {
+                    remaining == 0 -> "$totalCached gerada(s)/baixada(s); índice completo."
+                    else -> "$totalCached nesta sync · $remaining ainda sem miniatura (falha ou cancelamento)."
+                },
             )
         }
     }
@@ -2661,7 +2668,6 @@ class SyncCoordinator(
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280
-        const val THUMB_PREFETCH_MAX_TOTAL = 1680
         const val GPS_BACKFILL_ROUNDS = 4
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 250

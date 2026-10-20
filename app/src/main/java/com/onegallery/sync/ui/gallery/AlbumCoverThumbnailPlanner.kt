@@ -4,7 +4,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceComponents
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
-/** No sync: no máximo um item por álbum sem capa; o resto vem na rolagem da grade. */
+/** Sync: no máximo um item por álbum ainda sem capa (prioridade); demais miniaturas no prefetch geral. */
 object AlbumCoverThumbnailPlanner {
 
     fun coverPathsNeedingThumbnail(
