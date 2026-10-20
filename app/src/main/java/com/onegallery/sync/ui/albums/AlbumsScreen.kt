@@ -283,14 +283,13 @@ fun AlbumsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
+                        .padding(padding)
+                        .then(gridPinch.gridModifier),
                 ) {
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = albumCellMin),
                         state = albumGridState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .then(gridPinch.gridModifier),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 12.dp,
                             end = 12.dp + GalleryFastScrollRailReservedWidth,

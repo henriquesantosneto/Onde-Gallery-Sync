@@ -254,14 +254,13 @@ fun GalleryScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
+                        .padding(padding)
+                        .then(gridPinch.gridModifier),
                 ) {
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = mediaCellMin),
                         state = gridState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .then(gridPinch.gridModifier),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 8.dp,
                             end = 8.dp + if (dateTimeline) GalleryFastScrollRailReservedWidth else 0.dp,

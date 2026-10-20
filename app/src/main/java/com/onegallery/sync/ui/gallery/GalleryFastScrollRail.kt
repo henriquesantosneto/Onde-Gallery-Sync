@@ -236,10 +236,7 @@ fun GridFastScrollRail(
                 .matchParentSize()
                 .pointerInput(itemCount, lastIndex) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(
-                            requireUnconsumed = false,
-                            pass = PointerEventPass.Initial,
-                        )
+                        val down = awaitFirstDown(requireUnconsumed = false)
                         scope.launch { dragging = true }
                         val height = size.height.toFloat().coerceAtLeast(1f)
                         fun scrubAtY(yPx: Float) {
@@ -256,7 +253,7 @@ fun GridFastScrollRail(
                         }
                         scrubAtY(down.position.y)
                         while (true) {
-                            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) break
                             change.consume()

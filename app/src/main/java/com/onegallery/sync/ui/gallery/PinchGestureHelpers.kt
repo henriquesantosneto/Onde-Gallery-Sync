@@ -1,7 +1,5 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -24,48 +22,42 @@ fun Modifier.observeMultiTouchPinch(
 }
 
 /**
- * Pinça na [LazyVerticalGrid]: distância entre dois dedos (não depende de [detectTransformGestures],
- * que perde para o scroll interno da grade).
+ * Pinça na grade: escuta no passe [PointerEventPass.Initial] (antes do scroll/cliques dos filhos).
  */
 fun Modifier.gridPinchZoomDetector(
     onMultiTouchActive: (Boolean) -> Unit,
     onPinchZoom: (Float) -> Unit,
 ): Modifier = pointerInput(Unit) {
-    awaitEachGesture {
-        try {
-            onMultiTouchActive(false)
-            var previousDistance = 0f
-            var hadTwoPointers = false
+    awaitPointerEventScope {
+        var previousDistance = 0f
+        var hadTwoPointers = false
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val pressed = event.changes.filter { it.pressed }
 
-            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-
-            do {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                val pressed = event.changes.filter { it.pressed }
-
-                if (pressed.size >= 2) {
-                    hadTwoPointers = true
-                    onMultiTouchActive(true)
-                    val p0 = pressed[0].position
-                    val p1 = pressed[1].position
-                    val distance = (p0 - p1).getDistance()
-                    if (previousDistance > 0f) {
-                        val zoom = distance / previousDistance
-                        if (zoom.isFinite() && abs(zoom - 1f) > 0.001f) {
-                            onPinchZoom(zoom)
-                        }
-                    }
-                    previousDistance = distance
-                    pressed.forEach { it.consume() }
-                } else {
-                    previousDistance = 0f
-                    if (!hadTwoPointers) {
-                        onMultiTouchActive(false)
+            if (pressed.size >= 2) {
+                hadTwoPointers = true
+                onMultiTouchActive(true)
+                val p0 = pressed[0].position
+                val p1 = pressed[1].position
+                val distance = (p0 - p1).getDistance()
+                if (previousDistance > 0f) {
+                    val zoom = distance / previousDistance
+                    if (zoom.isFinite() && abs(zoom - 1f) > 0.001f) {
+                        onPinchZoom(zoom)
                     }
                 }
-            } while (event.changes.any { it.pressed })
-        } finally {
-            onMultiTouchActive(false)
+                previousDistance = distance
+                pressed.forEach { it.consume() }
+            } else {
+                previousDistance = 0f
+                if (!pressed.any { it.pressed }) {
+                    hadTwoPointers = false
+                    onMultiTouchActive(false)
+                } else if (!hadTwoPointers) {
+                    onMultiTouchActive(false)
+                }
+            }
         }
     }
 }
