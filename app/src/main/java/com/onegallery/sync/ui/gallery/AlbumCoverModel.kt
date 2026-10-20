@@ -11,17 +11,31 @@ data class LiveAlbumCover(
 )
 
 /**
- * Capa de álbum: mídia **mais recente** do grupo que já tenha fonte local para exibir.
- * Consulta a pasta de miniaturas ao vivo — não depende do snapshot da galeria nem do fim do sync.
+ * Capa de álbum:
+ * 1) mídia **mais recente** (`sortTimestamp`) que já tenha **arquivo de miniatura** no cache do app;
+ * 2) se nenhuma, a mais recente exibível (URI local / original / thumb).
  */
 fun resolveAlbumCoverItem(
     items: List<GalleryDisplayItem>,
     mediaCacheRepository: MediaCacheRepository,
 ): GalleryDisplayItem? {
+    if (items.isEmpty()) return null
+    val withThumbFile = items.filter { hasCachedThumbnailFile(it, mediaCacheRepository) }
+    if (withThumbFile.isNotEmpty()) {
+        return withThumbFile.maxWithOrNull(albumCoverItemComparator)
+    }
     return items
         .asSequence()
         .filter { galleryItemCoverReady(it, mediaCacheRepository) }
         .maxWithOrNull(albumCoverItemComparator)
+}
+
+fun hasCachedThumbnailFile(
+    item: GalleryDisplayItem,
+    mediaCacheRepository: MediaCacheRepository,
+): Boolean {
+    if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath)?.isFile == true) return true
+    return item.cachedPlaceholderThumb?.isFile == true && item.cachedPlaceholderThumb.length() > 0L
 }
 
 fun resolveAlbumCoverModel(
@@ -35,10 +49,7 @@ fun resolveAlbumCoverModel(
 
 private val albumCoverItemComparator = compareBy<GalleryDisplayItem>(
     { it.sortTimestamp },
-    { item ->
-        item.cachedPlaceholderThumb?.takeIf { it.isFile }?.lastModified()
-            ?: 0L
-    },
+    { item -> item.cachedPlaceholderThumb?.takeIf { it.isFile }?.lastModified() ?: 0L },
 )
 
 fun galleryItemCoverReady(
