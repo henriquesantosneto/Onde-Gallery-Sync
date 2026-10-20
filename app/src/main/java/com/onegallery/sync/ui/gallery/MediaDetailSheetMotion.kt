@@ -16,15 +16,12 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.abs
 
-/** Fração da altura da tela ocupada pelo painel de detalhes (0 = fechado). */
 object MediaDetailSheetAnchors {
     const val FULL = 0.88f
-    /** Detalhes resumidos (data, arquivo, câmera, mapa). */
     const val SIMPLE = 0.45f
 
     private val anchors = floatArrayOf(0f, SIMPLE, FULL)
 
-    /** Snap ao âncora mais próximo; fling vertical promove/rebaixa um degrau. */
     fun snap(fraction: Float, velocityYPxPerSec: Float = 0f): Float {
         val flingUp = velocityYPxPerSec < -780f
         val flingDown = velocityYPxPerSec > 480f
@@ -89,17 +86,14 @@ fun rememberMediaDetailSheetFraction(
     val animatable = remember { Animatable(0f) }
     LaunchedEffect(dragging, settleTarget) {
         if (!dragging) {
-            animatable.animateTo(settleTarget, tween(durationMillis = 180))
+            animatable.animateTo(settleTarget, tween(durationMillis = 200))
         }
     }
     return if (dragging) dragFraction else animatable.value
 }
 
-private const val VERTICAL_DOMINANCE_RATIO = 1.02f
+private const val VERTICAL_DOMINANCE_RATIO = 1.42f
 
-/**
- * Arraste vertical no pass [PointerEventPass.Initial]: horizontal segue para o pager (Main).
- */
 fun Modifier.draggableDetailPanelHeight(
     enabled: Boolean,
     screenHeightPx: Float,
@@ -129,6 +123,7 @@ fun Modifier.draggableDetailPanelHeight(
             var dragging = false
             var baseFraction = fractionBaseState.floatValue.coerceIn(0f, maxFraction)
             val velocityTracker = VelocityTracker()
+            val panelClosed = baseFraction < 0.05f
 
             while (true) {
                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
@@ -152,7 +147,9 @@ fun Modifier.draggableDetailPanelHeight(
                     if (ax < slop && ay < slop) continue
 
                     when {
-                        baseFraction > 0.03f && ay > slop && ay >= ax -> {
+                        ax > ay * 1.08f -> passedToChildren = true
+                        panelClosed && sumY > touchSlop -> passedToChildren = true
+                        !panelClosed && baseFraction > 0.03f && ay > slop && ay >= ax -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -161,7 +158,7 @@ fun Modifier.draggableDetailPanelHeight(
                                 panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
                         }
-                        ay > ax * VERTICAL_DOMINANCE_RATIO -> {
+                        panelClosed && sumY < 0f && ay > ax * 1.28f -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -170,8 +167,15 @@ fun Modifier.draggableDetailPanelHeight(
                                 panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
                         }
-                        ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToChildren = true
-                        baseFraction < 0.05f && sumY > touchSlop -> passedToChildren = true
+                        !panelClosed && ay > ax * VERTICAL_DOMINANCE_RATIO -> {
+                            lockedVertical = true
+                            change.consume()
+                            dragging = true
+                            onDragStart()
+                            onDragFraction(
+                                panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
+                            )
+                        }
                     }
                 } else {
                     change.consume()

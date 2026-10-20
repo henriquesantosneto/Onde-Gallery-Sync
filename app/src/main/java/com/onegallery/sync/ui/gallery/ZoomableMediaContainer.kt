@@ -66,6 +66,15 @@ fun ZoomableMediaContainer(
                 .pointerInput(resetKey) {
                     coroutineScope {
                         launch {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val multi = event.changes.count { it.pressed } >= 2
+                                    if (multi) reportZoomActive(multiTouch = true)
+                                }
+                            }
+                        }
+                        launch {
                             awaitEachGesture {
                                 try {
                                     var previousDistance = 0f
@@ -81,15 +90,12 @@ fun ZoomableMediaContainer(
                                             if (previousDistance > 0f) {
                                                 val zoom = distance / previousDistance
                                                 if (zoom.isFinite() && abs(zoom - 1f) > 0.0008f) {
-                                                    transform.applyPinchZoom(
-                                                        (p0 + p1) / 2f,
-                                                        zoom,
-                                                    )
+                                                    val centroid = (p0 + p1) / 2f
+                                                    transform.applyPinchZoom(centroid, zoom)
                                                     reportZoomActive(multiTouch = true)
                                                 }
                                             }
                                             previousDistance = distance
-                                            pressed.forEach { it.consume() }
                                         } else {
                                             previousDistance = 0f
                                         }
@@ -105,9 +111,10 @@ fun ZoomableMediaContainer(
                     if (transform.scale <= ZOOM_ACTIVE_THRESHOLD) return@pointerInput
                     detectTransformGestures(panZoomLock = true) { centroid, pan, zoom, _ ->
                         reportZoomActive(multiTouch = true)
-                        if (abs(zoom - 1f) > 0.001f) {
-                            transform.applyPinchZoom(centroid, zoom)
-                        }
+                        val previousScale = transform.scale
+                        val newScale = (previousScale * zoom).coerceIn(1f, 5f)
+                        val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
+                        transform.applyPinchZoom(centroid, scaleFactor)
                         if (pan != Offset.Zero) {
                             transform.panBy(pan)
                         }

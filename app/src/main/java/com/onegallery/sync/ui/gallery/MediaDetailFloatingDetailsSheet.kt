@@ -55,8 +55,7 @@ fun MediaDetailPushDetailsSheet(
     val multiSelect = canonicalPaths.size > 1
     val gestureBaseFraction = remember { mutableFloatStateOf(panelFraction) }
     gestureBaseFraction.floatValue = panelFraction
-    val atSimpleLevel = contentLevel == MediaDetailContentLevel.Simple
-    val panelDragModifier = Modifier.draggableDetailPanelHeight(
+    val handleDragModifier = Modifier.draggableDetailPanelHeight(
         enabled = true,
         screenHeightPx = screenHeightPx,
         fractionBaseState = gestureBaseFraction,
@@ -70,14 +69,13 @@ fun MediaDetailPushDetailsSheet(
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(Color(0xFF0D0D0D))
-            .navigationBarsPadding()
-            .then(if (atSimpleLevel) panelDragModifier else Modifier),
+            .navigationBarsPadding(),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .then(if (!atSimpleLevel) panelDragModifier else Modifier)
+                .then(handleDragModifier)
                 .padding(top = 10.dp, bottom = 6.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -104,7 +102,7 @@ fun MediaDetailPushDetailsSheet(
                 showAdvancedToggle = false,
                 scrollContentInternally = multiSelect,
                 scrollBelowMapOnly = !multiSelect,
-                firstSectionDragModifier = if (!atSimpleLevel) panelDragModifier else Modifier,
+                firstSectionDragModifier = Modifier,
                 modifier = if (multiSelect) {
                     Modifier.fillMaxWidth()
                 } else {

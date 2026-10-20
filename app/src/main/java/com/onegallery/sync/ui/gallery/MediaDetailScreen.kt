@@ -248,20 +248,32 @@ fun MediaDetailScreen(
             configuration.screenHeightDp.dp.toPx()
         }
         val detailsVisible = detailsDisplayFraction > 0.02f
+        val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
         val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
         gestureBaseFraction.floatValue = if (detailsDragging) {
             detailsDragFraction
         } else {
             detailsSettleFraction
         }
+        val panelClosed = gestureBaseFraction.floatValue < 0.05f && !detailsDragging
+        val panelClosedForSwipeUp = detailsSettleFraction < 0.05f && !detailsDragging
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
+                    .align(Alignment.TopCenter)
+                    .openDetailsOnSwipeUp(
+                        enabled = swipeUpForDetails &&
+                            pagerScrollEnabled &&
+                            panelClosedForSwipeUp,
+                        onSwipeUp = { openDetailsToSimple() },
+                    )
                     .draggableDetailPanelHeight(
                         enabled = swipeUpForDetails && pagerScrollEnabled,
                         screenHeightPx = screenHeightPx,
                         fractionBaseState = gestureBaseFraction,
+                        activationEdgeHeightFraction = if (panelClosed) 0.38f else 1f,
                         onDragStart = {
                             detailsDragging = true
                             detailsDragFraction = gestureBaseFraction.floatValue
@@ -279,7 +291,7 @@ fun MediaDetailScreen(
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled && !detailsDragging,
+                userScrollEnabled = pagerScrollEnabled,
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
