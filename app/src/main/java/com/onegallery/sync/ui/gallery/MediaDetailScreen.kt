@@ -79,9 +79,6 @@ fun MediaDetailScreen(
     /** true = oculta barras e carrossel (toque na foto alterna). */
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
-    var multiTouchOnPhoto by remember { mutableStateOf(false) }
-    var photoZoomActive by remember { mutableStateOf(false) }
-    var activePageZoomTransform by remember { mutableStateOf<ZoomTransformHolder?>(null) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -182,8 +179,6 @@ fun MediaDetailScreen(
         detailsDragFraction = 0f
         detailsDragging = false
         activePageError = null
-        photoZoomActive = false
-        multiTouchOnPhoto = false
         pagerScrollEnabled = true
     }
 
@@ -256,79 +251,36 @@ fun MediaDetailScreen(
             detailsSettleFraction,
             max(detailsDisplayFraction, if (detailsDragging) detailsDragFraction else 0f),
         )
-        val detailPanelDragEnabled = swipeUpForDetails && !photoZoomActive && !multiTouchOnPhoto
         val panelClosed = gestureBaseFraction.floatValue < 0.05f && !detailsDragging
-        val pagerManualDragEnabled = pagerPaths.size > 1 &&
-            pagerScrollEnabled &&
-            !multiTouchOnPhoto &&
-            !photoZoomActive &&
-            !detailsDragging &&
-            detailsSettleFraction < 0.05f
-        val detailPanelDragModifier =
-            if (detailPanelDragEnabled) {
-                Modifier.draggableDetailPanelHeight(
-                    enabled = true,
-                    screenHeightPx = screenHeightPx,
-                    fractionBaseState = gestureBaseFraction,
-                    activationEdgeHeightFraction = if (panelClosed) 0.36f else 1f,
-                    onDragStart = {
-                        detailsDragging = true
-                        detailsDragFraction = gestureBaseFraction.floatValue
-                    },
-                    onDragFraction = { fraction ->
-                        detailsDragging = true
-                        detailsDragFraction = fraction
-                    },
-                    onDragEnd = { velocityY ->
-                        snapDetailsPanel(velocityY)
-                        detailsDragging = false
-                    },
-                )
-            } else {
-                Modifier
-            }
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
                     .align(Alignment.TopCenter)
-                    .observeMultiTouchPinch { active ->
-                        multiTouchOnPhoto = active
-                        if (active) pagerScrollEnabled = false
-                    }
-                    .then(
-                        activePageZoomTransform?.let { zoomTransform ->
-                            Modifier.detailPhotoPinchZoom(
-                                transform = zoomTransform,
-                                onPinching = { pinching ->
-                                    if (pinching) {
-                                        multiTouchOnPhoto = true
-                                        pagerScrollEnabled = false
-                                    }
-                                },
-                                onTransformChanged = {
-                                    val zoomed = zoomTransform.scale > 1.02f
-                                    photoZoomActive = zoomed
-                                    pagerScrollEnabled = !zoomed
-                                },
-                            )
-                        } ?: Modifier,
-                    )
-                    .then(detailPanelDragModifier),
+                    .draggableDetailPanelHeight(
+                        enabled = swipeUpForDetails && pagerScrollEnabled,
+                        screenHeightPx = screenHeightPx,
+                        fractionBaseState = gestureBaseFraction,
+                        activationEdgeHeightFraction = if (panelClosed) 0.36f else 1f,
+                        onDragStart = {
+                            detailsDragging = true
+                            detailsDragFraction = gestureBaseFraction.floatValue
+                        },
+                        onDragFraction = { fraction ->
+                            detailsDragging = true
+                            detailsDragFraction = fraction
+                        },
+                        onDragEnd = { velocityY ->
+                            snapDetailsPanel(velocityY)
+                            detailsDragging = false
+                        },
+                    ),
             ) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .mediaDetailPagerHorizontalDrag(
-                        enabled = pagerManualDragEnabled,
-                        pagerState = pagerState,
-                    ),
-                userScrollEnabled = !pagerManualDragEnabled &&
-                    pagerScrollEnabled &&
-                    !multiTouchOnPhoto &&
-                    !photoZoomActive,
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = pagerScrollEnabled,
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
@@ -340,18 +292,13 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onToggleImmersive = { immersive = !immersive },
-                    onZoomActiveChanged = { active ->
-                        photoZoomActive = active
-                        pagerScrollEnabled = !active
-                    },
+                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
                     onActivePageError = { err ->
                         if (page == pagerState.currentPage) {
                             activePageError = err
                         }
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
-                    onActiveZoomTransform = { activePageZoomTransform = it },
-                    detailPanelDragModifier = detailPanelDragModifier,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -548,8 +495,6 @@ private fun MediaDetailPage(
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
-    onActiveZoomTransform: (ZoomTransformHolder?) -> Unit = {},
-    detailPanelDragModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
@@ -662,15 +607,6 @@ private fun MediaDetailPage(
 
     val display = item
     val statusItem = liveItem ?: display
-    val playbackUri = display?.playbackUri()
-    LaunchedEffect(isActivePage, canonicalPath) {
-        if (!isActivePage) {
-            onActiveZoomTransform(null)
-            return@LaunchedEffect
-        }
-        onActiveZoomTransform(zoomTransform)
-    }
-
     Box(modifier = modifier) {
         when {
             loading && display == null -> {
