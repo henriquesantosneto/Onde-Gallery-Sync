@@ -66,21 +66,12 @@ fun ZoomableMediaContainer(
                 .pointerInput(resetKey) {
                     coroutineScope {
                         launch {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    val multi = event.changes.count { it.pressed } >= 2
-                                    if (multi) reportZoomActive(multiTouch = true)
-                                }
-                            }
-                        }
-                        launch {
                             awaitEachGesture {
                                 try {
                                     var previousDistance = 0f
-                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
                                     do {
-                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val event = awaitPointerEvent(PointerEventPass.Main)
                                         val pressed = event.changes.filter { it.pressed }
                                         if (pressed.size >= 2) {
                                             reportZoomActive(multiTouch = true)

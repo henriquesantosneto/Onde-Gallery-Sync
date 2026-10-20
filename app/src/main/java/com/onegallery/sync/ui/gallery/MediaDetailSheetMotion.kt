@@ -93,7 +93,7 @@ fun rememberMediaDetailSheetFraction(
 ): Float {
     val animatable = remember { Animatable(0f) }
     LaunchedEffect(dragging, dragFraction) {
-        if (dragging) {
+        if (!dragging) {
             animatable.snapTo(dragFraction)
         }
     }
@@ -102,11 +102,14 @@ fun rememberMediaDetailSheetFraction(
             animatable.animateTo(settleTarget, tween(durationMillis = 220))
         }
     }
-    return animatable.value
+    // Durante o arraste usa fração direta (LaunchedEffect snap atrasava 1 frame → tremor).
+    return if (dragging) dragFraction else animatable.value
 }
 
-/** Igual ao ajuste “arraste confortável” (c8f41e4): vertical ganha cedo ao puxar detalhes. */
-private const val VERTICAL_DOMINANCE_RATIO = 1.02f
+/** Painel aberto: vertical ganha cedo. Fechado: exige gesto mais vertical (pager não treme). */
+private const val VERTICAL_DOMINANCE_PANEL_OPEN = 1.05f
+private const val VERTICAL_DOMINANCE_PANEL_CLOSED_UP = 1.14f
+private const val HORIZONTAL_PASS_RATIO = 1.06f
 
 /**
  * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
@@ -165,8 +168,14 @@ fun Modifier.draggableDetailPanelHeight(
                     val slop = touchSlop * if (baseFraction > 0.03f) 0.45f else 1f
                     if (ax < slop && ay < slop) continue
 
+                    val panelOpen = baseFraction > 0.03f
+                    val verticalRatio = when {
+                        panelOpen -> VERTICAL_DOMINANCE_PANEL_OPEN
+                        sumY < 0f -> VERTICAL_DOMINANCE_PANEL_CLOSED_UP
+                        else -> VERTICAL_DOMINANCE_PANEL_CLOSED_UP
+                    }
                     when {
-                        baseFraction > 0.03f && ay > slop && ay >= ax -> {
+                        panelOpen && ay > slop && ay >= ax -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -176,7 +185,7 @@ fun Modifier.draggableDetailPanelHeight(
                             )
                             onDragFraction(fraction)
                         }
-                        ay > ax * VERTICAL_DOMINANCE_RATIO -> {
+                        !panelOpen && sumY < 0f && ay > ax * verticalRatio -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -186,8 +195,11 @@ fun Modifier.draggableDetailPanelHeight(
                             )
                             onDragFraction(fraction)
                         }
-                        ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToChildren = true
-                        baseFraction < 0.05f && sumY > touchSlop -> passedToChildren = true
+                        !panelOpen && ay > ax * verticalRatio && sumY >= 0f -> {
+                            passedToChildren = true
+                        }
+                        ax > ay * HORIZONTAL_PASS_RATIO -> passedToChildren = true
+                        !panelOpen && sumY > touchSlop -> passedToChildren = true
                     }
                 } else {
                     change.consume()

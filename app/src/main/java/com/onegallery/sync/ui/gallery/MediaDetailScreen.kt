@@ -214,7 +214,10 @@ fun MediaDetailScreen(
         val pool = if (liveItems.isNotEmpty()) itemsByPath else contextItems.associateBy { it.canonicalPath }
         pagerPaths.mapNotNull { path -> pool[path] }
     }
-    val detailsPanelOpen = detailsDisplayFraction > 0.05f && detailPaths.isNotEmpty()
+    val detailsPanelOpen = when {
+        detailsDragging -> detailsDragFraction > 0.14f
+        else -> detailsSettleFraction > 0.05f
+    } && detailPaths.isNotEmpty()
     val showFilmstrip = chromeVisible &&
         !state.selectionMode &&
         !detailsPanelOpen &&
@@ -253,29 +256,32 @@ fun MediaDetailScreen(
         } else {
             detailsSettleFraction
         }
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .draggableDetailPanelHeight(
+                    enabled = swipeUpForDetails && pagerScrollEnabled,
+                    screenHeightPx = screenHeightPx,
+                    fractionBaseState = gestureBaseFraction,
+                    onDragStart = {
+                        detailsDragging = true
+                        detailsDragFraction = gestureBaseFraction.floatValue
+                    },
+                    onDragFraction = { fraction ->
+                        detailsDragging = true
+                        detailsDragFraction = fraction
+                    },
+                    onDragEnd = { velocityY ->
+                        snapDetailsPanel(velocityY)
+                        detailsDragging = false
+                    },
+                ),
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
-                    .align(Alignment.TopCenter)
-                    .draggableDetailPanelHeight(
-                        enabled = swipeUpForDetails && pagerScrollEnabled,
-                        screenHeightPx = screenHeightPx,
-                        fractionBaseState = gestureBaseFraction,
-                        onDragStart = {
-                            detailsDragging = true
-                            detailsDragFraction = gestureBaseFraction.floatValue
-                        },
-                        onDragFraction = { fraction ->
-                            detailsDragging = true
-                            detailsDragFraction = fraction
-                        },
-                        onDragEnd = { velocityY ->
-                            snapDetailsPanel(velocityY)
-                            detailsDragging = false
-                        },
-                    ),
+                    .align(Alignment.TopCenter),
             ) {
             HorizontalPager(
                 state = pagerState,
