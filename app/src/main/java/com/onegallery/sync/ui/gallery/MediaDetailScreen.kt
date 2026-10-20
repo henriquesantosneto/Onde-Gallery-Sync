@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -249,35 +250,16 @@ fun MediaDetailScreen(
         }
         val detailsVisible = detailsDisplayFraction > 0.02f
         val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
-        val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
-        gestureBaseFraction.floatValue = if (detailsDragging) {
-            detailsDragFraction
-        } else {
-            detailsSettleFraction
+        val panelFractionBase = {
+            if (detailsDragging) detailsDragFraction else detailsSettleFraction
         }
+        val panelClosed = detailsSettleFraction < 0.05f && !detailsDragging
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
-                    .align(Alignment.TopCenter)
-                    .draggableDetailPanelHeight(
-                        enabled = swipeUpForDetails && pagerScrollEnabled,
-                        screenHeightPx = screenHeightPx,
-                        fractionBaseState = gestureBaseFraction,
-                        onDragStart = {
-                            detailsDragging = true
-                            detailsDragFraction = gestureBaseFraction.floatValue
-                        },
-                        onDragFraction = { fraction ->
-                            detailsDragging = true
-                            detailsDragFraction = fraction
-                        },
-                        onDragEnd = { velocityY ->
-                            snapDetailsPanel(velocityY)
-                            detailsDragging = false
-                        },
-                    ),
+                    .align(Alignment.TopCenter),
             ) {
             HorizontalPager(
                 state = pagerState,
@@ -391,6 +373,39 @@ fun MediaDetailScreen(
             }
             }
 
+            if (
+                swipeUpForDetails &&
+                pagerScrollEnabled &&
+                panelClosed &&
+                detailPaths.isNotEmpty()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(88.dp)
+                        .navigationBarsPadding()
+                        .padding(bottom = if (showFilmstrip) 72.dp else 0.dp)
+                        .detailPanelVerticalDrag(
+                            enabled = true,
+                            screenHeightPx = screenHeightPx,
+                            fractionBase = panelFractionBase,
+                            onDragStart = {
+                                detailsDragging = true
+                                detailsDragFraction = panelFractionBase()
+                            },
+                            onDragFraction = { fraction ->
+                                detailsDragging = true
+                                detailsDragFraction = fraction
+                            },
+                            onDragEnd = { velocityY ->
+                                snapDetailsPanel(velocityY)
+                                detailsDragging = false
+                            },
+                        ),
+                )
+            }
+
             if (detailsVisible && detailPaths.isNotEmpty()) {
                 MediaDetailPushDetailsSheet(
                     canonicalPaths = detailPaths,
@@ -399,6 +414,10 @@ fun MediaDetailScreen(
                     mediaCacheRepository = mediaCacheRepository,
                     panelFraction = detailsDisplayFraction,
                     contentLevel = detailsContentLevel,
+                    onPanelDragStart = {
+                        detailsDragging = true
+                        detailsDragFraction = panelFractionBase()
+                    },
                     onPanelFractionChange = { fraction ->
                         detailsDragging = true
                         detailsDragFraction = fraction

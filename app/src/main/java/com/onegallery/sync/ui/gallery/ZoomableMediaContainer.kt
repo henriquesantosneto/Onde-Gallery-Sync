@@ -2,6 +2,8 @@ package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +27,10 @@ import kotlin.math.abs
 private const val MIN_SCALE = 1f
 private const val ZOOM_ACTIVE_THRESHOLD = 1.02f
 
+/**
+ * Pinça/pan só na mídia: consome toque com 2+ dedos ou quando já ampliado.
+ * Um dedo em escala 1 não consome → pager horizontal funciona.
+ */
 @Composable
 fun ZoomableMediaContainer(
     resetKey: Any?,
@@ -35,15 +41,14 @@ fun ZoomableMediaContainer(
     onSingleTap: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    val zoomActiveCallback = rememberUpdatedState(onZoomActiveChanged)
-    val transformState = rememberUpdatedState(transform)
-    var lastZoomActiveReported by remember(resetKey) { mutableStateOf(false) }
+    val transformRef = rememberUpdatedState(transform)
+    val onZoomRef = rememberUpdatedState(onZoomActiveChanged)
+    var lastZoomActive by remember(resetKey) { mutableStateOf(false) }
 
-    fun reportZoomActive(multiTouch: Boolean) {
-        val active = multiTouch || transformState.value.scale > ZOOM_ACTIVE_THRESHOLD
-        if (active != lastZoomActiveReported) {
-            lastZoomActiveReported = active
-            zoomActiveCallback.value(active)
+    fun publishZoomActive(active: Boolean) {
+        if (active != lastZoomActive) {
+            lastZoomActive = active
+            onZoomRef.value(active)
         }
     }
 
@@ -62,75 +67,52 @@ fun ZoomableMediaContainer(
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
                 .pointerInput(resetKey) {
-                    awaitPointerEventScope {
-                        var previousDistance = 0f
-                        var pinching = false
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
                             val pressed = event.changes.filter { it.pressed }
+                            val t = transformRef.value
                             when {
                                 pressed.size >= 2 -> {
-                                    if (!pinching) {
-                                        pinching = true
-                                        reportZoomActive(multiTouch = true)
+                                    publishZoomActive(true)
+                                    val zoom = event.calculateZoom()
+                                    val pan = event.calculatePan()
+                                    if (abs(zoom - 1f) > 0.001f) {
+                                        val centroid = pressed.fold(Offset.Zero) { acc, c ->
+                                            acc + c.position
+                                        } / pressed.size.toFloat()
+                                        t.applyPinchZoom(centroid, zoom)
                                     }
-                                    val p0 = pressed[0].position
-                                    val p1 = pressed[1].position
-                                    val distance = (p0 - p1).getDistance().coerceAtLeast(1f)
-                                    if (previousDistance > 0f) {
-                                        val zoom = distance / previousDistance
-                                        if (zoom.isFinite() && abs(zoom - 1f) > 0.0008f) {
-                                            transformState.value.applyPinchZoom(
-                                                (p0 + p1) / 2f,
-                                                zoom,
-                                            )
-                                        }
+                                    if (t.scale > ZOOM_ACTIVE_THRESHOLD && pan != Offset.Zero) {
+                                        t.panBy(pan)
                                     }
-                                    previousDistance = distance
                                     pressed.forEach { it.consume() }
                                 }
-                                pressed.isEmpty() -> {
-                                    previousDistance = 0f
-                                    if (pinching) {
-                                        pinching = false
-                                        reportZoomActive(multiTouch = false)
+                                pressed.size == 1 && t.scale > ZOOM_ACTIVE_THRESHOLD -> {
+                                    publishZoomActive(true)
+                                    val change = pressed.first()
+                                    val delta = change.positionChange()
+                                    if (delta != Offset.Zero) {
+                                        change.consume()
+                                        t.panBy(delta)
                                     }
                                 }
-                                else -> {
-                                    if (!pinching) previousDistance = 0f
+                                pressed.isEmpty() -> {
+                                    publishZoomActive(t.scale > ZOOM_ACTIVE_THRESHOLD)
                                 }
                             }
-                        }
-                    }
-                }
-                .pointerInput(resetKey) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        if (transformState.value.scale <= ZOOM_ACTIVE_THRESHOLD) return@awaitEachGesture
-                        val touchSlop = viewConfiguration.touchSlop
-                        var pastSlop = false
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            if (transformState.value.scale <= ZOOM_ACTIVE_THRESHOLD) break
-                            val delta = change.positionChange()
-                            if (!pastSlop) {
-                                if (kotlin.math.hypot(delta.x.toDouble(), delta.y.toDouble()) < touchSlop) {
-                                    continue
-                                }
-                                pastSlop = true
-                            }
-                            change.consume()
-                            transformState.value.panBy(delta)
-                        }
+                        } while (event.changes.any { it.pressed })
+                        publishZoomActive(
+                            transformRef.value.scale > ZOOM_ACTIVE_THRESHOLD,
+                        )
                     }
                 }
                 .pointerInput(resetKey, interceptSingleTap) {
                     if (!interceptSingleTap) return@pointerInput
                     detectTapGestures(
                         onTap = {
-                            if (abs(transformState.value.scale - MIN_SCALE) < 0.05f) {
+                            if (abs(transformRef.value.scale - MIN_SCALE) < 0.05f) {
                                 onSingleTap()
                             }
                         },

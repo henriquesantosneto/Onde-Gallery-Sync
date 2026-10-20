@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,9 +24,6 @@ import androidx.compose.ui.unit.dp
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.sync.SyncCoordinator
 
-/**
- * Painel de detalhes abaixo da foto: altura definida pelo arraste do usuário.
- */
 @Composable
 fun MediaDetailPushDetailsSheet(
     canonicalPaths: List<String>,
@@ -39,6 +34,7 @@ fun MediaDetailPushDetailsSheet(
     contentLevel: MediaDetailContentLevel,
     onPanelFractionChange: (Float) -> Unit,
     onPanelDragEnd: (velocityYPxPerSec: Float) -> Unit,
+    onPanelDragStart: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (canonicalPaths.isEmpty() || panelFraction <= 0f) return
@@ -53,16 +49,7 @@ fun MediaDetailPushDetailsSheet(
         configuration.screenHeightDp.dp.toPx()
     }
     val multiSelect = canonicalPaths.size > 1
-    val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
-    gestureBaseFraction.floatValue = panelFraction
-    val handleDragModifier = Modifier.draggableDetailPanelHeight(
-        enabled = true,
-        screenHeightPx = screenHeightPx,
-        fractionBaseState = gestureBaseFraction,
-        onDragStart = { onPanelFractionChange(gestureBaseFraction.floatValue) },
-        onDragFraction = onPanelFractionChange,
-        onDragEnd = onPanelDragEnd,
-    )
+    val fractionBase = { panelFraction }
 
     Column(
         modifier = modifier
@@ -75,7 +62,14 @@ fun MediaDetailPushDetailsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .then(handleDragModifier)
+                .detailPanelVerticalDrag(
+                    enabled = true,
+                    screenHeightPx = screenHeightPx,
+                    fractionBase = fractionBase,
+                    onDragStart = onPanelDragStart,
+                    onDragFraction = onPanelFractionChange,
+                    onDragEnd = onPanelDragEnd,
+                )
                 .padding(top = 10.dp, bottom = 6.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
