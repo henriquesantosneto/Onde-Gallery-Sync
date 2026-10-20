@@ -67,6 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
+import com.onegallery.sync.ui.gallery.AlbumGridCoverImage
 import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
 import com.onegallery.sync.ui.gallery.AlbumListSort
 import com.onegallery.sync.ui.gallery.GalleryFastScrollRailReservedWidth
@@ -316,6 +317,8 @@ fun AlbumsScreen(
                                     selected = selected,
                                     selectionMode = !isPlace && state.albumSelectionMode,
                                     gesturesEnabled = !gridPinch.blockItemGestures,
+                                    coverRefreshEpoch = state.albumCoverRefreshEpoch,
+                                    resolveLiveCover = viewModel::liveAlbumCoverFor,
                                     onClick = {
                                         if (!isPlace && state.albumSelectionMode) {
                                             viewModel.toggleAlbumSelection(entry.album.filterKey)
@@ -480,6 +483,8 @@ private fun AlbumGridTile(
     selected: Boolean,
     selectionMode: Boolean,
     gesturesEnabled: Boolean = true,
+    coverRefreshEpoch: Long,
+    resolveLiveCover: suspend (MediaAlbum) -> Any?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -502,21 +507,14 @@ private fun AlbumGridTile(
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center,
         ) {
-            if (album.coverModel != null) {
-                AsyncImage(
-                    model = album.coverModel,
-                    contentDescription = album.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Icon(
-                    if (isPlace) Icons.Outlined.Place else Icons.Outlined.PhotoAlbum,
-                    contentDescription = null,
-                    modifier = Modifier.padding(32.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            AlbumGridCoverImage(
+                album = album,
+                isPlace = isPlace,
+                fallbackCover = album.coverModel,
+                coverRefreshEpoch = coverRefreshEpoch,
+                resolveLiveCover = resolveLiveCover,
+                contentDescription = album.title,
+            )
             if (selectionMode) {
                 Icon(
                     imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,

@@ -49,6 +49,8 @@ data class GalleryUiState(
     val actionMessage: String? = null,
     /** Itens com coordenadas GPS (mapa de locais). */
     val geoItems: List<GalleryDisplayItem> = emptyList(),
+    /** Sinal para recarregar capas visíveis na grade de álbuns (miniaturas novas no disco). */
+    val albumCoverRefreshEpoch: Long = 0L,
 )
 
 private data class SelectionSlice(
@@ -98,6 +100,8 @@ class GalleryViewModel(
 
     private val albumCoverLocalIndex = AlbumCoverLocalIndex()
     private var lastAlbumCoverRefreshEpoch = 0L
+    @Volatile
+    private var latestLibraryItems: List<GalleryDisplayItem> = emptyList()
 
     private data class LibrarySnapshot(
         val allItems: List<GalleryDisplayItem>,
@@ -156,6 +160,7 @@ class GalleryViewModel(
             albumCoverLocalIndex.invalidateAfterThumbnailBatch()
         }
         val allItems = snapshot.allItems
+        latestLibraryItems = allItems
         val userAlbums = snapshot.userAlbums
         val items = allItems
             .filter { item ->
@@ -194,6 +199,7 @@ class GalleryViewModel(
             error = controls.error,
             actionMessage = controls.message,
             geoItems = allItems.filter { it.latitude != null && it.longitude != null },
+            albumCoverRefreshEpoch = coverRefreshEpoch,
         )
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
@@ -253,6 +259,29 @@ class GalleryViewModel(
     /** Reaplica cache/local no índice da galeria (ex.: após baixar original no detalhe). */
     fun notifyLocalDisplayChanged() {
         syncCoordinator.notifyGalleryDisplayRefresh()
+    }
+
+    /** Capa ao rolar a grade: lê miniaturas locais mais recentes do álbum (sem rede). */
+    suspend fun liveAlbumCoverFor(album: MediaAlbum): Any? {
+        val items = itemsForAlbumCover(album)
+        if (items.isEmpty()) return album.coverModel
+        return resolveAlbumCoverModel(items, mediaCacheRepository) ?: album.coverModel
+    }
+
+    private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {
+        val all = latestLibraryItems
+        if (all.isEmpty()) return emptyList()
+        return when {
+            album.bucketId.startsWith("place:") -> {
+                val encoded = album.bucketId.removePrefix("place:")
+                val matchKey = PlaceMatchKey.decode(encoded)
+                all.filter { item ->
+                    matchKey?.let { item.matchesPlace(it) }
+                        ?: (item.locationLabel == album.title)
+                }
+            }
+            else -> all.filter { it.albumName == album.filterKey }
+        }
     }
 
     fun refresh() {
