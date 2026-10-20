@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
@@ -30,7 +31,6 @@ object MediaDetailSheetAnchors {
         if (flingUp) {
             val idx = anchors.indexOfLast { fraction >= it - 0.04f }.coerceAtLeast(0)
             val next = (idx + 1).coerceAtMost(anchors.lastIndex)
-            // Reabrindo do fechado: no máximo um degrau (não pular direto para FULL).
             if (fraction < SIMPLE * 0.55f && next > 1) return anchors[1]
             return anchors[next]
         }
@@ -39,7 +39,6 @@ object MediaDetailSheetAnchors {
                 .let { if (it < 0) anchors.lastIndex else it }
             return anchors[(idx - 1).coerceAtLeast(0)]
         }
-        // Meio-termo entre âncoras (0 / 0,45 / 0,88): evita cair no nível completo ao abrir pouco.
         val closeBias = when {
             velocityYPxPerSec > 160f -> 0.08f
             velocityYPxPerSec < -160f -> -0.04f
@@ -54,7 +53,6 @@ object MediaDetailSheetAnchors {
     }
 }
 
-/** Ganho ao abrir (menos) vs fechar (mais) — arraste mais confortável nos dois sentidos. */
 private const val DETAIL_PANEL_DRAG_GAIN_OPEN = 1.55f
 private const val DETAIL_PANEL_DRAG_GAIN_CLOSE = 2.85f
 
@@ -70,9 +68,7 @@ private fun panelFractionFromDrag(
 }
 
 enum class MediaDetailContentLevel {
-    /** Resumo Samsung (sem bloco técnico longo). */
     Simple,
-    /** EXIF / “Mais informações”. */
     Full,
 }
 
@@ -93,19 +89,16 @@ fun rememberMediaDetailSheetFraction(
     val animatable = remember { Animatable(0f) }
     LaunchedEffect(dragging, settleTarget) {
         if (!dragging) {
-            animatable.snapTo(settleTarget)
+            animatable.animateTo(settleTarget, tween(durationMillis = 180))
         }
     }
     return if (dragging) dragFraction else animatable.value
 }
 
-private const val VERTICAL_DOMINANCE_RATIO = 1.08f
-private const val HORIZONTAL_PASS_RATIO = 1.12f
+private const val VERTICAL_DOMINANCE_RATIO = 1.02f
 
 /**
- * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
- * [fractionBaseState] é atualizado a cada frame na UI; o gesto lê [.floatValue] ao tocar
- * (evita closure obsoleta dentro do [pointerInput]).
+ * Arraste vertical no pass [PointerEventPass.Initial]: horizontal segue para o pager (Main).
  */
 fun Modifier.draggableDetailPanelHeight(
     enabled: Boolean,
@@ -114,7 +107,6 @@ fun Modifier.draggableDetailPanelHeight(
     onDragStart: () -> Unit,
     onDragFraction: (Float) -> Unit,
     onDragEnd: (velocityYPxPerSec: Float) -> Unit,
-    /** 1 = área inteira; 0.2 = só a faixa inferior (ex.: abrir detalhes sem brigar com pinça). */
     activationEdgeHeightFraction: Float = 1f,
 ): Modifier {
     if (!enabled || screenHeightPx <= 0f) return this
@@ -123,7 +115,7 @@ fun Modifier.draggableDetailPanelHeight(
         val maxFraction = MediaDetailSheetAnchors.FULL
         val edgeFraction = activationEdgeHeightFraction.coerceIn(0.05f, 1f)
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             if (edgeFraction < 1f) {
                 val minY = size.height * (1f - edgeFraction)
                 if (down.position.y < minY) {
@@ -139,12 +131,8 @@ fun Modifier.draggableDetailPanelHeight(
             val velocityTracker = VelocityTracker()
 
             while (true) {
-                val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                 if (event.changes.count { it.pressed } >= 2) {
-                    if (dragging) {
-                        onDragEnd(0f)
-                        dragging = false
-                    }
                     break
                 }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
@@ -173,7 +161,7 @@ fun Modifier.draggableDetailPanelHeight(
                                 panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
                         }
-                        sumY < 0f && ay > ax * VERTICAL_DOMINANCE_RATIO -> {
+                        ay > ax * VERTICAL_DOMINANCE_RATIO -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -182,21 +170,19 @@ fun Modifier.draggableDetailPanelHeight(
                                 panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
                         }
-                        ax > ay * HORIZONTAL_PASS_RATIO -> passedToChildren = true
-                        sumY > touchSlop -> passedToChildren = true
+                        ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToChildren = true
+                        baseFraction < 0.05f && sumY > touchSlop -> passedToChildren = true
                     }
                 } else {
                     change.consume()
                     sumY += delta.y
-                    val fraction = panelFractionFromDrag(
-                        baseFraction, sumY, screenHeightPx, maxFraction,
+                    onDragFraction(
+                        panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                     )
-                    onDragFraction(fraction)
                 }
             }
             if (dragging) {
-                val velocityY = velocityTracker.calculateVelocity().y
-                onDragEnd(velocityY)
+                onDragEnd(velocityTracker.calculateVelocity().y)
             }
         }
     }

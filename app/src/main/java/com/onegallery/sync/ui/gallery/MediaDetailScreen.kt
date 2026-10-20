@@ -79,8 +79,6 @@ fun MediaDetailScreen(
     /** true = oculta barras e carrossel (toque na foto alterna). */
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
-    var photoPinching by remember { mutableStateOf(false) }
-    var activePageZoomTransform by remember { mutableStateOf<ZoomTransformHolder?>(null) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -181,7 +179,6 @@ fun MediaDetailScreen(
         detailsDragFraction = 0f
         detailsDragging = false
         activePageError = null
-        photoPinching = false
         pagerScrollEnabled = true
     }
 
@@ -257,17 +254,12 @@ fun MediaDetailScreen(
         } else {
             detailsSettleFraction
         }
-        val openPanelDragFromPhoto = swipeUpForDetails &&
-            pagerScrollEnabled &&
-            !photoPinching &&
-            detailsSettleFraction < 0.03f &&
-            !detailsDragging
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .draggableDetailPanelHeight(
-                        enabled = openPanelDragFromPhoto,
+                        enabled = swipeUpForDetails && pagerScrollEnabled,
                         screenHeightPx = screenHeightPx,
                         fractionBaseState = gestureBaseFraction,
                         onDragStart = {
@@ -282,27 +274,12 @@ fun MediaDetailScreen(
                             snapDetailsPanel(velocityY)
                             detailsDragging = false
                         },
-                    )
-                    .then(
-                        activePageZoomTransform?.let { zoomTransform ->
-                            Modifier.detailPhotoPinchZoom(
-                                transform = zoomTransform,
-                                onPinching = { pinching ->
-                                    photoPinching = pinching
-                                    if (pinching) pagerScrollEnabled = false
-                                },
-                                onTransformChanged = {
-                                    val zoomed = zoomTransform.scale > 1.02f
-                                    pagerScrollEnabled = !zoomed && !photoPinching
-                                },
-                            )
-                        } ?: Modifier,
                     ),
             ) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled && !photoPinching,
+                userScrollEnabled = pagerScrollEnabled && !detailsDragging,
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
@@ -314,16 +291,13 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onToggleImmersive = { immersive = !immersive },
-                    onZoomActiveChanged = { active ->
-                        if (!photoPinching) pagerScrollEnabled = !active
-                    },
+                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
                     onActivePageError = { err ->
                         if (page == pagerState.currentPage) {
                             activePageError = err
                         }
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
-                    onActiveZoomTransform = { activePageZoomTransform = it },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -520,7 +494,6 @@ private fun MediaDetailPage(
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
-    onActiveZoomTransform: (ZoomTransformHolder?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
@@ -637,10 +610,7 @@ private fun MediaDetailPage(
         if (!isActivePage) {
             zoomTransform.scale = 1f
             zoomTransform.offset = Offset.Zero
-            onActiveZoomTransform(null)
-            return@LaunchedEffect
         }
-        onActiveZoomTransform(zoomTransform)
     }
     Box(modifier = modifier) {
         when {
