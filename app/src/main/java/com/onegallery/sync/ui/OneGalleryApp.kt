@@ -90,13 +90,20 @@ private fun NavHostController.openGalleryTab(clearBrowseFilters: () -> Unit) {
     }
 }
 
+private fun NavHostController.ensureAtAlbumsRoot() {
+    repeat(8) {
+        if (currentBackStackEntry?.destination?.route == MainTab.Albums.route) return
+        if (!popBackStack()) return
+    }
+    if (currentBackStackEntry?.destination?.route != MainTab.Albums.route) {
+        navigate(MainTab.Albums.route) {
+            launchSingleTop = true
+        }
+    }
+}
+
 private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
     clearBrowseFilters()
-    if (currentBackStackEntry?.destination?.route == ALBUMS_BROWSE_ROUTE) {
-        popBackStack(MainTab.Albums.route, inclusive = false)
-        getBackStackEntry(MainTab.Albums.route).savedStateHandle["resetAlbumsSubTab"] = true
-        return
-    }
     navigate(MainTab.Albums.route) {
         popUpTo(graph.findStartDestination().id) {
             saveState = true
@@ -104,7 +111,11 @@ private fun NavHostController.openAlbumsTab(clearBrowseFilters: () -> Unit) {
         launchSingleTop = true
         restoreState = true
     }
-    getBackStackEntry(MainTab.Albums.route).savedStateHandle["resetAlbumsSubTab"] = true
+    // restoreState pode reabrir albums/browse (grade) ou mapa por cima da lista de álbuns
+    ensureAtAlbumsRoot()
+    runCatching {
+        getBackStackEntry(MainTab.Albums.route).savedStateHandle["resetAlbumsSubTab"] = true
+    }
 }
 
 private fun NavHostController.openMainTab(tab: MainTab, clearBrowseFilters: () -> Unit) {
