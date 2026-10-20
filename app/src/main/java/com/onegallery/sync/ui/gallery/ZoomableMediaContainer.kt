@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import kotlin.math.abs
 
@@ -57,10 +59,26 @@ fun ZoomableMediaContainer(
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
                 .pointerInput(resetKey) {
-                    detectDragGestures { change, dragAmount ->
-                        if (transform.scale <= ZOOM_ACTIVE_THRESHOLD) return@detectDragGestures
-                        change.consume()
-                        transform.panBy(dragAmount)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (transform.scale <= ZOOM_ACTIVE_THRESHOLD) return@awaitEachGesture
+                        val touchSlop = viewConfiguration.touchSlop
+                        var pastSlop = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            if (transform.scale <= ZOOM_ACTIVE_THRESHOLD) break
+                            val delta = change.positionChange()
+                            if (!pastSlop) {
+                                if (kotlin.math.hypot(delta.x.toDouble(), delta.y.toDouble()) < touchSlop) {
+                                    continue
+                                }
+                                pastSlop = true
+                            }
+                            change.consume()
+                            transform.panBy(delta)
+                        }
                     }
                 }
                 .pointerInput(resetKey, interceptSingleTap) {

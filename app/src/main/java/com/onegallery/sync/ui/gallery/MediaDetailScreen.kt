@@ -182,6 +182,9 @@ fun MediaDetailScreen(
         detailsDragFraction = 0f
         detailsDragging = false
         activePageError = null
+        photoZoomActive = false
+        multiTouchOnPhoto = false
+        pagerScrollEnabled = true
     }
 
     fun openDetailsToSimple() {
@@ -309,7 +312,7 @@ fun MediaDetailScreen(
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled && !multiTouchOnPhoto,
+                userScrollEnabled = pagerScrollEnabled && !multiTouchOnPhoto && !photoZoomActive,
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
@@ -336,6 +339,31 @@ fun MediaDetailScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+
+            val edgeSwipeEnabled = pagerPaths.size > 1 &&
+                pagerScrollEnabled &&
+                !multiTouchOnPhoto &&
+                !photoZoomActive &&
+                !detailsDragging &&
+                detailsSettleFraction < 0.05f
+            MediaDetailEdgePagerSwipeOverlay(
+                enabled = edgeSwipeEnabled,
+                onSwipeToNext = {
+                    if (pagerState.currentPage < pagerPaths.lastIndex) {
+                        pagerScope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                        }
+                    }
+                },
+                onSwipeToPrevious = {
+                    if (pagerState.currentPage > 0) {
+                        pagerScope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
 
             if (showFilmstrip) {
                 MediaDetailFilmstrip(
