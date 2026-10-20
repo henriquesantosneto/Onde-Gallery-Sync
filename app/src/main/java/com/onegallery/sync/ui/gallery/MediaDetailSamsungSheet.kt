@@ -62,7 +62,9 @@ fun MediaDetailSamsungSheet(
             .fillMaxWidth()
             .then(
                 if (scrollWholeColumn) {
-                    Modifier.verticalScroll(scroll)
+                    Modifier
+                        .fillMaxHeight()
+                        .verticalScroll(scroll)
                 } else if (scrollBelowMapOnly) {
                     Modifier.fillMaxHeight()
                 } else {

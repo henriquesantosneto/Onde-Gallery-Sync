@@ -48,7 +48,6 @@ fun MediaDetailPushDetailsSheet(
     val screenHeightPx = with(LocalDensity.current) {
         configuration.screenHeightDp.dp.toPx()
     }
-    val multiSelect = canonicalPaths.size > 1
     val fractionBase = { panelFraction }
 
     Column(
@@ -94,16 +93,12 @@ fun MediaDetailPushDetailsSheet(
                 mediaCacheRepository = mediaCacheRepository,
                 contentLevel = contentLevel,
                 showAdvancedToggle = false,
-                scrollContentInternally = multiSelect,
-                scrollBelowMapOnly = !multiSelect,
+                scrollContentInternally = true,
+                scrollBelowMapOnly = false,
                 firstSectionDragModifier = Modifier,
-                modifier = if (multiSelect) {
-                    Modifier.fillMaxWidth()
-                } else {
-                    Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight()
-                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(),
             )
         }
     }
