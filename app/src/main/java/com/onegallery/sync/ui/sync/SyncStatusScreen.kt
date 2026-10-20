@@ -135,7 +135,7 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        val activeItem = coordinatorState.activeItem
+                        val activeItems = coordinatorState.activeItems
                         if (coordinatorState.isRunning) {
                             LinearProgressIndicator(
                                 modifier = Modifier
@@ -150,7 +150,9 @@ fun SyncStatusScreen(
                                 CircularProgressIndicator(strokeWidth = 2.dp)
                                 Text(
                                     when {
-                                        activeItem != null -> activeItem.operationLabel
+                                        activeItems.size > 1 ->
+                                            "${activeItems.size} transferências em paralelo…"
+                                        activeItems.size == 1 -> activeItems[0].operationLabel
                                         coordinatorState.lastMessage.contains(
                                             "Cancelando",
                                             ignoreCase = true,
@@ -162,26 +164,34 @@ fun SyncStatusScreen(
                             }
                         }
                         val queueCap = if (coordinatorState.isRunning) 10 else 8
-                        val queueWindowStart = if (coordinatorState.isRunning && activeItem != null) {
-                            queueForUi.indexOfFirst { it.canonicalPath == activeItem.canonicalPath }
-                                .coerceAtLeast(0)
+                        val queueWindowStart = if (coordinatorState.isRunning && activeItems.isNotEmpty()) {
+                            activeItems
+                                .map { item ->
+                                    queueForUi.indexOfFirst { it.canonicalPath == item.canonicalPath }
+                                }
+                                .filter { it >= 0 }
+                                .minOrNull()
+                                ?: 0
                         } else {
                             0
                         }
                         val queueInStatus = queueForUi
                             .drop(queueWindowStart)
                             .take(queueCap)
-                        val activeMissingFromList = coordinatorState.isRunning &&
-                            activeItem != null &&
-                            queueInStatus.none { it.canonicalPath == activeItem.canonicalPath }
-                        if (queueInStatus.isNotEmpty() || activeMissingFromList) {
+                        val activePathsInStatus = queueInStatus.map { it.canonicalPath }.toSet()
+                        val activesMissingFromList = if (coordinatorState.isRunning) {
+                            activeItems.filter { it.canonicalPath !in activePathsInStatus }
+                        } else {
+                            emptyList()
+                        }
+                        if (queueInStatus.isNotEmpty() || activesMissingFromList.isNotEmpty()) {
                             Text(
                                 if (coordinatorState.isRunning && queueForUi.size > queueInStatus.size) {
                                     val from = queueWindowStart + 1
                                     val to = (queueWindowStart + queueInStatus.size)
                                         .coerceAtMost(queueForUi.size)
                                     "Arquivos na fila ($from–$to de ${queueForUi.size})"
-                                } else if (queueForUi.size + (if (activeMissingFromList) 1 else 0) > 1) {
+                                } else if (queueForUi.size + activesMissingFromList.size > 1) {
                                     "Arquivos na fila (${queueForUi.size})"
                                 } else {
                                     "Arquivo na fila"
@@ -191,13 +201,13 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
                             )
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (activeMissingFromList && activeItem != null) {
-                                    SyncQueueActiveOnlyRow(activeItem = activeItem)
+                                activesMissingFromList.forEach { item ->
+                                    SyncQueueActiveOnlyRow(activeItem = item)
                                 }
                                 queueInStatus.forEach { row ->
                                     SyncQueueItemRow(
                                         row = row,
-                                        activeItem = activeItem,
+                                        activeItems = activeItems,
                                         isRunning = coordinatorState.isRunning,
                                     )
                                 }
@@ -392,11 +402,11 @@ private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
 @Composable
 private fun SyncQueueItemRow(
     row: SyncQueueDisplayRow,
-    activeItem: ActiveSyncItem?,
+    activeItems: List<ActiveSyncItem>,
     isRunning: Boolean,
 ) {
-    val isActive = isRunning &&
-        activeItem?.canonicalPath == row.canonicalPath
+    val activeItem = activeItems.firstOrNull { it.canonicalPath == row.canonicalPath }
+    val isActive = isRunning && activeItem != null
     Column(
         modifier = Modifier
             .fillMaxWidth()

@@ -76,8 +76,8 @@ data class SyncUiState(
     val activityHeadline: String = "",
     /** Detalhes numéricos / sub-etapa (ex.: 1200/2943 itens). */
     val activityDetail: String = "",
-    /** Arquivo em transferência agora (upload/download). */
-    val activeItem: ActiveSyncItem? = null,
+    /** Arquivos em transferência agora (upload/download/miniatura), até 3 em paralelo. */
+    val activeItems: List<ActiveSyncItem> = emptyList(),
     /** Fila prevista/em andamento nesta execução (uploads reais, não só PENDING_* no Room). */
     val runQueue: List<SyncQueueDisplayRow> = emptyList(),
 )
@@ -237,7 +237,7 @@ class SyncCoordinator(
             activityHeadline = inProgressMessage,
             activityDetail = "",
             runQueue = emptyList(),
-            activeItem = null,
+            activeItems = emptyList(),
         )
         cancelAllManagedSyncJobs(inProgressMessage)
         val job = activeLongTaskJob.get()
@@ -246,7 +246,7 @@ class SyncCoordinator(
         } else if (_state.value.isRunning) {
             _state.value = _state.value.copy(
                 isRunning = false,
-                activeItem = null,
+                activeItems = emptyList(),
                 runQueue = emptyList(),
                 lastMessage = completedMessageForCancelReason(reason),
             )
@@ -295,7 +295,7 @@ class SyncCoordinator(
         val msg = autoSyncPausedMessage("Sync automático em pausa após cancelamento.")
         _state.value = _state.value.copy(
             isRunning = false,
-            activeItem = null,
+            activeItems = emptyList(),
             runQueue = emptyList(),
             lastMessage = msg,
         )
@@ -341,7 +341,7 @@ class SyncCoordinator(
                         isRunning = true,
                         lastMessage = "Verificando índice da galeria…",
                         runQueue = emptyList(),
-                        activeItem = null,
+                        activeItems = emptyList(),
                     )
                     val rebuilt = applyPendingIndexRebuildIfNeeded()
                     val items = localMediaRepository.loadAllMedia()
@@ -372,7 +372,7 @@ class SyncCoordinator(
                     indexPassLocalItemsById = emptyMap()
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         lastMessage = buildSanitizeMessage(rebuilt, sanitized),
                     )
                     sanitized.copy(fullRebuild = rebuilt || sanitized.fullRebuild)
@@ -382,7 +382,7 @@ class SyncCoordinator(
                     val userCancelled = cancelled && isUserCancellation()
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         lastMessage = when {
                             cancelled -> cancellationResultMessage()
                             else -> error.message ?: "Falha na manutenção do índice."
@@ -527,8 +527,36 @@ class SyncCoordinator(
     val pendingOperationCount: Flow<Int> = syncMetadataDao.observePendingCount()
     val syncQueue: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingQueue()
 
-    private fun setActiveSyncItem(item: ActiveSyncItem?) {
-        _state.value = _state.value.copy(activeItem = item)
+    private val activeSyncItemsLock = Any()
+
+    private fun upsertActiveSyncItem(item: ActiveSyncItem) {
+        synchronized(activeSyncItemsLock) {
+            val next = _state.value.activeItems.toMutableList()
+            val index = next.indexOfFirst { it.canonicalPath == item.canonicalPath }
+            if (index >= 0) {
+                next[index] = item
+            } else {
+                next.add(item)
+            }
+            _state.value = _state.value.copy(activeItems = next)
+        }
+    }
+
+    private fun removeActiveSyncItem(canonicalPath: String) {
+        synchronized(activeSyncItemsLock) {
+            val next = _state.value.activeItems.filter { it.canonicalPath != canonicalPath }
+            if (next.size != _state.value.activeItems.size) {
+                _state.value = _state.value.copy(activeItems = next)
+            }
+        }
+    }
+
+    private fun clearActiveSyncItems() {
+        synchronized(activeSyncItemsLock) {
+            if (_state.value.activeItems.isNotEmpty()) {
+                _state.value = _state.value.copy(activeItems = emptyList())
+            }
+        }
     }
 
     private fun setRunQueueFromEntities(entities: List<SyncMetadataEntity>) {
@@ -648,7 +676,7 @@ class SyncCoordinator(
                 _state.value = _state.value.copy(
                     lastIndexedLocalCount = items.size,
                     isRunning = false,
-                activeItem = null,
+                activeItems = emptyList(),
                     lastMessage = "Indexação local: ${items.size} itens. GPS/data extra no sync ou em Sync → indexar GPS.",
                 )
             } else {
@@ -661,7 +689,7 @@ class SyncCoordinator(
             if (manageRunningState) {
                 _state.value = _state.value.copy(
                     isRunning = false,
-                activeItem = null,
+                activeItems = emptyList(),
                     lastMessage = if (cancelled) {
                         autoSyncPausedMessage("Indexação cancelada.")
                     } else {
@@ -825,7 +853,7 @@ class SyncCoordinator(
                 _state.value = _state.value.copy(
                     isRunning = true,
                     runQueue = emptyList(),
-                    activeItem = null,
+                    activeItems = emptyList(),
                     lastMessage = "Sincronizando com OneDrive…",
                     progressPhase = SyncProgressPhase.PREPARING,
                     activityHeadline = "Preparando sincronismo…",
@@ -1054,7 +1082,7 @@ class SyncCoordinator(
                     }
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         runQueue = emptyList(),
                         isOffline = false,
                         pendingOperations = pendingCount,
@@ -1071,7 +1099,7 @@ class SyncCoordinator(
                     val userCancelled = cancelled && syncCancelReason.get() == SyncCancelReason.USER
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         runQueue = emptyList(),
                         progressPhase = SyncProgressPhase.IDLE,
                         activityHeadline = "",
@@ -1107,7 +1135,7 @@ class SyncCoordinator(
                     isRunning = true,
                     lastMessage = "Indexando localização das fotos…",
                     runQueue = emptyList(),
-                    activeItem = null,
+                    activeItems = emptyList(),
                 )
                 val result = runCatching {
                     ensureNotCancelled()
@@ -1120,7 +1148,7 @@ class SyncCoordinator(
                 result.onSuccess { withGps ->
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         lastMessage = if (withGps > 0) {
                             "Mapa: $withGps foto(s) com GPS no índice."
                         } else {
@@ -1133,7 +1161,7 @@ class SyncCoordinator(
                     val userCancelled = cancelled && isUserCancellation()
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         lastMessage = if (cancelled) {
                             cancellationResultMessage()
                         } else {
@@ -1732,17 +1760,17 @@ class SyncCoordinator(
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
         ensureSyncMayContinue()
-        setActiveSyncItem(
+        upsertActiveSyncItem(
             ActiveSyncItem(
                 canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
                 operationLabel = "Enviando para OneDrive…",
             ),
         )
-        val localId = row.localMediaId ?: return 0.also { setActiveSyncItem(null) }
+        val localId = row.localMediaId ?: return 0.also { removeActiveSyncItem(row.canonicalPath) }
         val item = indexPassLocalItemsById[localId]
             ?: localMediaRepository.findById(localId)
-            ?: return 0.also { setActiveSyncItem(null) }
+            ?: return 0.also { removeActiveSyncItem(row.canonicalPath) }
         val temp = localMediaRepository.materializeToTempFile(item) ?: run {
             syncMetadataDao.upsert(
                 row.copy(
@@ -1750,7 +1778,7 @@ class SyncCoordinator(
                     cloudState = CloudSyncState.ERROR,
                 ),
             )
-            setActiveSyncItem(null)
+            removeActiveSyncItem(row.canonicalPath)
             return 0
         }
         return runCatching {
@@ -1781,14 +1809,14 @@ class SyncCoordinator(
             0
         }.also {
             temp.delete()
-            setActiveSyncItem(null)
+            removeActiveSyncItem(row.canonicalPath)
             removeFromRunQueue(row.canonicalPath)
         }
     }
 
     /** Nuvem mais nova: só miniatura no cache — original completo sob demanda na visualização. */
     private suspend fun registerCloudDownloadPlaceholder(row: SyncMetadataEntity): Int {
-        setActiveSyncItem(
+        upsertActiveSyncItem(
             ActiveSyncItem(
                 canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
@@ -1796,7 +1824,7 @@ class SyncCoordinator(
             ),
         )
         ensureThumbnailCached(row.canonicalPath).getOrNull()
-        setActiveSyncItem(null)
+        removeActiveSyncItem(row.canonicalPath)
         removeFromRunQueue(row.canonicalPath)
         return 1
     }
@@ -2260,7 +2288,7 @@ class SyncCoordinator(
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,
-                    activeItem = null,
+                    activeItems = emptyList(),
                     progressPhase = SyncProgressPhase.PREFETCH_THUMBNAILS,
                     activityHeadline = "Completando galeria em segundo plano…",
                     activityDetail = "Miniaturas, capas e metadados.",
@@ -2324,7 +2352,7 @@ class SyncCoordinator(
             }.onSuccess { (finalMessage, pendingCount) ->
                 _state.value = _state.value.copy(
                     isRunning = false,
-                    activeItem = null,
+                    activeItems = emptyList(),
                     runQueue = emptyList(),
                     pendingOperations = pendingCount,
                     progressPhase = SyncProgressPhase.IDLE,
@@ -2336,7 +2364,7 @@ class SyncCoordinator(
                 if (error is CancellationException) {
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         runQueue = emptyList(),
                         progressPhase = SyncProgressPhase.IDLE,
                         activityHeadline = "",
@@ -2347,7 +2375,7 @@ class SyncCoordinator(
                     val prefix = coreSyncMessagePrefix
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        activeItem = null,
+                        activeItems = emptyList(),
                         runQueue = emptyList(),
                         progressPhase = SyncProgressPhase.IDLE,
                         activityHeadline = "",
@@ -2455,7 +2483,7 @@ class SyncCoordinator(
                             coroutineContext.ensureActive()
                             ensureNotCancelled()
                         }
-                        setActiveSyncItem(
+                        upsertActiveSyncItem(
                             ActiveSyncItem(
                                 canonicalPath = row.canonicalPath,
                                 displayName = row.displayName,
@@ -2477,7 +2505,7 @@ class SyncCoordinator(
                                 alsoUpdateLastMessage = false,
                             )
                         }
-                        setActiveSyncItem(null)
+                        removeActiveSyncItem(row.canonicalPath)
                         removeFromRunQueue(row.canonicalPath)
                         if (hit) 1 else 0
                     }
@@ -2831,7 +2859,7 @@ class SyncCoordinator(
                     if (shouldCancelActiveSyncTransfer(job)) {
                         job?.cancel(CancellationException("Sincronismo cancelado."))
                     } else {
-                        setActiveSyncItem(
+                        upsertActiveSyncItem(
                             ActiveSyncItem(
                                 canonicalPath = canonicalPath,
                                 displayName = displayName,
@@ -2875,7 +2903,7 @@ class SyncCoordinator(
                     if (honorSyncCancel && shouldCancelActiveSyncTransfer(job)) {
                         job?.cancel(CancellationException("Sincronismo cancelado."))
                     } else {
-                        setActiveSyncItem(
+                        upsertActiveSyncItem(
                             ActiveSyncItem(
                                 canonicalPath = canonicalPath,
                                 displayName = displayName,
