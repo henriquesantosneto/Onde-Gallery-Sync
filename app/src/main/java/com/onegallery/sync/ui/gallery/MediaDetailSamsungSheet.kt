@@ -194,7 +194,7 @@ fun MediaDetailSamsungSheet(
                 if (effectiveAdvanced) {
                     val advancedModifier = if (scrollBelowMapOnly) {
                         Modifier
-                            .weight(1f)
+                            .weight(1f, fill = true)
                             .fillMaxWidth()
                             .verticalScroll(belowMapScroll)
                     } else {

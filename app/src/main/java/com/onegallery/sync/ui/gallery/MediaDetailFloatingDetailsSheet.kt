@@ -49,6 +49,14 @@ fun MediaDetailPushDetailsSheet(
         configuration.screenHeightDp.dp.toPx()
     }
     val fractionBase = { panelFraction }
+    val panelDragModifier = Modifier.detailPanelVerticalDrag(
+        enabled = true,
+        screenHeightPx = screenHeightPx,
+        fractionBase = fractionBase,
+        onDragStart = onPanelDragStart,
+        onDragFraction = onPanelFractionChange,
+        onDragEnd = onPanelDragEnd,
+    )
 
     Column(
         modifier = modifier
@@ -61,14 +69,7 @@ fun MediaDetailPushDetailsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .detailPanelVerticalDrag(
-                    enabled = true,
-                    screenHeightPx = screenHeightPx,
-                    fractionBase = fractionBase,
-                    onDragStart = onPanelDragStart,
-                    onDragFraction = onPanelFractionChange,
-                    onDragEnd = onPanelDragEnd,
-                )
+                .then(panelDragModifier)
                 .padding(top = 10.dp, bottom = 6.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -93,9 +94,9 @@ fun MediaDetailPushDetailsSheet(
                 mediaCacheRepository = mediaCacheRepository,
                 contentLevel = contentLevel,
                 showAdvancedToggle = false,
-                scrollContentInternally = true,
-                scrollBelowMapOnly = false,
-                firstSectionDragModifier = Modifier,
+                scrollContentInternally = false,
+                scrollBelowMapOnly = canonicalPaths.size == 1,
+                firstSectionDragModifier = panelDragModifier,
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(),

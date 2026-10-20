@@ -259,7 +259,35 @@ fun MediaDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
-                    .align(Alignment.TopCenter),
+                    .align(Alignment.TopCenter)
+                    .then(
+                        if (swipeUpForDetails && panelClosed && detailPaths.isNotEmpty()) {
+                            Modifier
+                                .openDetailsOnSwipeUp(
+                                    enabled = true,
+                                    onSwipeUp = { openDetailsToSimple() },
+                                )
+                                .detailPanelVerticalDrag(
+                                    enabled = true,
+                                    screenHeightPx = screenHeightPx,
+                                    fractionBase = panelFractionBase,
+                                    onDragStart = {
+                                        detailsDragging = true
+                                        detailsDragFraction = panelFractionBase()
+                                    },
+                                    onDragFraction = { fraction ->
+                                        detailsDragging = true
+                                        detailsDragFraction = fraction
+                                    },
+                                    onDragEnd = { velocityY ->
+                                        snapDetailsPanel(velocityY)
+                                        detailsDragging = false
+                                    },
+                                )
+                        } else {
+                            Modifier
+                        },
+                    ),
             ) {
             HorizontalPager(
                 state = pagerState,
@@ -373,17 +401,12 @@ fun MediaDetailScreen(
             }
             }
 
-            if (
-                swipeUpForDetails &&
-                pagerScrollEnabled &&
-                panelClosed &&
-                detailPaths.isNotEmpty()
-            ) {
+            if (swipeUpForDetails && panelClosed && detailPaths.isNotEmpty()) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(88.dp)
+                        .height(140.dp)
                         .navigationBarsPadding()
                         .padding(bottom = if (showFilmstrip) 72.dp else 0.dp)
                         .detailPanelVerticalDrag(
