@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -324,7 +324,7 @@ fun OneGalleryApp(
                             icon = {
                                 Icon(
                                     when (tab) {
-                                        MainTab.Gallery -> Icons.Outlined.Image
+                                        MainTab.Gallery -> Icons.Outlined.Photo
                                         MainTab.Albums -> Icons.Outlined.PhotoAlbum
                                         MainTab.Sync -> Icons.Outlined.CloudSync
                                         MainTab.Settings -> Icons.Outlined.Settings

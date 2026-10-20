@@ -21,7 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Collections
+import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
@@ -483,7 +483,7 @@ private fun AlbumGridTile(
                 )
             } else {
                 Icon(
-                    if (isPlace) Icons.Outlined.Place else Icons.Outlined.Collections,
+                    if (isPlace) Icons.Outlined.Place else Icons.Outlined.PhotoAlbum,
                     contentDescription = null,
                     modifier = Modifier.padding(32.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
