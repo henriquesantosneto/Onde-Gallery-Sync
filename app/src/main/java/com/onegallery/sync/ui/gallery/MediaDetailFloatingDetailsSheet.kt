@@ -53,7 +53,7 @@ fun MediaDetailPushDetailsSheet(
         configuration.screenHeightDp.dp.toPx()
     }
     val multiSelect = canonicalPaths.size > 1
-    val gestureBaseFraction = remember { mutableFloatStateOf(panelFraction) }
+    val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
     gestureBaseFraction.floatValue = panelFraction
     val handleDragModifier = Modifier.draggableDetailPanelHeight(
         enabled = true,
