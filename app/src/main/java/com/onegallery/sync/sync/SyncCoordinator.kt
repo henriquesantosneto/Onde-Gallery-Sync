@@ -30,12 +30,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +50,7 @@ import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 private enum class SyncCancelReason {
@@ -865,7 +871,8 @@ class SyncCoordinator(
                     var cloudOnly = 0
 
                     val allRows = syncMetadataDao.getAll()
-                    val rows = allRows.filter { it.localMediaId != null }
+                    val existingByPath = allRows.associateBy { it.canonicalPath }
+                    val rows = syncMetadataDao.getRowsWithLocalCopy()
                     setSyncProgress(
                         SyncProgressPhase.RECONCILING_LOCAL,
                         "Montando fila de sincronismo…",
@@ -894,6 +901,15 @@ class SyncCoordinator(
                     val knownPaths = mutableSetOf<String>()
                     var localPassIndex = 0
                     val localPassTotal = rows.size
+                    val uploadQueue = mutableListOf<SyncMetadataEntity>()
+                    val upsertBatch = mutableListOf<SyncMetadataEntity>()
+                    suspend fun flushReconcileUpserts() {
+                        if (upsertBatch.isEmpty()) return
+                        upsertBatch.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+                            syncMetadataDao.upsertAll(chunk)
+                        }
+                        upsertBatch.clear()
+                    }
 
                     for (row in rowsProcessingOrder) {
                         ensureSyncMayContinue()
@@ -903,8 +919,8 @@ class SyncCoordinator(
                                 SyncProgressPhase.RECONCILING_LOCAL,
                                 "Comparando itens locais com a nuvem…",
                                 "Progresso $localPassIndex/$localPassTotal · " +
-                                    "$uploaded enviado(s) · " +
-                                    "$pendingDownloadPlaceholders miniatura(s) de download.",
+                                    "fila de envio ${uploadQueue.size} · " +
+                                    "$pendingDownloadPlaceholders download(s) de miniatura.",
                                 alsoUpdateLastMessage = false,
                             )
                         }
@@ -913,7 +929,7 @@ class SyncCoordinator(
                         val remote = remoteByPath[row.canonicalPath]
                         when {
                             remote == null && row.oneDriveItemId != null -> {
-                                syncMetadataDao.upsert(
+                                upsertBatch.add(
                                     row.copy(
                                         oneDriveItemId = null,
                                         pendingDeleteTarget = PendingDeleteTarget.NONE,
@@ -922,24 +938,35 @@ class SyncCoordinator(
                                     ),
                                 )
                             }
-                            remote == null -> uploaded += uploadLocalRow(row)
+                            remote == null -> uploadQueue.add(row)
                             else -> {
                                 val merged = reconcileWithRemote(row, remote)
-                                syncMetadataDao.upsert(merged)
+                                upsertBatch.add(merged)
                                 when (merged.cloudState) {
-                                    CloudSyncState.PENDING_UPLOAD -> uploaded += uploadLocalRow(merged)
-                                    CloudSyncState.PENDING_DOWNLOAD ->
-                                        pendingDownloadPlaceholders += registerCloudDownloadPlaceholder(merged)
+                                    CloudSyncState.PENDING_UPLOAD -> uploadQueue.add(merged)
+                                    CloudSyncState.PENDING_DOWNLOAD -> pendingDownloadPlaceholders++
                                     else -> Unit
                                 }
                             }
                         }
+                        if (upsertBatch.size >= ROOM_UPSERT_CHUNK) {
+                            flushReconcileUpserts()
+                        }
                     }
+                    flushReconcileUpserts()
 
+                    setSyncProgress(
+                        SyncProgressPhase.RECONCILING_LOCAL,
+                        "Enviando arquivos para a nuvem…",
+                        "${uploadQueue.size} envio(s) · até $PARALLEL_UPLOADS em paralelo.",
+                        alsoUpdateLastMessage = false,
+                    )
+                    uploaded += runParallelUploads(uploadQueue)
                     uploaded += applyPendingUploadRetries(remoteByPath)
 
                     val cloudOnlyCandidates = remoteByPath.keys.count { it !in knownPaths }
                     var cloudOnlyProcessed = 0
+                    val cloudOnlyInserts = mutableListOf<SyncMetadataEntity>()
                     remoteByPath.forEach { (path, remote) ->
                         ensureSyncMayContinue()
                         if (path in knownPaths) return@forEach
@@ -953,9 +980,8 @@ class SyncCoordinator(
                                 alsoUpdateLastMessage = false,
                             )
                         }
-                        val existing = syncMetadataDao.getByCanonicalPath(path)
-                        if (existing == null) {
-                            syncMetadataDao.upsert(
+                        if (path !in existingByPath) {
+                            cloudOnlyInserts.add(
                                 SyncMetadataEntity(
                                     canonicalPath = path,
                                     displayName = remote.name,
@@ -974,12 +1000,11 @@ class SyncCoordinator(
                             cloudOnly++
                         }
                     }
-
-                    val pendingCount = syncMetadataDao.getAll().count {
-                        it.cloudState == CloudSyncState.PENDING_UPLOAD ||
-                            it.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
-                            it.pendingDeleteTarget != PendingDeleteTarget.NONE
+                    cloudOnlyInserts.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+                        syncMetadataDao.upsertAll(chunk)
                     }
+
+                    val pendingCount = syncMetadataDao.countPendingOperations()
                     var freedLocal = 0
                     if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
                         freedLocal = autoReleaseSyncedLocalCopies(
@@ -987,32 +1012,6 @@ class SyncCoordinator(
                         )
                     }
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
-                    // Pós-sync: fila residual → capas (álbuns) → miniaturas gerais → metadados (GPS/data) → sanitização
-                    drainRemainingRunQueueBeforePrefetch()
-                    setSyncProgress(
-                        SyncProgressPhase.PREFETCH_THUMBNAILS,
-                        "Capas dos álbuns…",
-                        "Uma miniatura por álbum (pastas e locais), antes de indexar GPS.",
-                    )
-                    ensureAlbumCoverThumbnails()
-                    setSyncProgress(
-                        SyncProgressPhase.PREFETCH_THUMBNAILS,
-                        "Miniaturas na galeria…",
-                        "Grade, mapa e itens restantes — originais completos sob demanda.",
-                    )
-                    prefetchMissingThumbnails()
-                    setSyncProgress(
-                        SyncProgressPhase.BACKFILL_GPS,
-                        "Indexando localização (GPS)…",
-                        "EXIF local e trechos na nuvem (limite por passagem).",
-                    )
-                    backfillMissingGpsLocations()
-                    setSyncProgress(
-                        SyncProgressPhase.BACKFILL_CAPTURE_DATE,
-                        "Indexando data de captura…",
-                        "Ordenação por data na galeria; nuvem limitada por sync.",
-                    )
-                    backfillMissingCaptureTimes()
                     val seenLocalIds = indexPassLocalItemsById.keys
                     val seenLocalPaths = indexPassLocalItemsById.values.map {
                         SyncPaths.canonicalFromLocal(it)
@@ -1029,15 +1028,25 @@ class SyncCoordinator(
                         remoteCanonicalPaths = remoteByPath.keys,
                         remoteListingAvailable = true,
                     )
-                    val gpsNote = _state.value.lastMessage.takeIf {
-                        it.startsWith("Localização GPS:") || it.startsWith("Data de captura:")
-                    }
                     setSyncProgress(
                         SyncProgressPhase.FINISHING,
                         "Finalizando sincronismo…",
                         "",
                         alsoUpdateLastMessage = false,
                     )
+                    val coreSyncMessage = buildString {
+                        append(
+                            "Sync: $uploaded enviados, $pendingDownloadPlaceholders download(s) " +
+                                "só miniatura (nuvem), $cloudOnly só na nuvem$freeMsg.",
+                        )
+                        if (sanitized.removedRows > 0) {
+                            append("\nManutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s).")
+                        }
+                        append(
+                            "\nMiniaturas e GPS continuam em segundo plano — " +
+                                "acompanhe na aba Sincronismo.",
+                        )
+                    }
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItem = null,
@@ -1047,35 +1056,10 @@ class SyncCoordinator(
                         progressPhase = SyncProgressPhase.IDLE,
                         activityHeadline = "",
                         activityDetail = "",
-                        lastMessage = buildString {
-                            append(
-                                "Sync: $uploaded enviados, $pendingDownloadPlaceholders download(s) " +
-                                    "só miniatura (nuvem), $cloudOnly só na nuvem$freeMsg.",
-                            )
-                            if (sanitized.removedRows > 0) {
-                                append("\nManutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s).")
-                            }
-                            if (gpsNote != null) {
-                                append("\n")
-                                append(gpsNote)
-                            }
-                            val missingThumb = countIndexedMissingThumbnails()
-                            val missingGps = countIndexedMissingGps()
-                            if (missingThumb > 0) {
-                                append(
-                                    "\nMiniaturas pendentes: $missingThumb — " +
-                                        "alguns itens falharam ou o sync foi interrompido.",
-                                )
-                            }
-                            if (missingGps > 0) {
-                                append(
-                                    "\nSem GPS no índice: $missingGps — confira permissão " +
-                                        "“Localização das mídias” e sincronize de novo.",
-                                )
-                            }
-                        },
+                        lastMessage = coreSyncMessage,
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
+                    schedulePostSyncEnrichment(coreSyncMessagePrefix = coreSyncMessage.substringBefore("\n"))
                     SyncSummary(uploaded, pendingDownloadPlaceholders, cloudOnly)
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
@@ -1751,7 +1735,9 @@ class SyncCoordinator(
             ),
         )
         val localId = row.localMediaId ?: return 0.also { setActiveSyncItem(null) }
-        val item = localMediaRepository.findById(localId) ?: return 0.also { setActiveSyncItem(null) }
+        val item = indexPassLocalItemsById[localId]
+            ?: localMediaRepository.findById(localId)
+            ?: return 0.also { setActiveSyncItem(null) }
         val temp = localMediaRepository.materializeToTempFile(item) ?: run {
             syncMetadataDao.upsert(
                 row.copy(
@@ -1910,28 +1896,33 @@ class SyncCoordinator(
     private suspend fun applyPendingUploadRetries(
         remoteByPath: Map<String, RemoteDriveFile>,
     ): Int {
-        var uploaded = 0
-        val pending = syncMetadataDao.getAll().filter { row ->
-            row.localMediaId != null &&
-                row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
-                row.cloudState == CloudSyncState.PENDING_UPLOAD
-        }
-        for (row in pending) {
+        val toUpload = mutableListOf<SyncMetadataEntity>()
+        for (row in syncMetadataDao.getPendingUploadRows()) {
             ensureSyncMayContinue()
             val remote = remoteByPath[row.canonicalPath]
-            uploaded += if (remote == null) {
-                uploadLocalRow(row)
+            if (remote == null) {
+                toUpload.add(row)
             } else {
                 val merged = reconcileWithRemote(row, remote)
                 syncMetadataDao.upsert(merged)
                 if (merged.cloudState == CloudSyncState.PENDING_UPLOAD) {
-                    uploadLocalRow(merged)
-                } else {
-                    0
+                    toUpload.add(merged)
                 }
             }
         }
-        return uploaded
+        return runParallelUploads(toUpload)
+    }
+
+    private suspend fun runParallelUploads(rows: List<SyncMetadataEntity>): Int {
+        if (rows.isEmpty()) return 0
+        val semaphore = Semaphore(PARALLEL_UPLOADS)
+        return supervisorScope {
+            rows.map { row ->
+                async {
+                    semaphore.withPermit { uploadLocalRow(row) }
+                }
+            }.awaitAll().sum()
+        }
     }
 
     private suspend fun reconcileMissingLocalItems(seenPaths: Set<String>) {
@@ -2224,6 +2215,145 @@ class SyncCoordinator(
         ).getOrNull()
     }
 
+    /** Miniaturas, capas, GPS e data de captura após o núcleo do sync (não bloqueia envio/listagem). */
+    private fun schedulePostSyncEnrichment(coreSyncMessagePrefix: String) {
+        val scope = backgroundScope ?: return
+        registerManagedSyncJob(
+            scope.launch {
+                while (!longTaskMutex.tryLock()) {
+                    delay(40)
+                    if (syncCancelRequested.get()) return@launch
+                }
+                try {
+                    if (syncCancelRequested.get()) return@launch
+                    runPostSyncEnrichmentInternal(coreSyncMessagePrefix)
+                } finally {
+                    longTaskMutex.unlock()
+                }
+            },
+        )
+    }
+
+    private suspend fun seedResidualRunQueueAfterCoreSync() {
+        val residual = syncMetadataDao.getAll().filter { row ->
+            when {
+                row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
+                row.cloudState == CloudSyncState.PENDING_DOWNLOAD &&
+                    row.oneDriveItemId != null &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null -> true
+                else -> false
+            }
+        }
+        if (residual.isNotEmpty()) {
+            setRunQueueFromEntities(residual.sortedWith(syncQueueEntityComparator))
+        }
+    }
+
+    private suspend fun runPostSyncEnrichmentInternal(coreSyncMessagePrefix: String) {
+        foregroundGuard.runWithForeground {
+            runCatching {
+                bindActiveLongTaskJob()
+                _state.value = _state.value.copy(
+                    isRunning = true,
+                    activeItem = null,
+                    progressPhase = SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    activityHeadline = "Completando galeria em segundo plano…",
+                    activityDetail = "Miniaturas, capas e metadados.",
+                )
+                seedResidualRunQueueAfterCoreSync()
+                drainRemainingRunQueueBeforePrefetch()
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Capas dos álbuns…",
+                    "Uma miniatura por álbum (pastas e locais), antes de indexar GPS.",
+                    alsoUpdateLastMessage = false,
+                )
+                ensureAlbumCoverThumbnails()
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Miniaturas na galeria…",
+                    "Grade, mapa e itens restantes — originais completos sob demanda.",
+                    alsoUpdateLastMessage = false,
+                )
+                prefetchMissingThumbnails()
+                setSyncProgress(
+                    SyncProgressPhase.BACKFILL_GPS,
+                    "Indexando localização (GPS)…",
+                    "EXIF local e trechos na nuvem (limite por passagem).",
+                    alsoUpdateLastMessage = false,
+                )
+                backfillMissingGpsLocations()
+                setSyncProgress(
+                    SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+                    "Indexando data de captura…",
+                    "Ordenação por data na galeria; nuvem limitada por sync.",
+                    alsoUpdateLastMessage = false,
+                )
+                backfillMissingCaptureTimes()
+                indexPassLocalItemsById = emptyMap()
+                val finalMessage = buildString {
+                    append(coreSyncMessagePrefix)
+                    val gpsNote = _state.value.lastMessage.takeIf {
+                        it.startsWith("Localização GPS:") || it.startsWith("Data de captura:")
+                    }
+                    if (gpsNote != null) {
+                        append("\n")
+                        append(gpsNote)
+                    }
+                    val missingThumb = countIndexedMissingThumbnails()
+                    val missingGps = countIndexedMissingGps()
+                    if (missingThumb > 0) {
+                        append(
+                            "\nMiniaturas pendentes: $missingThumb — " +
+                                "alguns itens falharam ou o sync foi interrompido.",
+                        )
+                    }
+                    if (missingGps > 0) {
+                        append(
+                            "\nSem GPS no índice: $missingGps — confira permissão " +
+                                "“Localização das mídias” e sincronize de novo.",
+                        )
+                    }
+                }
+                finalMessage to syncMetadataDao.countPendingOperations()
+            }.onSuccess { (finalMessage, pendingCount) ->
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    activeItem = null,
+                    runQueue = emptyList(),
+                    pendingOperations = pendingCount,
+                    progressPhase = SyncProgressPhase.IDLE,
+                    activityHeadline = "",
+                    activityDetail = "",
+                    lastMessage = finalMessage,
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) {
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        activeItem = null,
+                        runQueue = emptyList(),
+                        progressPhase = SyncProgressPhase.IDLE,
+                        activityHeadline = "",
+                        activityDetail = "",
+                        lastMessage = cancellationResultMessage(),
+                    )
+                } else {
+                    val prefix = coreSyncMessagePrefix
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        activeItem = null,
+                        runQueue = emptyList(),
+                        progressPhase = SyncProgressPhase.IDLE,
+                        activityHeadline = "",
+                        activityDetail = "",
+                        lastMessage = "$prefix\nPós-sync: ${error.message ?: "erro desconhecido"}.",
+                    )
+                }
+            }
+        }
+    }
+
     /** Após cancelar sync/index, completa miniaturas pendentes sem refazer upload/download. */
     private fun scheduleThumbnailPrefetchAfterInterrupt() {
         val scope = backgroundScope ?: return
@@ -2309,32 +2439,46 @@ class SyncCoordinator(
         honorSyncCancel: Boolean,
     ): Int {
         if (rows.isEmpty()) return 0
-        var cached = 0
-        rows.forEachIndexed { index, row ->
-            if (honorSyncCancel && index % 12 == 0) {
-                ensureNotCancelled()
-            }
-            if (_state.value.isRunning) {
-                setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Gerando e baixando miniaturas…",
-                    "${index + 1}/${rows.size} nesta leva · $cached salvas em cache.",
-                    alsoUpdateLastMessage = false,
-                )
-            }
-            coroutineContext.ensureActive()
-            setActiveSyncItem(
-                ActiveSyncItem(
-                    canonicalPath = row.canonicalPath,
-                    displayName = row.displayName,
-                    operationLabel = thumbnailOperationLabel(row),
-                ),
-            )
-            ensureThumbnailCached(row.canonicalPath).getOrNull()?.let { cached++ }
-            setActiveSyncItem(null)
-            removeFromRunQueue(row.canonicalPath)
+        val semaphore = Semaphore(PARALLEL_THUMBNAILS)
+        val completed = AtomicInteger(0)
+        val cachedCount = AtomicInteger(0)
+        return supervisorScope {
+            rows.map { row ->
+                async {
+                    semaphore.withPermit {
+                        if (honorSyncCancel) {
+                            coroutineContext.ensureActive()
+                            ensureNotCancelled()
+                        }
+                        setActiveSyncItem(
+                            ActiveSyncItem(
+                                canonicalPath = row.canonicalPath,
+                                displayName = row.displayName,
+                                operationLabel = thumbnailOperationLabel(row),
+                            ),
+                        )
+                        val hit = ensureThumbnailCached(row.canonicalPath).getOrNull() != null
+                        if (hit) cachedCount.incrementAndGet()
+                        val done = completed.incrementAndGet()
+                        if (_state.value.isRunning &&
+                            (done == rows.size || done % 8 == 0)
+                        ) {
+                            setSyncProgress(
+                                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                                "Gerando e baixando miniaturas…",
+                                "$done/${rows.size} nesta leva · " +
+                                    "${cachedCount.get()} salvas em cache · " +
+                                    "até $PARALLEL_THUMBNAILS em paralelo.",
+                                alsoUpdateLastMessage = false,
+                            )
+                        }
+                        setActiveSyncItem(null)
+                        removeFromRunQueue(row.canonicalPath)
+                        if (hit) 1 else 0
+                    }
+                }
+            }.awaitAll().sum()
         }
-        return cached
     }
 
     private suspend fun backfillMissingGpsLocations() {
@@ -2735,6 +2879,9 @@ class SyncCoordinator(
         const val GPS_BACKFILL_ROUNDS = 4
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 250
+        const val PARALLEL_UPLOADS = 3
+        const val PARALLEL_THUMBNAILS = 3
+        const val ROOM_UPSERT_CHUNK = 64
     }
 }
 

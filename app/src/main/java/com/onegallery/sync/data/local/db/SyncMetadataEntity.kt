@@ -1,11 +1,19 @@
 package com.onegallery.sync.data.local.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 
-@Entity(tableName = "sync_metadata")
+@Entity(
+    tableName = "sync_metadata",
+    indices = [
+        Index(value = ["cloudState"]),
+        Index(value = ["localMediaId"]),
+        Index(value = ["oneDriveItemId"]),
+    ],
+)
 data class SyncMetadataEntity(
     @PrimaryKey val canonicalPath: String,
     val displayName: String,

@@ -15,6 +15,28 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata")
     suspend fun getAll(): List<SyncMetadataEntity>
 
+    @Query("SELECT * FROM sync_metadata WHERE localMediaId IS NOT NULL")
+    suspend fun getRowsWithLocalCopy(): List<SyncMetadataEntity>
+
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE localMediaId IS NOT NULL
+          AND pendingDeleteTarget = 'NONE'
+          AND cloudState = 'PENDING_UPLOAD'
+        """,
+    )
+    suspend fun getPendingUploadRows(): List<SyncMetadataEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM sync_metadata
+        WHERE cloudState IN ('PENDING_UPLOAD', 'PENDING_DOWNLOAD')
+           OR pendingDeleteTarget != 'NONE'
+        """,
+    )
+    suspend fun countPendingOperations(): Int
+
     @Query("SELECT * FROM sync_metadata WHERE canonicalPath = :canonicalPath LIMIT 1")
     suspend fun getByCanonicalPath(canonicalPath: String): SyncMetadataEntity?
 
