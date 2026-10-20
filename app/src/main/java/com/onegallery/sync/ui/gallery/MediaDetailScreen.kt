@@ -65,6 +65,10 @@ fun MediaDetailScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    fun leaveDetail() {
+        viewModel.notifyLocalDisplayChanged()
+        onBack()
+    }
     val liveItems = state.items
     val snackbarHostState = remember { SnackbarHostState() }
     var showMoveDialog by remember { mutableStateOf(false) }
@@ -106,7 +110,7 @@ fun MediaDetailScreen(
         LaunchedEffect(initialCanonicalPath) {
             delay(600)
             if (viewModel.state.value.items.isEmpty()) {
-                onBack()
+                leaveDetail()
             }
         }
         return
@@ -290,6 +294,7 @@ fun MediaDetailScreen(
                             activePageError = err
                         }
                     },
+                    onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -319,7 +324,7 @@ fun MediaDetailScreen(
                     title = barTitle,
                     subtitle = barSubtitle,
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = { leaveDetail() }) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
                         }
                     },
@@ -459,9 +464,11 @@ private fun MediaDetailPage(
     onToggleImmersive: () -> Unit,
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
+    onLocalOriginalCached: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
+    var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
     var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
@@ -480,6 +487,15 @@ private fun MediaDetailPage(
             }
         }
 
+    fun notifyGridIfNewlyCached(display: GalleryDisplayItem?) {
+        if (gridNotifiedForCache || display == null) return
+        if (!display.hasViewableLocalOriginal(viewContext)) return
+        val liveHadCache = liveItem?.hasViewableLocalOriginal(viewContext) == true
+        if (liveHadCache) return
+        gridNotifiedForCache = true
+        onLocalOriginalCached()
+    }
+
     suspend fun loadFullOriginalForViewing() {
         val preview = item ?: liveItem
         if (preview?.hasViewableLocalOriginal(viewContext) == true) return
@@ -491,6 +507,7 @@ private fun MediaDetailPage(
             if (result.isSuccess) {
                 val file = result.getOrNull()
                 item = loadDisplayItem(includeOriginalFile = file)
+                notifyGridIfNewlyCached(item)
             } else {
                 error = result.exceptionOrNull()?.message
             }
@@ -519,6 +536,7 @@ private fun MediaDetailPage(
                 syncCoordinator.ensureThumbnailCached(canonicalPath)
             }
             item = loadDisplayItem() ?: item
+            notifyGridIfNewlyCached(item)
             loading = false
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled

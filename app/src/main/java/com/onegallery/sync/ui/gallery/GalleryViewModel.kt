@@ -103,7 +103,8 @@ class GalleryViewModel(
     private val librarySnapshot = combine(
         syncCoordinator.galleryMetadata,
         syncCoordinator.userAlbums,
-    ) { metadata, userAlbums ->
+        syncCoordinator.galleryDisplayRefreshEpoch,
+    ) { metadata, userAlbums, _ ->
         metadata to userAlbums
     }.conflate()
         .map { (metadata, userAlbums) ->
@@ -228,6 +229,11 @@ class GalleryViewModel(
     fun setAlbumListSort(sort: AlbumListSort) {
         albumListSort.value = sort
         galleryPreferences.albumListSort = sort
+    }
+
+    /** Reaplica cache/local no índice da galeria (ex.: após baixar original no detalhe). */
+    fun notifyLocalDisplayChanged() {
+        syncCoordinator.notifyGalleryDisplayRefresh()
     }
 
     fun refresh() {

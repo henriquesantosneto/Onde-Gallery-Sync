@@ -447,6 +447,13 @@ class SyncCoordinator(
 
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAll()
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
+
+    private val _galleryDisplayRefreshEpoch = MutableStateFlow(0L)
+    val galleryDisplayRefreshEpoch: StateFlow<Long> = _galleryDisplayRefreshEpoch.asStateFlow()
+
+    fun notifyGalleryDisplayRefresh() {
+        _galleryDisplayRefreshEpoch.value = System.nanoTime()
+    }
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
     val pendingOperationCount: Flow<Int> = syncMetadataDao.observePendingCount()
     val syncQueue: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingQueue()
@@ -1135,13 +1142,26 @@ class SyncCoordinator(
     }
 
     private suspend fun persistCachedOriginalPath(row: SyncMetadataEntity, file: File) {
-        if (row.cachedFilePath == file.absolutePath) return
+        val nextCloudState = when {
+            row.oneDriveItemId != null &&
+                (
+                    row.cloudState == CloudSyncState.CLOUD_ONLY ||
+                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                    ) -> CloudSyncState.SYNCED
+            else -> row.cloudState
+        }
+        if (row.cachedFilePath == file.absolutePath && row.cloudState == nextCloudState) {
+            notifyGalleryDisplayRefresh()
+            return
+        }
         syncMetadataDao.upsert(
             row.copy(
                 cachedFilePath = file.absolutePath,
                 lastError = null,
+                cloudState = nextCloudState,
             ),
         )
+        notifyGalleryDisplayRefresh()
     }
 
     /** Baixa da nuvem (se preciso); importação na galeria roda em segundo plano. */
@@ -1288,6 +1308,7 @@ class SyncCoordinator(
             )
         }
         syncMetadataDao.upsert(updated)
+        notifyGalleryDisplayRefresh()
         runCatching { ensureThumbnailCachedOnIo(row.canonicalPath) }
         return Result.success(sourceFile)
     }
