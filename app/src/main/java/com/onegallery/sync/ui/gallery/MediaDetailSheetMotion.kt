@@ -95,13 +95,22 @@ fun Modifier.draggableDetailPanelHeight(
     onDragStart: () -> Unit,
     onDragFraction: (Float) -> Unit,
     onDragEnd: (velocityYPxPerSec: Float) -> Unit,
+    /** 1 = área inteira; 0.2 = só a faixa inferior (ex.: abrir detalhes sem brigar com pinça). */
+    activationEdgeHeightFraction: Float = 1f,
 ): Modifier {
     if (!enabled || screenHeightPx <= 0f) return this
-    return pointerInput(enabled, screenHeightPx) {
+    return pointerInput(enabled, screenHeightPx, activationEdgeHeightFraction) {
         val touchSlop = viewConfiguration.touchSlop
         val maxFraction = MediaDetailSheetAnchors.FULL
+        val edgeFraction = activationEdgeHeightFraction.coerceIn(0.05f, 1f)
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+            if (edgeFraction < 1f) {
+                val minY = size.height * (1f - edgeFraction)
+                if (down.position.y < minY) {
+                    return@awaitEachGesture
+                }
+            }
             var sumX = 0f
             var sumY = 0f
             var lockedVertical = false

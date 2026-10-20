@@ -1,7 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -40,6 +41,11 @@ fun ZoomableMediaContainer(
     var containerSize by remember(resetKey) { mutableStateOf(IntSize.Zero) }
     val zoomActiveCallback = rememberUpdatedState(onZoomActiveChanged)
 
+    fun layerCenter(): Offset {
+        if (containerSize == IntSize.Zero) return Offset.Zero
+        return Offset(containerSize.width / 2f, containerSize.height / 2f)
+    }
+
     fun updateZoomActive(multiTouch: Boolean) {
         zoomActiveCallback.value(multiTouch || scaleState.floatValue > ZOOM_ACTIVE_THRESHOLD)
     }
@@ -54,14 +60,21 @@ fun ZoomableMediaContainer(
         )
     }
 
-    fun applyPinchZoom(zoomFactor: Float, p0: Offset, p1: Offset) {
-        if (!zoomFactor.isFinite() || abs(zoomFactor - 1f) <= 0.001f) return
+    fun applyZoomAtCentroid(centroid: Offset, zoomFactor: Float, pan: Offset = Offset.Zero) {
+        if (!zoomFactor.isFinite()) return
         val previousScale = scaleState.floatValue
+        if (abs(zoomFactor - 1f) <= 0.0005f) {
+            if (pan != Offset.Zero && previousScale > MIN_SCALE) {
+                offset = clampOffset(offset + pan, previousScale)
+                updateZoomActive(multiTouch = false)
+            }
+            return
+        }
         val newScale = (previousScale * zoomFactor).coerceIn(MIN_SCALE, MAX_SCALE)
-        val centroid = (p0 + p1) / 2f
         val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
+        val focal = centroid - layerCenter()
         offset = clampOffset(
-            (offset + centroid) * scaleFactor - centroid,
+            focal * (1f - scaleFactor) + offset * scaleFactor + pan,
             newScale,
         )
         scaleState.floatValue = newScale
@@ -71,7 +84,7 @@ fun ZoomableMediaContainer(
             scale = MIN_SCALE
             offset = Offset.Zero
         }
-        updateZoomActive(multiTouch = true)
+        updateZoomActive(multiTouch = newScale > ZOOM_ACTIVE_THRESHOLD)
     }
 
     Box(
@@ -86,51 +99,53 @@ fun ZoomableMediaContainer(
                     scaleY = scaleState.floatValue
                     translationX = offset.x
                     translationY = offset.y
+                    transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .pointerInput(resetKey) {
+                .pointerInput(resetKey, containerSize) {
                     awaitPointerEventScope {
                         var previousDistance = 0f
+                        var pinching = false
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val pressed = event.changes.filter { it.pressed }
-                            if (pressed.size >= 2) {
-                                updateZoomActive(multiTouch = true)
-                                val p0 = pressed[0].position
-                                val p1 = pressed[1].position
-                                val distance = (p0 - p1).getDistance()
-                                if (previousDistance > 0f) {
-                                    val zoom = distance / previousDistance
-                                    applyPinchZoom(zoom, p0, p1)
+                            when {
+                                pressed.size >= 2 -> {
+                                    pinching = true
+                                    updateZoomActive(multiTouch = true)
+                                    val p0 = pressed[0].position
+                                    val p1 = pressed[1].position
+                                    val distance = (p0 - p1).getDistance()
+                                    val centroid = (p0 + p1) / 2f
+                                    if (previousDistance > 0f) {
+                                        val zoom = distance / previousDistance
+                                        applyZoomAtCentroid(centroid, zoom)
+                                    }
+                                    previousDistance = distance
+                                    pressed.forEach { it.consume() }
                                 }
-                                previousDistance = distance
-                                pressed.forEach { it.consume() }
-                            } else {
-                                previousDistance = 0f
-                                if (pressed.isEmpty()) {
+                                pressed.isEmpty() -> {
+                                    previousDistance = 0f
+                                    pinching = false
                                     updateZoomActive(multiTouch = false)
                                 }
+                                pinching -> Unit
+                                else -> previousDistance = 0f
                             }
                         }
                     }
                 }
                 .pointerInput(resetKey, scale) {
                     if (scale <= ZOOM_ACTIVE_THRESHOLD) return@pointerInput
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        offset = clampOffset(offset + dragAmount, scaleState.floatValue)
+                        updateZoomActive(multiTouch = false)
+                    }
+                }
+                .pointerInput(resetKey, scale, containerSize) {
+                    if (scale <= ZOOM_ACTIVE_THRESHOLD) return@pointerInput
                     detectTransformGestures(panZoomLock = true) { centroid, pan, zoom, _ ->
-                        updateZoomActive(multiTouch = true)
-                        val previousScale = scaleState.floatValue
-                        val newScale = (previousScale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
-                        val scaleFactor = if (previousScale == 0f) 1f else newScale / previousScale
-                        offset = clampOffset(
-                            (offset + centroid) * scaleFactor - centroid + pan,
-                            newScale,
-                        )
-                        scaleState.floatValue = newScale
-                        scale = newScale
-                        if (newScale <= MIN_SCALE + 0.001f) {
-                            scaleState.floatValue = MIN_SCALE
-                            scale = MIN_SCALE
-                            offset = Offset.Zero
-                        }
+                        applyZoomAtCentroid(centroid, zoom, pan)
                         updateZoomActive(multiTouch = true)
                     }
                 }

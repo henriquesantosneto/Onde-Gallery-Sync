@@ -79,6 +79,7 @@ fun MediaDetailScreen(
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
     var multiTouchOnPhoto by remember { mutableStateOf(false) }
+    var photoZoomActive by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -261,8 +262,12 @@ fun MediaDetailScreen(
                         if (active) pagerScrollEnabled = false
                     }
                     .draggableDetailPanelHeight(
-                        enabled = swipeUpForDetails && pagerScrollEnabled && !multiTouchOnPhoto,
+                        enabled = swipeUpForDetails &&
+                            !photoZoomActive &&
+                            !multiTouchOnPhoto &&
+                            pagerScrollEnabled,
                         screenHeightPx = screenHeightPx,
+                        activationEdgeHeightFraction = 0.22f,
                         fractionBaseState = gestureBaseFraction,
                         onDragStart = {
                             detailsDragging = true
@@ -294,6 +299,7 @@ fun MediaDetailScreen(
                     mediaCacheRepository = mediaCacheRepository,
                     onToggleImmersive = { immersive = !immersive },
                     onZoomActiveChanged = { active ->
+                        photoZoomActive = active
                         pagerScrollEnabled = !active && !multiTouchOnPhoto
                     },
                     onActivePageError = { err ->
