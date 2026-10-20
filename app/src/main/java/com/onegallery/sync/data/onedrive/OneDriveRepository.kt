@@ -294,9 +294,10 @@ class OneDriveRepository(
     suspend fun probeExifLocationFromItem(
         itemId: String,
         locationResolver: MediaLocationResolver,
+        fileNameHint: String? = null,
     ): Result<MediaLocation?> {
         return runWithToken { token ->
-            val temp = File.createTempFile("ogs-exif-probe-", ".bin", appContext.cacheDir)
+            val temp = File.createTempFile("ogs-exif-probe-", exifProbeTempSuffix(fileNameHint), appContext.cacheDir)
             try {
                 resumableTransfer.downloadByteRange(
                     authorization = "Bearer $token",
@@ -327,9 +328,10 @@ class OneDriveRepository(
     suspend fun probeExifCaptureTimeFromItem(
         itemId: String,
         captureResolver: MediaCaptureTimeResolver,
+        fileNameHint: String? = null,
     ): Result<Long?> {
         return runWithToken { token ->
-            val temp = File.createTempFile("ogs-exif-capture-", ".bin", appContext.cacheDir)
+            val temp = File.createTempFile("ogs-exif-capture-", exifProbeTempSuffix(fileNameHint), appContext.cacheDir)
             try {
                 resumableTransfer.downloadByteRange(
                     authorization = "Bearer $token",
@@ -359,6 +361,16 @@ class OneDriveRepository(
     private companion object {
         const val EXIF_PROBE_BYTES = 512 * 1024L
         const val STREAM_BUFFER_BYTES = 64 * 1024
+
+        fun exifProbeTempSuffix(fileName: String?): String {
+            if (fileName.isNullOrBlank()) return ".jpg"
+            val ext = fileName.substringAfterLast('.', "").lowercase().take(8)
+            return when (ext) {
+                "jpg", "jpeg", "heic", "heif", "png", "webp", "dng", "tif", "tiff", "mp4", "mov", "m4v" ->
+                    ".$ext"
+                else -> ".jpg"
+            }
+        }
     }
 
     suspend fun deleteRemoteItem(itemId: String): Result<Unit> {

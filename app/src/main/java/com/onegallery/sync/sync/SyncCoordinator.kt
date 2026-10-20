@@ -2103,7 +2103,7 @@ class SyncCoordinator(
     ): MediaLocation? {
         resolveLocationLocalOnly(uri, cachedFilePath)?.let { return it }
         oneDriveItemId?.let { itemId ->
-            probeCloudExifLocation(itemId)?.let { return it }
+            probeCloudExifLocation(itemId, fileNameHint = null)?.let { return it }
         }
         return null
     }
@@ -2114,26 +2114,44 @@ class SyncCoordinator(
             cachedFilePath = row.cachedFilePath,
             oneDriveItemId = null,
         )?.let { return it }
-        val localId = row.localMediaId ?: return null
-        val item = indexPassLocalItemsById[localId]
-            ?: localMediaRepository.findById(localId)
-            ?: return null
-        item.latitude?.let { lat ->
-            item.longitude?.let { lon ->
-                return MediaLocation(lat, lon, formatCoordLabel(lat, lon))
+        val localId = row.localMediaId
+        if (localId != null) {
+            val item = indexPassLocalItemsById[localId]
+                ?: localMediaRepository.findById(localId)
+            if (item != null) {
+                item.latitude?.let { lat ->
+                    item.longitude?.let { lon ->
+                        return MediaLocation(lat, lon, formatCoordLabel(lat, lon))
+                    }
+                }
+                val temp = localMediaRepository.materializeToTempFile(item)
+                if (temp != null) {
+                    runCatching {
+                        mediaLocationResolver.resolveFromFile(temp)
+                    }.getOrNull()?.let { located ->
+                        temp.delete()
+                        return located
+                    }
+                    temp.delete()
+                }
             }
         }
-        val temp = localMediaRepository.materializeToTempFile(item) ?: return null
-        return runCatching {
-            mediaLocationResolver.resolveFromFile(temp)
-        }.getOrNull().also { temp.delete() }
+        return row.oneDriveItemId?.let { itemId ->
+            probeCloudExifLocation(itemId, row.displayName)
+        }
     }
 
-    private suspend fun probeCloudExifLocation(oneDriveItemId: String): MediaLocation? {
+    private suspend fun probeCloudExifLocation(
+        oneDriveItemId: String,
+        fileNameHint: String? = null,
+    ): MediaLocation? {
         if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return null
         if (!networkMonitor.isOnline()) return null
-        return oneDriveRepository.probeExifLocationFromItem(oneDriveItemId, mediaLocationResolver)
-            .getOrNull()
+        return oneDriveRepository.probeExifLocationFromItem(
+            oneDriveItemId,
+            mediaLocationResolver,
+            fileNameHint,
+        ).getOrNull()
     }
 
     /** Após cancelar sync/index, completa miniaturas pendentes sem refazer upload/download. */
@@ -2295,14 +2313,9 @@ class SyncCoordinator(
                         localProbes++
                         resolveLocationForBackfill(row)
                     }
-                    hasLocal -> null
                     row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
                         cloudProbes++
-                        resolveLocationFromSources(
-                            uri = null,
-                            cachedFilePath = null,
-                            oneDriveItemId = row.oneDriveItemId,
-                        )
+                        probeCloudExifLocation(row.oneDriveItemId, row.displayName)
                     }
                     else -> null
                 } ?: return@forEachIndexed
@@ -2319,11 +2332,17 @@ class SyncCoordinator(
         return GpsBackfillBatchOutcome(indexed, hitLimit)
     }
 
-    private suspend fun probeCloudExifCaptureTime(oneDriveItemId: String): Long? {
+    private suspend fun probeCloudExifCaptureTime(
+        oneDriveItemId: String,
+        fileNameHint: String? = null,
+    ): Long? {
         if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return null
         if (!networkMonitor.isOnline()) return null
-        return oneDriveRepository.probeExifCaptureTimeFromItem(oneDriveItemId, mediaCaptureTimeResolver)
-            .getOrNull()
+        return oneDriveRepository.probeExifCaptureTimeFromItem(
+            oneDriveItemId,
+            mediaCaptureTimeResolver,
+            fileNameHint,
+        ).getOrNull()
     }
 
     private suspend fun resolveCaptureTimeFromSources(
