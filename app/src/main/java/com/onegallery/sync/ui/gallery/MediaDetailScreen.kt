@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -224,6 +225,10 @@ fun MediaDetailScreen(
         detailsDragging -> detailsDragFraction > 0.14f
         else -> detailsSettleFraction > 0.05f
     } && detailPaths.isNotEmpty()
+
+    BackHandler(enabled = state.selectionMode && !detailsPanelOpen) {
+        viewModel.clearSelection()
+    }
     val showFilmstrip = chromeVisible &&
         !state.selectionMode &&
         !detailsPanelOpen &&
@@ -358,7 +363,19 @@ fun MediaDetailScreen(
                     title = barTitle,
                     subtitle = barSubtitle,
                     navigationIcon = {
-                        IconButton(onClick = { leaveDetail() }) {
+                        IconButton(
+                            onClick = {
+                                when {
+                                    detailsPanelOpen -> {
+                                        detailsSettleFraction = 0f
+                                        detailsDragFraction = 0f
+                                        detailsDragging = false
+                                    }
+                                    state.selectionMode -> viewModel.clearSelection()
+                                    else -> leaveDetail()
+                                }
+                            },
+                        ) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
                         }
                     },
@@ -382,11 +399,23 @@ fun MediaDetailScreen(
                                 Text("Cancelar", color = Color.White)
                             }
                         } else if (currentPath != null) {
-                            IconButton(onClick = { viewModel.toggleSelection(currentPath) }) {
+                            IconButton(
+                                onClick = {
+                                    if (state.selectionMode) {
+                                        if (currentSelected && state.selectedPaths.size == 1) {
+                                            viewModel.clearSelection()
+                                        } else {
+                                            viewModel.toggleSelection(currentPath)
+                                        }
+                                    } else {
+                                        viewModel.enterSelectionMode(currentPath)
+                                    }
+                                },
+                            ) {
                                 Icon(
                                     if (currentSelected) Icons.Outlined.CheckCircle
                                     else Icons.Outlined.RadioButtonUnchecked,
-                                    contentDescription = "Selecionar",
+                                    contentDescription = "Selecionar foto",
                                 )
                             }
                             MediaGalleryOverflowMenuButton(
