@@ -258,6 +258,12 @@ fun MediaDetailScreen(
         )
         val detailPanelDragEnabled = swipeUpForDetails && !photoZoomActive && !multiTouchOnPhoto
         val panelClosed = gestureBaseFraction.floatValue < 0.05f && !detailsDragging
+        val pagerManualDragEnabled = pagerPaths.size > 1 &&
+            pagerScrollEnabled &&
+            !multiTouchOnPhoto &&
+            !photoZoomActive &&
+            !detailsDragging &&
+            detailsSettleFraction < 0.05f
         val detailPanelDragModifier =
             if (detailPanelDragEnabled) {
                 Modifier.draggableDetailPanelHeight(
@@ -313,8 +319,16 @@ fun MediaDetailScreen(
             ) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled && !multiTouchOnPhoto && !photoZoomActive,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .mediaDetailPagerHorizontalDrag(
+                        enabled = pagerManualDragEnabled,
+                        pagerState = pagerState,
+                    ),
+                userScrollEnabled = !pagerManualDragEnabled &&
+                    pagerScrollEnabled &&
+                    !multiTouchOnPhoto &&
+                    !photoZoomActive,
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
@@ -338,14 +352,6 @@ fun MediaDetailScreen(
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
                     onActiveZoomTransform = { activePageZoomTransform = it },
                     detailPanelDragModifier = detailPanelDragModifier,
-                    pagerDragRelayEnabled = pagerPaths.size > 1 &&
-                        pagerScrollEnabled &&
-                        !multiTouchOnPhoto &&
-                        !photoZoomActive &&
-                        !detailsDragging &&
-                        detailsSettleFraction < 0.05f,
-                    pagerState = pagerState,
-                    pagerScope = pagerScope,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -525,6 +531,7 @@ private fun VideoPlayerWithZoom(
             uri = playback,
             modifier = Modifier.fillMaxSize(),
             playWhenReady = true,
+            usePlaybackControls = false,
         )
     }
 }
@@ -543,9 +550,6 @@ private fun MediaDetailPage(
     onLocalOriginalCached: () -> Unit = {},
     onActiveZoomTransform: (ZoomTransformHolder?) -> Unit = {},
     detailPanelDragModifier: Modifier = Modifier,
-    pagerDragRelayEnabled: Boolean = false,
-    pagerState: androidx.compose.foundation.pager.PagerState? = null,
-    pagerScope: kotlinx.coroutines.CoroutineScope? = null,
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
@@ -685,39 +689,19 @@ private fun MediaDetailPage(
                     val overlayItem = statusItem ?: display
                     when {
                         display.kind == MediaKind.VIDEO && playback != null -> {
-                            val relayEnabled = pagerDragRelayEnabled &&
-                                isActivePage &&
-                                pagerState != null &&
-                                pagerScope != null
                             MediaDetailMediaShell(
                                 item = overlayItem,
                                 recalling = loadingFull,
                                 contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
-                                if (relayEnabled && pagerState != null && pagerScope != null) {
-                                    MediaDetailPagerDragRelay(
-                                        enabled = true,
-                                        pagerState = pagerState,
-                                        pagerScope = pagerScope,
-                                    ) {
-                                        VideoPlayerWithZoom(
-                                            playback = playback,
-                                            canonicalPath = canonicalPath,
-                                            zoomTransform = zoomTransform,
-                                            onZoomActiveChanged = onZoomActiveChanged,
-                                            onToggleImmersive = onToggleImmersive,
-                                        )
-                                    }
-                                } else {
-                                    VideoPlayerWithZoom(
-                                        playback = playback,
-                                        canonicalPath = canonicalPath,
-                                        zoomTransform = zoomTransform,
-                                        onZoomActiveChanged = onZoomActiveChanged,
-                                        onToggleImmersive = onToggleImmersive,
-                                    )
-                                }
+                                VideoPlayerWithZoom(
+                                    playback = playback,
+                                    canonicalPath = canonicalPath,
+                                    zoomTransform = zoomTransform,
+                                    onZoomActiveChanged = onZoomActiveChanged,
+                                    onToggleImmersive = onToggleImmersive,
+                                )
                             }
                         }
                         display.kind == MediaKind.VIDEO -> {

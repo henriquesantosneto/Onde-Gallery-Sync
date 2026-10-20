@@ -41,6 +41,8 @@ fun VideoPlayerView(
     uri: Uri,
     modifier: Modifier = Modifier,
     playWhenReady: Boolean = true,
+    /** false = toques passam ao pager (detalhe com swipe horizontal). */
+    usePlaybackControls: Boolean = true,
 ) {
     val context = LocalContext.current
     var muted by remember(uri) { mutableStateOf(true) }
@@ -90,9 +92,14 @@ fun VideoPlayerView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     this.player = player
-                    useController = true
+                    useController = usePlaybackControls
                     controllerShowTimeoutMs = 5_000
                     isMotionEventSplittingEnabled = false
+                    if (!usePlaybackControls) {
+                        isClickable = false
+                        isFocusable = false
+                        setOnTouchListener { _, _ -> false }
+                    }
                 }
             },
             update = { view ->
