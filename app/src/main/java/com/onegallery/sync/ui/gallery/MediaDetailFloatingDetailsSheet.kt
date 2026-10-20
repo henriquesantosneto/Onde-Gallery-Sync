@@ -53,7 +53,15 @@ fun MediaDetailPushDetailsSheet(
     val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
     gestureBaseFraction.floatValue = panelDragBaseFraction
 
-    fun panelDragModifier() = Modifier.draggableDetailPanelHeight(
+    val handleDragModifier = Modifier.draggableDetailPanelHeight(
+        enabled = true,
+        screenHeightPx = screenHeightPx,
+        fractionBaseState = gestureBaseFraction,
+        onDragStart = onPanelDragStart,
+        onDragFraction = onPanelFractionChange,
+        onDragEnd = onPanelDragEnd,
+    )
+    val summaryDragModifier = Modifier.draggableDetailPanelHeight(
         enabled = true,
         screenHeightPx = screenHeightPx,
         fractionBaseState = gestureBaseFraction,
@@ -73,7 +81,7 @@ fun MediaDetailPushDetailsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .then(panelDragModifier())
+                .then(handleDragModifier)
                 .padding(top = 10.dp, bottom = 6.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -100,7 +108,7 @@ fun MediaDetailPushDetailsSheet(
                 showAdvancedToggle = false,
                 scrollContentInternally = false,
                 scrollBelowMapOnly = canonicalPaths.size == 1,
-                firstSectionDragModifier = panelDragModifier(),
+                firstSectionDragModifier = summaryDragModifier,
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(),

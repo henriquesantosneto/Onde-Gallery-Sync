@@ -80,6 +80,8 @@ fun MediaDetailScreen(
     /** true = oculta barras e carrossel (toque na foto alterna). */
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
+    var zoomActive by remember { mutableStateOf(false) }
+    var fullScreenPanelPull by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -181,6 +183,8 @@ fun MediaDetailScreen(
         detailsDragging = false
         activePageError = null
         pagerScrollEnabled = true
+        zoomActive = false
+        fullScreenPanelPull = false
     }
 
     fun openDetailsToSimple() {
@@ -204,10 +208,9 @@ fun MediaDetailScreen(
     var detailsContentLevel by remember {
         mutableStateOf(MediaDetailContentLevel.Simple)
     }
-    LaunchedEffect(detailsDragging, detailsSettleFraction) {
-        if (!detailsDragging) {
-            detailsContentLevel = contentLevelForPanelFraction(detailsSettleFraction)
-        }
+    LaunchedEffect(detailsDragging, detailsDragFraction, detailsSettleFraction) {
+        val fraction = if (detailsDragging) detailsDragFraction else detailsSettleFraction
+        detailsContentLevel = contentLevelForPanelFraction(fraction)
     }
 
     val chromeVisible = !immersive
@@ -257,27 +260,40 @@ fun MediaDetailScreen(
             detailsSettleFraction
         }
         val panelDragBaseFraction = gestureBaseFraction.floatValue
+        val panelPullEnabled = swipeUpForDetails && !zoomActive && detailPaths.isNotEmpty()
+        val showFullScreenPanelPull = panelPullEnabled && (
+            (detailsSettleFraction < 0.05f && !detailsDragging) || fullScreenPanelPull
+            )
+        val panelDragModifier = Modifier.draggableDetailPanelHeight(
+            enabled = true,
+            screenHeightPx = screenHeightPx,
+            fractionBaseState = gestureBaseFraction,
+            onDragStart = {
+                fullScreenPanelPull = detailsSettleFraction < 0.05f
+                detailsDragging = true
+                detailsDragFraction = gestureBaseFraction.floatValue
+            },
+            onDragFraction = { fraction ->
+                detailsDragging = true
+                detailsDragFraction = fraction
+            },
+            onDragEnd = { velocityY ->
+                snapDetailsPanel(velocityY)
+                detailsDragging = false
+                fullScreenPanelPull = false
+            },
+        )
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
                     .align(Alignment.TopCenter)
-                    .draggableDetailPanelHeight(
-                        enabled = swipeUpForDetails && pagerScrollEnabled && detailPaths.isNotEmpty(),
-                        screenHeightPx = screenHeightPx,
-                        fractionBaseState = gestureBaseFraction,
-                        onDragStart = {
-                            detailsDragging = true
-                            detailsDragFraction = gestureBaseFraction.floatValue
-                        },
-                        onDragFraction = { fraction ->
-                            detailsDragging = true
-                            detailsDragFraction = fraction
-                        },
-                        onDragEnd = { velocityY ->
-                            snapDetailsPanel(velocityY)
-                            detailsDragging = false
+                    .then(
+                        if (panelPullEnabled && detailsVisible && !fullScreenPanelPull) {
+                            panelDragModifier
+                        } else {
+                            Modifier
                         },
                     ),
             ) {
@@ -296,7 +312,10 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onToggleImmersive = { immersive = !immersive },
-                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
+                    onZoomActiveChanged = { active ->
+                        zoomActive = active
+                        pagerScrollEnabled = !active
+                    },
                     onActivePageError = { err ->
                         if (page == pagerState.currentPage) {
                             activePageError = err
@@ -420,6 +439,14 @@ fun MediaDetailScreen(
                         .fillMaxHeight(
                             detailsDisplayFraction.coerceIn(0.08f, MediaDetailSheetAnchors.FULL),
                         ),
+                )
+            }
+
+            if (showFullScreenPanelPull) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .then(panelDragModifier),
                 )
             }
         }
