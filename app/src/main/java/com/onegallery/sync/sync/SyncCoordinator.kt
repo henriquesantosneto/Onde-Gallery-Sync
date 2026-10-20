@@ -483,6 +483,17 @@ class SyncCoordinator(
         }
     }
 
+    /** Índice ganhou item novo ou ordem mudou — capas dos álbuns afetados. */
+    fun bumpAlbumCoverRevisionsForBucketIds(bucketIds: Collection<String>) {
+        if (bucketIds.isEmpty()) return
+        val stamp = System.nanoTime()
+        _albumCoverRevisions.update { current ->
+            val next = current.toMutableMap()
+            bucketIds.forEach { next[it] = stamp }
+            next
+        }
+    }
+
     private suspend fun bumpAlbumCoverRevisionsForPaths(paths: List<String>) {
         if (paths.isEmpty()) return
         val keys = linkedSetOf<String>()

@@ -100,6 +100,8 @@ class GalleryViewModel(
 
     private val albumCoverLocalIndex = AlbumCoverLocalIndex()
     private var lastAlbumCoverRevisions: Map<String, Long> = emptyMap()
+    private val folderAlbumLatestSort = mutableMapOf<String, Long>()
+    private val placeAlbumLatestSort = mutableMapOf<String, Long>()
     @Volatile
     private var latestLibraryItems: List<GalleryDisplayItem> = emptyList()
 
@@ -162,6 +164,10 @@ class GalleryViewModel(
         lastAlbumCoverRevisions = coverRevisions
         val allItems = snapshot.allItems
         latestLibraryItems = allItems
+        val coverKeysToRefresh = detectAlbumCoverSignatureChanges(allItems)
+        if (coverKeysToRefresh.isNotEmpty()) {
+            syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(coverKeysToRefresh)
+        }
         val userAlbums = snapshot.userAlbums
         val items = allItems
             .filter { item ->
@@ -269,6 +275,38 @@ class GalleryViewModel(
             return LiveAlbumCover(displayModel = album.coverModel, sourceItem = null)
         }
         return resolveLiveAlbumCover(items, mediaCacheRepository, album.coverModel)
+    }
+
+    private fun detectAlbumCoverSignatureChanges(allItems: List<GalleryDisplayItem>): Set<String> {
+        if (allItems.isEmpty()) return emptySet()
+        val changed = mutableSetOf<String>()
+        allItems.groupBy { it.albumName }.forEach { (name, items) ->
+            val key = "album:$name"
+            val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
+            if (folderAlbumLatestSort[key] != latest) {
+                folderAlbumLatestSort[key] = latest
+                changed.add(key)
+            }
+        }
+        val placeLocated = allItems.mapNotNull { item ->
+            val label = item.locationLabel?.trim().orEmpty()
+            val components = PlaceComponents.forItem(item)
+                ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
+            when {
+                components != null -> PlaceMatchKey.forComponents(components, item.locationLabel).encode() to item
+                label.isNotEmpty() -> PlaceMatchKey.legacyLabel(label).encode() to item
+                else -> null
+            }
+        }
+        placeLocated.groupBy({ it.first }, { it.second }).forEach { (encoded, group) ->
+            val key = "place:$encoded"
+            val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
+            if (placeAlbumLatestSort[key] != latest) {
+                placeAlbumLatestSort[key] = latest
+                changed.add(key)
+            }
+        }
+        return changed
     }
 
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {

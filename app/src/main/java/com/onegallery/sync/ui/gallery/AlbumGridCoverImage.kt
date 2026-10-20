@@ -13,7 +13,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,7 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Capa na grade de álbuns: relê miniaturas locais ao rolar ou após lote de thumbs (sem piscar).
+ * Capa na grade: ao aparecer na rolagem ou após revisão do álbum, relê disco (foto/vídeo).
  */
 @Composable
 fun AlbumGridCoverImage(
@@ -47,47 +46,25 @@ fun AlbumGridCoverImage(
     var displayModel by remember(album.bucketId) { mutableStateOf<Any?>(fallbackCover) }
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(false) }
     var coverCacheKey by remember(album.bucketId) { mutableStateOf(album.bucketId) }
-    var lastAppliedRevision by remember(album.bucketId) { mutableLongStateOf(0L) }
-
-    LaunchedEffect(album.bucketId, fallbackCover) {
-        if (displayModel == null && fallbackCover != null) {
-            displayModel = fallbackCover
-        }
-    }
 
     LaunchedEffect(album.bucketId, coverRevision) {
-        if (coverRevision == 0L || coverRevision == lastAppliedRevision) return@LaunchedEffect
-        lastAppliedRevision = coverRevision
-        applyLiveAlbumCover(
-            album = album,
-            resolveLiveCover = resolveLiveCover,
-            context = context,
-            onResult = { model, isVideo, cacheKey ->
-                if (model != null) {
-                    displayModel = model
-                    coverIsVideo = isVideo
-                    coverCacheKey = cacheKey
-                }
-            },
-        )
-    }
-
-    LaunchedEffect(album.bucketId) {
-        if (displayModel != null) return@LaunchedEffect
-        applyLiveAlbumCover(
-            album = album,
-            resolveLiveCover = resolveLiveCover,
-            context = context,
-            onResult = { model, isVideo, cacheKey ->
-                if (model != null) {
-                    displayModel = model
-                    coverIsVideo = isVideo
-                    coverCacheKey = cacheKey
-                } else if (fallbackCover != null) {
-                    displayModel = fallbackCover
-                }
-            },
-        )
+        val live = withContext(Dispatchers.IO) { resolveLiveCover(album) }
+        val isVideo = live.sourceItem?.kind == MediaKind.VIDEO
+        val resolved = withContext(Dispatchers.IO) {
+            live.sourceItem?.let { item ->
+                GalleryThumbnailModels.resolveGridModel(context, item, 480)
+            } ?: live.displayModel
+        }
+        val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId
+        if (resolved != null) {
+            if (cacheKey != coverCacheKey || displayModel == null) {
+                displayModel = resolved
+                coverIsVideo = isVideo
+                coverCacheKey = cacheKey
+            }
+        } else if (displayModel == null && fallbackCover != null) {
+            displayModel = fallbackCover
+        }
     }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -126,21 +103,4 @@ fun AlbumGridCoverImage(
             )
         }
     }
-}
-
-private suspend fun applyLiveAlbumCover(
-    album: MediaAlbum,
-    resolveLiveCover: suspend (MediaAlbum) -> LiveAlbumCover,
-    context: android.content.Context,
-    onResult: (model: Any?, isVideo: Boolean, cacheKey: String) -> Unit,
-) {
-    val live = withContext(Dispatchers.IO) { resolveLiveCover(album) }
-    val isVideo = live.sourceItem?.kind == MediaKind.VIDEO
-    val resolved = withContext(Dispatchers.IO) {
-        live.sourceItem?.let { item ->
-            GalleryThumbnailModels.resolveGridModel(context, item, 480)
-        } ?: live.displayModel
-    }
-    val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId
-    onResult(resolved, isVideo, cacheKey)
 }
