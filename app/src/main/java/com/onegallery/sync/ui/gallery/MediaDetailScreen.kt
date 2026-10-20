@@ -37,7 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -83,7 +82,6 @@ fun MediaDetailScreen(
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
     var zoomActive by remember { mutableStateOf(false) }
-    var activeZoomTransform by remember { mutableStateOf<ZoomTransformHolder?>(null) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -186,7 +184,6 @@ fun MediaDetailScreen(
         activePageError = null
         pagerScrollEnabled = true
         zoomActive = false
-        activeZoomTransform = null
     }
 
     fun openDetailsToSimple() {
@@ -206,13 +203,20 @@ fun MediaDetailScreen(
         settleTarget = detailsSettleFraction,
         dragFraction = detailsDragFraction,
         dragging = detailsDragging,
+        resetKey = pagerState.currentPage,
     )
     var detailsContentLevel by remember {
         mutableStateOf(MediaDetailContentLevel.Simple)
     }
     LaunchedEffect(detailsDragging, detailsDragFraction, detailsSettleFraction) {
         val fraction = if (detailsDragging) detailsDragFraction else detailsSettleFraction
-        detailsContentLevel = contentLevelForPanelFraction(fraction)
+        detailsContentLevel = contentLevelForPanelFraction(
+            fraction,
+            detailsContentLevel,
+        )
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        detailsContentLevel = MediaDetailContentLevel.Simple
     }
 
     val chromeVisible = !immersive
@@ -257,7 +261,10 @@ fun MediaDetailScreen(
         val screenHeightPx = with(LocalDensity.current) {
             configuration.screenHeightDp.dp.toPx()
         }
-        val detailsVisible = detailsDisplayFraction > 0.02f
+        val showDetailsSheet = detailPaths.isNotEmpty() &&
+            (detailsDragging || detailsSettleFraction > 0.02f)
+        val useSplitPhotoLayout = showDetailsSheet ||
+            detailsDisplayFraction > 0.03f
         val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
         val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
         gestureBaseFraction.floatValue = if (detailsDragging) {
@@ -267,50 +274,44 @@ fun MediaDetailScreen(
         }
         val panelDragBaseFraction = gestureBaseFraction.floatValue
         val panelPullEnabled = swipeUpForDetails && !zoomActive && detailPaths.isNotEmpty()
+        val onPanelDragStart = {
+            detailsDragging = true
+            detailsDragFraction = gestureBaseFraction.floatValue
+        }
+        val onPanelDragFraction: (Float) -> Unit = { fraction ->
+            detailsDragging = true
+            detailsDragFraction = fraction
+        }
+        val onPanelDragEnd: (Float) -> Unit = { velocityY ->
+            snapDetailsPanel(velocityY)
+            detailsDragging = false
+        }
+        fun panelDragModifier() = Modifier.draggableDetailPanelHeight(
+            enabled = true,
+            screenHeightPx = screenHeightPx,
+            fractionBaseState = gestureBaseFraction,
+            onDragStart = onPanelDragStart,
+            onDragFraction = onPanelDragFraction,
+            onDragEnd = onPanelDragEnd,
+        )
+        val panelOpenForLayout = detailsSettleFraction > 0.05f || detailsDragging
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
+                    .fillMaxHeight(if (useSplitPhotoLayout) photoHeightFraction else 1f)
                     .align(Alignment.TopCenter)
                     .then(
-                        activeZoomTransform?.let { transform ->
-                            Modifier.detailPhotoPinchZoom(
-                                transform = transform,
-                                onPinching = { pinching ->
-                                    val zoomed = pinching || transform.scale > 1.02f
-                                    zoomActive = zoomed
-                                    pagerScrollEnabled = !zoomed
-                                },
-                                onTransformChanged = {
-                                    val zoomed = transform.scale > 1.02f
-                                    zoomActive = zoomed
-                                    pagerScrollEnabled = !zoomed
-                                },
-                            )
-                        } ?: Modifier,
-                    )
-                    .draggableDetailPanelHeight(
-                        enabled = panelPullEnabled,
-                        screenHeightPx = screenHeightPx,
-                        fractionBaseState = gestureBaseFraction,
-                        onDragStart = {
-                            detailsDragging = true
-                            detailsDragFraction = gestureBaseFraction.floatValue
-                        },
-                        onDragFraction = { fraction ->
-                            detailsDragging = true
-                            detailsDragFraction = fraction
-                        },
-                        onDragEnd = { velocityY ->
-                            snapDetailsPanel(velocityY)
-                            detailsDragging = false
-                        },
+                        if (panelPullEnabled && panelOpenForLayout) panelDragModifier() else Modifier,
                     ),
             ) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (panelPullEnabled && !panelOpenForLayout) panelDragModifier() else Modifier,
+                    ),
                 userScrollEnabled = pagerScrollEnabled && !detailsDragging,
                 key = { page -> pagerPaths[page] },
             ) { page ->
@@ -333,7 +334,6 @@ fun MediaDetailScreen(
                         }
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
-                    onRegisterZoomTransform = { activeZoomTransform = it },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -344,7 +344,10 @@ fun MediaDetailScreen(
                     currentCanonicalPath = currentPath,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .navigationBarsPadding(),
+                        .navigationBarsPadding()
+                        .then(
+                            if (panelPullEnabled && !panelOpenForLayout) panelDragModifier() else Modifier,
+                        ),
                     onSelectPath = { path ->
                         val index = pagerPaths.indexOf(path)
                         if (index >= 0) {
@@ -448,7 +451,7 @@ fun MediaDetailScreen(
             }
             }
 
-            if (detailsVisible && detailPaths.isNotEmpty()) {
+            if (showDetailsSheet) {
                 MediaDetailPushDetailsSheet(
                     canonicalPaths = detailPaths,
                     displayItems = liveItems,
@@ -560,13 +563,9 @@ private fun MediaDetailPage(
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
-    onRegisterZoomTransform: (ZoomTransformHolder) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
-    if (isActivePage) {
-        SideEffect { onRegisterZoomTransform(zoomTransform) }
-    }
     var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
     var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
     var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }

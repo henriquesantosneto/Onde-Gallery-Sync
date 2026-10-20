@@ -55,11 +55,15 @@ enum class MediaDetailContentLevel {
     Full,
 }
 
-fun contentLevelForPanelFraction(fraction: Float): MediaDetailContentLevel {
-    return if (fraction >= 0.64f) {
-        MediaDetailContentLevel.Full
-    } else {
-        MediaDetailContentLevel.Simple
+fun contentLevelForPanelFraction(
+    fraction: Float,
+    previous: MediaDetailContentLevel = MediaDetailContentLevel.Simple,
+): MediaDetailContentLevel {
+    return when (previous) {
+        MediaDetailContentLevel.Full ->
+            if (fraction < 0.58f) MediaDetailContentLevel.Simple else MediaDetailContentLevel.Full
+        MediaDetailContentLevel.Simple ->
+            if (fraction >= 0.68f) MediaDetailContentLevel.Full else MediaDetailContentLevel.Simple
     }
 }
 
@@ -68,19 +72,32 @@ fun rememberMediaDetailSheetFraction(
     settleTarget: Float,
     dragFraction: Float,
     dragging: Boolean,
+    resetKey: Any,
 ): Float {
     val animatable = remember { Animatable(0f) }
-    LaunchedEffect(dragging, settleTarget) {
-        if (!dragging) {
-            animatable.animateTo(settleTarget, tween(durationMillis = 200))
+    LaunchedEffect(resetKey) {
+        animatable.snapTo(0f)
+    }
+    LaunchedEffect(dragging, dragFraction) {
+        if (dragging) {
+            animatable.snapTo(dragFraction)
         }
     }
-    return if (dragging) dragFraction else animatable.value
+    LaunchedEffect(dragging, settleTarget) {
+        if (!dragging) {
+            if (settleTarget <= 0f) {
+                animatable.snapTo(0f)
+            } else {
+                animatable.animateTo(settleTarget, tween(durationMillis = 220))
+            }
+        }
+    }
+    return animatable.value
 }
 
 private const val DETAIL_PANEL_DRAG_GAIN_OPEN = 1.55f
 private const val DETAIL_PANEL_DRAG_GAIN_CLOSE = 2.85f
-private const val HORIZONTAL_PASS_RATIO = 1.04f
+private const val HORIZONTAL_PASS_RATIO = 1.22f
 private const val VERTICAL_OPEN_RATIO_CLOSED = 1.32f
 private const val VERTICAL_DOMINANCE_RATIO = 1.38f
 
