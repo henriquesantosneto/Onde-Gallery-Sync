@@ -68,6 +68,7 @@ fun SyncMetadataEntity.syncQueueSortOrder(): Int = when {
     cloudState == CloudSyncState.PENDING_UPLOAD -> 0
     cloudState == CloudSyncState.LOCAL_ONLY -> 0
     cloudState == CloudSyncState.PENDING_DOWNLOAD -> 1
+    cloudState == CloudSyncState.CLOUD_ONLY -> 1
     else -> 3
 }
 

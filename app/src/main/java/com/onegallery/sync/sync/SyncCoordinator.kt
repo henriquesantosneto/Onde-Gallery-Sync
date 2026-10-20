@@ -937,6 +937,7 @@ class SyncCoordinator(
                     )
                     backfillMissingCaptureTimes()
                     indexPassLocalItemsById = emptyMap()
+                    drainRemainingRunQueueBeforePrefetch()
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
                         "Baixando miniaturas da nuvem…",
@@ -1712,9 +1713,54 @@ class SyncCoordinator(
 
     /** Nuvem mais nova: só miniatura no cache — original completo sob demanda na visualização. */
     private suspend fun registerCloudDownloadPlaceholder(row: SyncMetadataEntity): Int {
+        setActiveSyncItem(
+            ActiveSyncItem(
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                operationLabel = "Baixando miniatura da nuvem…",
+            ),
+        )
         ensureThumbnailCached(row.canonicalPath).getOrNull()
+        setActiveSyncItem(null)
         removeFromRunQueue(row.canonicalPath)
         return 1
+    }
+
+    /** Itens ainda listados na fila após a passagem local (ex.: só na nuvem). */
+    private suspend fun drainRemainingRunQueueBeforePrefetch() {
+        while (true) {
+            val path = _state.value.runQueue.firstOrNull()?.canonicalPath ?: break
+            val row = syncMetadataDao.getByCanonicalPath(path)
+            if (row == null) {
+                removeFromRunQueue(path)
+                continue
+            }
+            when {
+                row.pendingDeleteTarget != PendingDeleteTarget.NONE -> {
+                    deleteItemsImmediately(listOf(path), row.pendingDeleteTarget)
+                    removeFromRunQueue(path)
+                }
+                row.oneDriveItemId != null &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null -> {
+                    registerCloudDownloadPlaceholder(row)
+                }
+                else -> removeFromRunQueue(path)
+            }
+        }
+    }
+
+    private suspend fun buildThumbnailPrefetchEntities(maxPerRun: Int): List<SyncMetadataEntity> {
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return emptyList()
+        if (!networkMonitor.isOnline()) return emptyList()
+        return syncMetadataDao.getAll()
+            .asSequence()
+            .filter { row ->
+                row.oneDriveItemId != null &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null
+            }
+            .sortedWith(syncQueueEntityComparator)
+            .take(maxPerRun)
+            .toList()
     }
 
     private fun reconcileWithRemote(row: SyncMetadataEntity, remote: RemoteDriveFile): SyncMetadataEntity {
@@ -2049,7 +2095,8 @@ class SyncCoordinator(
             if (!longTaskMutex.tryLock()) return@launch
             try {
                 if (syncCancelRequested.get()) return@launch
-                val cached = runCloudThumbnailPrefetch(maxPerRun = 96, honorSyncCancel = false)
+                val rows = buildThumbnailPrefetchEntities(maxPerRun = 96)
+                val cached = runCloudThumbnailPrefetch(rows, honorSyncCancel = false)
                 if (cached > 0) {
                     val prefix = _state.value.lastMessage.substringBefore("\n")
                     _state.value = _state.value.copy(
@@ -2065,26 +2112,24 @@ class SyncCoordinator(
 
     /** Miniaturas da nuvem para grade/mapa/álbuns — sem baixar originais. */
     private suspend fun prefetchCloudThumbnails(maxPerRun: Int = 200) {
-        runCloudThumbnailPrefetch(maxPerRun = maxPerRun, honorSyncCancel = true)
+        val rows = buildThumbnailPrefetchEntities(maxPerRun)
+        if (rows.isNotEmpty()) {
+            setRunQueueFromEntities(rows)
+        }
+        runCloudThumbnailPrefetch(rows, honorSyncCancel = true)
     }
 
     private suspend fun runCloudThumbnailPrefetch(
-        maxPerRun: Int,
+        rows: List<SyncMetadataEntity>,
         honorSyncCancel: Boolean,
     ): Int {
-        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return 0
-        if (!networkMonitor.isOnline()) return 0
-        val rows = syncMetadataDao.getAll().filter { row ->
-            row.oneDriveItemId != null &&
-                mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null
-        }.take(maxPerRun)
         if (rows.isEmpty()) return 0
         var cached = 0
         rows.forEachIndexed { index, row ->
             if (honorSyncCancel && index % 12 == 0) {
                 ensureNotCancelled()
             }
-            if (_state.value.isRunning && (index == 0 || index % 16 == 0)) {
+            if (_state.value.isRunning) {
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Baixando miniaturas da nuvem…",
@@ -2093,7 +2138,16 @@ class SyncCoordinator(
                 )
             }
             coroutineContext.ensureActive()
+            setActiveSyncItem(
+                ActiveSyncItem(
+                    canonicalPath = row.canonicalPath,
+                    displayName = row.displayName,
+                    operationLabel = "Baixando miniatura da nuvem…",
+                ),
+            )
             ensureThumbnailCached(row.canonicalPath).getOrNull()?.let { cached++ }
+            setActiveSyncItem(null)
+            removeFromRunQueue(row.canonicalPath)
         }
         if (cached > 0 && honorSyncCancel) {
             setSyncProgress(
