@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -66,9 +67,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
+import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
 import com.onegallery.sync.ui.gallery.AlbumListSort
+import com.onegallery.sync.ui.gallery.GalleryFastScrollRailWidth
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
+import com.onegallery.sync.ui.gallery.buildAlbumGridFastScrollMarkers
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.ui.gallery.albumMediaCountBadgeCorner
 import com.onegallery.sync.ui.gallery.albumMediaCountBadgeFontScale
@@ -268,16 +272,34 @@ fun AlbumsScreen(
                 }
             }
             else -> {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = albumCellMin),
+                val albumGridState = rememberLazyGridState()
+                val railAlbums = when (selectedTab) {
+                    AlbumsBrowseTab.ALBUMS -> state.albums
+                    AlbumsBrowseTab.PLACES -> state.placeAlbums
+                }
+                val albumScrollMarkers = remember(railAlbums, state.albumListSort) {
+                    buildAlbumGridFastScrollMarkers(railAlbums, state.albumListSort)
+                }
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
-                        .then(gridPinch.gridModifier),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                        .padding(padding),
                 ) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = albumCellMin),
+                        state = albumGridState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(gridPinch.gridModifier),
+                        contentPadding = PaddingValues(
+                            start = 12.dp,
+                            end = 12.dp + GalleryFastScrollRailWidth,
+                            top = 12.dp,
+                            bottom = 12.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
                     items(
                         items = gridEntries,
                         key = { it.key },
@@ -323,6 +345,13 @@ fun AlbumsScreen(
                             is AlbumsGridEntry.Header -> Unit
                         }
                     }
+                    }
+                    AlbumGridFastScrollRail(
+                        gridState = albumGridState,
+                        itemCount = gridEntries.size,
+                        markers = albumScrollMarkers,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
                 }
             }
         }
