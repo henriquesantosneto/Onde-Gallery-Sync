@@ -147,9 +147,7 @@ fun Modifier.draggableDetailPanelHeight(
                     if (ax < slop && ay < slop) continue
 
                     when {
-                        ax > ay * 1.08f -> passedToChildren = true
-                        panelClosed && sumY > touchSlop -> passedToChildren = true
-                        !panelClosed && baseFraction > 0.03f && ay > slop && ay >= ax -> {
+                        panelClosed && sumY < -slop && ay >= ax * 0.82f -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -158,7 +156,7 @@ fun Modifier.draggableDetailPanelHeight(
                                 panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
                         }
-                        panelClosed && sumY < 0f && ay > ax * 1.28f -> {
+                        !panelClosed && baseFraction > 0.03f && ay > slop && ay >= ax -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -176,6 +174,8 @@ fun Modifier.draggableDetailPanelHeight(
                                 panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
                         }
+                        ax > ay * 1.12f && sumY >= -slop * 0.5f -> passedToChildren = true
+                        panelClosed && sumY > touchSlop -> passedToChildren = true
                     }
                 } else {
                     change.consume()

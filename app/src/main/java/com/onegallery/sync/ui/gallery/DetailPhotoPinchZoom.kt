@@ -18,7 +18,7 @@ fun Modifier.detailPhotoPinchZoom(
     transform: ZoomTransformHolder,
     onPinching: (Boolean) -> Unit,
     onTransformChanged: () -> Unit,
-): Modifier = pointerInput(transform.scale, transform.containerSize) {
+): Modifier = pointerInput(Unit) {
     awaitPointerEventScope {
         var previousDistance = 0f
         var pinching = false
