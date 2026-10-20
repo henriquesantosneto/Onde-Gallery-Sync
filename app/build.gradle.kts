@@ -73,8 +73,8 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 186
-        versionName = "0.8.130"
+        versionCode = 187
+        versionName = "0.8.131"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

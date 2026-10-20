@@ -26,8 +26,8 @@ object MediaDetailSheetAnchors {
 
     /** Snap ao âncora mais próximo; fling vertical promove/rebaixa um degrau. */
     fun snap(fraction: Float, velocityYPxPerSec: Float = 0f): Float {
-        val flingUp = velocityYPxPerSec < -900f
-        val flingDown = velocityYPxPerSec > 900f
+        val flingUp = velocityYPxPerSec < -650f
+        val flingDown = velocityYPxPerSec > 650f
         if (flingUp) {
             val idx = anchors.indexOfLast { fraction >= it - 0.04f }.coerceAtLeast(0)
             return anchors[(idx + 1).coerceAtMost(anchors.lastIndex)]
@@ -38,12 +38,24 @@ object MediaDetailSheetAnchors {
             return anchors[(idx - 1).coerceAtLeast(0)]
         }
         return when {
-            fraction < 0.12f -> 0f
-            // Acima da metade entre simples e completo → nível 2 (sem exigir ~62% da tela).
-            fraction >= 0.50f -> FULL
+            fraction < 0.18f -> 0f
+            fraction >= 0.40f -> FULL
             else -> SIMPLE
         }
     }
+}
+
+/** Arraste vertical → fração do painel (ganho > 1 = menos arrasto na tela). */
+private const val DETAIL_PANEL_DRAG_GAIN = 2.15f
+
+private fun panelFractionFromDrag(
+    baseFraction: Float,
+    sumY: Float,
+    screenHeightPx: Float,
+    maxFraction: Float,
+): Float {
+    return (baseFraction - sumY * DETAIL_PANEL_DRAG_GAIN / screenHeightPx)
+        .coerceIn(0f, maxFraction)
 }
 
 enum class MediaDetailContentLevel {
@@ -146,7 +158,9 @@ fun Modifier.draggableDetailPanelHeight(
                             change.consume()
                             dragging = true
                             onDragStart()
-                            val fraction = (baseFraction - sumY / screenHeightPx).coerceIn(0f, maxFraction)
+                            val fraction = panelFractionFromDrag(
+                                baseFraction, sumY, screenHeightPx, maxFraction,
+                            )
                             onDragFraction(fraction)
                         }
                         ay > ax * VERTICAL_DOMINANCE_RATIO -> {
@@ -154,7 +168,9 @@ fun Modifier.draggableDetailPanelHeight(
                             change.consume()
                             dragging = true
                             onDragStart()
-                            val fraction = (baseFraction - sumY / screenHeightPx).coerceIn(0f, maxFraction)
+                            val fraction = panelFractionFromDrag(
+                                baseFraction, sumY, screenHeightPx, maxFraction,
+                            )
                             onDragFraction(fraction)
                         }
                         ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToChildren = true
@@ -163,7 +179,9 @@ fun Modifier.draggableDetailPanelHeight(
                 } else {
                     change.consume()
                     sumY += delta.y
-                    val fraction = (baseFraction - sumY / screenHeightPx).coerceIn(0f, maxFraction)
+                    val fraction = panelFractionFromDrag(
+                        baseFraction, sumY, screenHeightPx, maxFraction,
+                    )
                     onDragFraction(fraction)
                 }
             }

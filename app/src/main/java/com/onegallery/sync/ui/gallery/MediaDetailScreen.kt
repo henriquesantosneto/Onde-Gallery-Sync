@@ -253,6 +253,29 @@ fun MediaDetailScreen(
             detailsSettleFraction,
             max(detailsDisplayFraction, if (detailsDragging) detailsDragFraction else 0f),
         )
+        val detailPanelDragEnabled = swipeUpForDetails && !photoZoomActive && !multiTouchOnPhoto
+        val detailPanelDragModifier =
+            if (detailPanelDragEnabled) {
+                Modifier.draggableDetailPanelHeight(
+                    enabled = true,
+                    screenHeightPx = screenHeightPx,
+                    fractionBaseState = gestureBaseFraction,
+                    onDragStart = {
+                        detailsDragging = true
+                        detailsDragFraction = gestureBaseFraction.floatValue
+                    },
+                    onDragFraction = { fraction ->
+                        detailsDragging = true
+                        detailsDragFraction = fraction
+                    },
+                    onDragEnd = { velocityY ->
+                        snapDetailsPanel(velocityY)
+                        detailsDragging = false
+                    },
+                )
+            } else {
+                Modifier
+            }
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
@@ -281,25 +304,7 @@ fun MediaDetailScreen(
                             )
                         } ?: Modifier,
                     )
-                    .draggableDetailPanelHeight(
-                        enabled = swipeUpForDetails &&
-                            !photoZoomActive &&
-                            !multiTouchOnPhoto,
-                        screenHeightPx = screenHeightPx,
-                        fractionBaseState = gestureBaseFraction,
-                        onDragStart = {
-                            detailsDragging = true
-                            detailsDragFraction = gestureBaseFraction.floatValue
-                        },
-                        onDragFraction = { fraction ->
-                            detailsDragging = true
-                            detailsDragFraction = fraction
-                        },
-                        onDragEnd = { velocityY ->
-                            snapDetailsPanel(velocityY)
-                            detailsDragging = false
-                        },
-                    ),
+                    .then(detailPanelDragModifier),
             ) {
             HorizontalPager(
                 state = pagerState,
@@ -327,6 +332,7 @@ fun MediaDetailScreen(
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
                     onActiveZoomTransform = { activePageZoomTransform = it },
+                    detailPanelDragModifier = detailPanelDragModifier,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -498,19 +504,10 @@ private fun MediaDetailPage(
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
     onActiveZoomTransform: (ZoomTransformHolder?) -> Unit = {},
+    detailPanelDragModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
-    DisposableEffect(isActivePage, canonicalPath) {
-        if (isActivePage) {
-            onActiveZoomTransform(zoomTransform)
-        }
-        onDispose {
-            if (isActivePage) {
-                onActiveZoomTransform(null)
-            }
-        }
-    }
     var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
     var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
     var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }
@@ -620,6 +617,15 @@ private fun MediaDetailPage(
 
     val display = item
     val statusItem = liveItem ?: display
+    val playbackUri = display?.playbackUri()
+    LaunchedEffect(isActivePage, display?.kind, playbackUri, canonicalPath) {
+        if (!isActivePage) {
+            onActiveZoomTransform(null)
+            return@LaunchedEffect
+        }
+        val playableVideo = display?.kind == MediaKind.VIDEO && playbackUri != null
+        onActiveZoomTransform(if (playableVideo) null else zoomTransform)
+    }
 
     Box(modifier = modifier) {
         when {
@@ -647,7 +653,9 @@ private fun MediaDetailPage(
                             ) {
                                 VideoPlayerView(
                                     uri = playback,
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .then(detailPanelDragModifier),
                                     playWhenReady = true,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                 )
