@@ -58,6 +58,8 @@ fun MediaSamsungDetailsContent(
     scrollContentInternally: Boolean = true,
     /** Rola só o bloco técnico abaixo do mapa (painel de detalhes da foto). */
     scrollBelowMapOnly: Boolean = false,
+    /** Arraste do painel na área resumo+mapa (nível 2, sem roubar scroll do EXIF). */
+    firstSectionDragModifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     var infos by remember(canonicalPaths) { mutableStateOf<List<MediaDetailInfo>>(emptyList()) }
@@ -99,6 +101,7 @@ fun MediaSamsungDetailsContent(
                 showAdvancedToggle = showAdvancedToggle,
                 scrollContentInternally = scrollContentInternally && !scrollBelowMapOnly,
                 scrollBelowMapOnly = scrollBelowMapOnly,
+                firstSectionDragModifier = firstSectionDragModifier,
             )
             footer?.invoke()
         }
@@ -140,6 +143,7 @@ private fun SamsungDetailBlock(
     showAdvancedToggle: Boolean = true,
     scrollContentInternally: Boolean = true,
     scrollBelowMapOnly: Boolean = false,
+    firstSectionDragModifier: Modifier = Modifier,
 ) {
     var showAdvanced by remember(info.displayName) { mutableStateOf(false) }
     MediaDetailSamsungSheet(
@@ -154,6 +158,7 @@ private fun SamsungDetailBlock(
         contentOnDark = true,
         scrollContentInternally = scrollContentInternally,
         scrollBelowMapOnly = scrollBelowMapOnly,
+        firstSectionDragModifier = firstSectionDragModifier,
         modifier = modifier,
     )
 }

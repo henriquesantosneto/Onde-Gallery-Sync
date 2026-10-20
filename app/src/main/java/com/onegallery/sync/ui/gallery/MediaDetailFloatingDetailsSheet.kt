@@ -55,26 +55,29 @@ fun MediaDetailPushDetailsSheet(
     val multiSelect = canonicalPaths.size > 1
     val gestureBaseFraction = remember { mutableFloatStateOf(panelFraction) }
     gestureBaseFraction.floatValue = panelFraction
+    val atSimpleLevel = contentLevel == MediaDetailContentLevel.Simple
+    val panelDragModifier = Modifier.draggableDetailPanelHeight(
+        enabled = true,
+        screenHeightPx = screenHeightPx,
+        fractionBaseState = gestureBaseFraction,
+        onDragStart = { onPanelFractionChange(gestureBaseFraction.floatValue) },
+        onDragFraction = onPanelFractionChange,
+        onDragEnd = onPanelDragEnd,
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(Color(0xFF0D0D0D))
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            .then(if (atSimpleLevel) panelDragModifier else Modifier),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .draggableDetailPanelHeight(
-                    enabled = true,
-                    screenHeightPx = screenHeightPx,
-                    fractionBaseState = gestureBaseFraction,
-                    onDragStart = { onPanelFractionChange(gestureBaseFraction.floatValue) },
-                    onDragFraction = onPanelFractionChange,
-                    onDragEnd = onPanelDragEnd,
-                )
+                .then(if (!atSimpleLevel) panelDragModifier else Modifier)
                 .padding(top = 10.dp, bottom = 6.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -101,6 +104,7 @@ fun MediaDetailPushDetailsSheet(
                 showAdvancedToggle = false,
                 scrollContentInternally = multiSelect,
                 scrollBelowMapOnly = !multiSelect,
+                firstSectionDragModifier = if (!atSimpleLevel) panelDragModifier else Modifier,
                 modifier = if (multiSelect) {
                     Modifier.fillMaxWidth()
                 } else {

@@ -38,6 +38,7 @@ fun MediaDetailSamsungSheet(
     contentOnDark: Boolean = false,
     scrollContentInternally: Boolean = true,
     scrollBelowMapOnly: Boolean = false,
+    firstSectionDragModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     val effectiveAdvanced = showAdvanced || contentLevel == MediaDetailContentLevel.Full
@@ -99,88 +100,92 @@ fun MediaDetailSamsungSheet(
                 )
             }
             info != null -> {
-                val headline = info.samsungHeadline.ifBlank {
-                    info.capturedAtFormatted.takeIf { it != "—" }.orEmpty()
-                }
-                Text(
-                    headline.ifBlank { info.displayName },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = primaryText,
-                )
-                if (!showStandardBody) return@Column
-
-                Text(
-                    info.displayName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = secondaryText,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Text(
-                    info.storagePathLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = secondaryText,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-
-                info.captureSpecs?.deviceLabel?.let { device ->
+                Column(
+                    modifier = firstSectionDragModifier.fillMaxWidth(),
+                ) {
+                    val headline = info.samsungHeadline.ifBlank {
+                        info.capturedAtFormatted.takeIf { it != "—" }.orEmpty()
+                    }
                     Text(
-                        device,
-                        style = MaterialTheme.typography.titleSmall,
+                        headline.ifBlank { info.displayName },
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = primaryText,
-                        modifier = Modifier.padding(top = 14.dp),
                     )
-                }
-                info.captureSpecs?.statsPrimaryLine?.let { line ->
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = secondaryText,
-                        modifier = Modifier.padding(top = if (info.captureSpecs.deviceLabel != null) 6.dp else 14.dp),
-                    )
-                }
-                info.captureSpecs?.statsSecondaryLine?.let { line ->
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = secondaryText,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-
-                if (info.hasLocationMap) {
-                    PhotoDetailLocationSection(
-                        latitude = info.mapLatitude!!,
-                        longitude = info.mapLongitude!!,
-                        locationLabel = info.locationLabel,
-                        contentOnDark = contentOnDark,
-                        modifier = Modifier.padding(top = 16.dp),
-                    )
-                } else if (!info.locationLabel.isNullOrBlank()) {
-                    Text(
-                        info.locationLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = primaryText,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                }
-
-                if (showAdvancedToggle && contentLevel != MediaDetailContentLevel.Full) {
-                    TextButton(
-                        onClick = onToggleAdvanced,
-                        modifier = Modifier.padding(top = 12.dp),
-                    ) {
-                        Icon(
-                            if (showAdvanced) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                            contentDescription = null,
-                            tint = if (contentOnDark) Color.White else MaterialTheme.colorScheme.primary,
+                    if (showStandardBody) {
+                        Text(
+                            info.displayName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = secondaryText,
+                            modifier = Modifier.padding(top = 6.dp),
                         )
                         Text(
-                            if (showAdvanced) " Ocultar mais informações" else " Mais informações",
-                            color = if (contentOnDark) Color.White.copy(alpha = 0.9f)
-                                else MaterialTheme.colorScheme.primary,
+                            info.storagePathLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = secondaryText,
+                            modifier = Modifier.padding(top = 2.dp),
                         )
+
+                        info.captureSpecs?.deviceLabel?.let { device ->
+                            Text(
+                                device,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = primaryText,
+                                modifier = Modifier.padding(top = 14.dp),
+                            )
+                        }
+                        info.captureSpecs?.statsPrimaryLine?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = secondaryText,
+                                modifier = Modifier.padding(top = if (info.captureSpecs.deviceLabel != null) 6.dp else 14.dp),
+                            )
+                        }
+                        info.captureSpecs?.statsSecondaryLine?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = secondaryText,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+
+                        if (info.hasLocationMap) {
+                            PhotoDetailLocationSection(
+                                latitude = info.mapLatitude!!,
+                                longitude = info.mapLongitude!!,
+                                locationLabel = info.locationLabel,
+                                contentOnDark = contentOnDark,
+                                modifier = Modifier.padding(top = 16.dp),
+                            )
+                        } else if (!info.locationLabel.isNullOrBlank()) {
+                            Text(
+                                info.locationLabel,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = primaryText,
+                                modifier = Modifier.padding(top = 12.dp),
+                            )
+                        }
+
+                        if (showAdvancedToggle && contentLevel != MediaDetailContentLevel.Full) {
+                            TextButton(
+                                onClick = onToggleAdvanced,
+                                modifier = Modifier.padding(top = 12.dp),
+                            ) {
+                                Icon(
+                                    if (showAdvanced) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                    contentDescription = null,
+                                    tint = if (contentOnDark) Color.White else MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    if (showAdvanced) " Ocultar mais informações" else " Mais informações",
+                                    color = if (contentOnDark) Color.White.copy(alpha = 0.9f)
+                                        else MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
                     }
                 }
 
