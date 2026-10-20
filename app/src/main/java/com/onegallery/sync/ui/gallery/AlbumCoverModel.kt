@@ -1,8 +1,14 @@
 package com.onegallery.sync.ui.gallery
 
-import android.net.Uri
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.MediaKind
 import java.io.File
+
+/** Capa resolvida ao rolar a grade (modelo + item de origem, ex. vídeo). */
+data class LiveAlbumCover(
+    val displayModel: Any?,
+    val sourceItem: GalleryDisplayItem?,
+)
 
 /**
  * Capa de álbum: mídia **mais recente** do grupo que já tenha fonte local para exibir.
@@ -46,9 +52,27 @@ fun resolveGalleryCoverModel(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository? = null,
 ): Any? {
+    val cachedThumb = mediaCacheRepository?.thumbnailIfCached(item.canonicalPath)
+        ?.takeIf { it.isFile && it.length() > 0L }
+        ?: item.cachedPlaceholderThumb?.takeIf { it.isFile && it.length() > 0L }
+    if (item.kind == MediaKind.VIDEO) {
+        cachedThumb?.let { return it }
+        item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
+        item.localUri?.let { return it }
+        return item.thumbnailModel
+    }
     item.localUri?.let { return it }
     item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
-    mediaCacheRepository?.thumbnailIfCached(item.canonicalPath)?.takeIf { it.isFile }?.let { return it }
-    item.cachedPlaceholderThumb?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
+    cachedThumb?.let { return it }
     return item.thumbnailModel
+}
+
+fun resolveLiveAlbumCover(
+    items: List<GalleryDisplayItem>,
+    mediaCacheRepository: MediaCacheRepository,
+    fallbackModel: Any? = null,
+): LiveAlbumCover {
+    val item = resolveAlbumCoverItem(items, mediaCacheRepository)
+    val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: fallbackModel
+    return LiveAlbumCover(displayModel = model, sourceItem = item)
 }

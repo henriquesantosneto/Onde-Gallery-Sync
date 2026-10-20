@@ -261,11 +261,13 @@ class GalleryViewModel(
         syncCoordinator.notifyGalleryDisplayRefresh()
     }
 
-    /** Capa ao rolar a grade: lê miniaturas locais mais recentes do álbum (sem rede). */
-    suspend fun liveAlbumCoverFor(album: MediaAlbum): Any? {
+    /** Capa ao rolar a grade: foto ou vídeo com miniatura local mais recente (sem rede). */
+    suspend fun liveAlbumCoverFor(album: MediaAlbum): LiveAlbumCover {
         val items = itemsForAlbumCover(album)
-        if (items.isEmpty()) return album.coverModel
-        return resolveAlbumCoverModel(items, mediaCacheRepository) ?: album.coverModel
+        if (items.isEmpty()) {
+            return LiveAlbumCover(displayModel = album.coverModel, sourceItem = null)
+        }
+        return resolveLiveAlbumCover(items, mediaCacheRepository, album.coverModel)
     }
 
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {

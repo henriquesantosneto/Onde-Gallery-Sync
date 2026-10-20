@@ -68,6 +68,7 @@ import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumGridCoverImage
+import com.onegallery.sync.ui.gallery.LiveAlbumCover
 import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
 import com.onegallery.sync.ui.gallery.AlbumListSort
 import com.onegallery.sync.ui.gallery.GalleryFastScrollRailReservedWidth
@@ -484,7 +485,7 @@ private fun AlbumGridTile(
     selectionMode: Boolean,
     gesturesEnabled: Boolean = true,
     coverRefreshEpoch: Long,
-    resolveLiveCover: suspend (MediaAlbum) -> Any?,
+    resolveLiveCover: suspend (MediaAlbum) -> LiveAlbumCover,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
