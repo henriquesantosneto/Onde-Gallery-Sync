@@ -458,9 +458,11 @@ fun OneGalleryApp(
         }
     }
 
-    // Um handler só, registrado por último (prioridade sobre NavHost / gesto na borda S22).
+    // Na foto, o MediaDetailScreen trata voltar (seleção/detalhes/sair). Aqui só grade e álbuns.
     val galleryUi by galleryViewModel.state.collectAsStateWithLifecycle()
-    val interceptBackForSelection = galleryUi.selectionMode || galleryUi.albumSelectionMode
+    val onMediaDetail = currentRoute?.startsWith("media/") == true
+    val interceptBackForSelection = !onMediaDetail &&
+        (galleryUi.selectionMode || galleryUi.albumSelectionMode)
     BackHandler(enabled = interceptBackForSelection) {
         when {
             galleryUi.selectionMode -> galleryViewModel.clearSelection()

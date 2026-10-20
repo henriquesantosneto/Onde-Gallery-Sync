@@ -27,6 +27,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -539,6 +540,21 @@ fun MediaDetailScreen(
                 }
             },
         )
+    }
+
+    // Prioridade sobre NavHost: voltar cancela seleção / fecha detalhes, não a listagem da galeria.
+    BackHandler {
+        when {
+            showDeleteConfirm -> showDeleteConfirm = false
+            showMoveDialog -> showMoveDialog = false
+            state.selectionMode -> viewModel.clearSelection()
+            detailsPanelOpen -> {
+                detailsSettleFraction = 0f
+                detailsDragFraction = 0f
+                detailsDragging = false
+            }
+            else -> leaveDetail()
+        }
     }
 }
 
