@@ -46,19 +46,15 @@ fun GalleryThumbnailImage(
     }
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
-        val fromItem = item.localUri ?: item.thumbnailModel
-        if (fromItem != null) {
-            displayData = fromItem
-        }
         if (item.localUri != null) {
             withContext(Dispatchers.IO) {
                 GalleryThumbnailModels.resolveGridModel(context, item, sizePx)
             }?.let { resolved ->
                 displayData = resolved
             }
-            return@LaunchedEffect
+        } else {
+            item.thumbnailModel?.let { displayData = it }
         }
-        if (displayData != null) return@LaunchedEffect
         val coordinator = syncCoordinator ?: return@LaunchedEffect
         coordinator.ensureThumbnailCached(item.canonicalPath).getOrNull()?.let { cached ->
             displayData = cached

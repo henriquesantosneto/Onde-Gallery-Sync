@@ -230,16 +230,26 @@ class GalleryViewModel(
     fun setAlbumFilter(album: String?) {
         browseFilter.value = if (album == null) GalleryBrowseFilter.All else GalleryBrowseFilter.AlbumFolder(album)
         clearSelection()
+        if (album != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                prefetchBrowseThumbnailsForFolder(album)
+            }
+        }
     }
 
     fun setPlaceFilter(displayName: String?, matchKey: String? = null) {
-        browseFilter.value = if (displayName == null) {
+        val placeKey = displayName?.let { matchKey ?: PlaceMatchKey.legacyLabel(it).encode() }
+        browseFilter.value = if (displayName == null || placeKey == null) {
             GalleryBrowseFilter.All
         } else {
-            val key = matchKey ?: PlaceMatchKey.legacyLabel(displayName).encode()
-            GalleryBrowseFilter.Place(displayName = displayName, matchKey = key)
+            GalleryBrowseFilter.Place(displayName = displayName, matchKey = placeKey)
         }
         clearSelection()
+        if (placeKey != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                prefetchBrowseThumbnailsForPlace(placeKey)
+            }
+        }
     }
 
     /** Abre filtro a partir do rótulo salvo na foto (mapa / detalhes). */
@@ -307,6 +317,52 @@ class GalleryViewModel(
             }
         }
         return changed
+    }
+
+    private suspend fun prefetchBrowseThumbnailsForFolder(albumName: String) {
+        val items = latestLibraryItems.filter { it.albumName == albumName }
+        prefetchBrowseThumbnails(items, coverBucketId = "album:$albumName")
+    }
+
+    private suspend fun prefetchBrowseThumbnailsForPlace(encodedMatchKey: String) {
+        val matchKey = PlaceMatchKey.decode(encodedMatchKey)
+        val items = latestLibraryItems.filter { item ->
+            matchKey?.let { item.matchesPlace(it) } == true
+        }
+        prefetchBrowseThumbnails(items, coverBucketId = "place:$encodedMatchKey")
+    }
+
+    private suspend fun prefetchBrowseThumbnails(
+        items: List<GalleryDisplayItem>,
+        coverBucketId: String,
+    ) {
+        if (items.isEmpty()) return
+        val ordered = items.sortedBy(sortOrder.value)
+        val paths = linkedSetOf<String>()
+        ordered.firstOrNull { itemNeedsGeneratedThumbnail(it) }?.canonicalPath?.let { paths.add(it) }
+        resolveAlbumCoverItem(items, mediaCacheRepository)
+            ?.takeIf { itemNeedsGeneratedThumbnail(it) }
+            ?.canonicalPath
+            ?.let { paths.add(it) }
+        ordered
+            .asSequence()
+            .filter { itemNeedsGeneratedThumbnail(it) }
+            .take(28)
+            .forEach { paths.add(it.canonicalPath) }
+        paths.forEach { path ->
+            syncCoordinator.ensureThumbnailCached(path)
+        }
+        if (paths.isNotEmpty()) {
+            syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(setOf(coverBucketId))
+        }
+    }
+
+    private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {
+        if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath) != null) return false
+        if (item.oneDriveItemId != null) return true
+        if (item.localMediaId != null) return true
+        if (item.localUri != null) return true
+        return false
     }
 
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {
