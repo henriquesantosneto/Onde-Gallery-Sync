@@ -63,7 +63,13 @@ class MediaCacheRepository(context: Context) {
         return committed
     }
 
-    fun hasOriginal(canonicalPath: String): Boolean = originalFile(canonicalPath).exists()
+    fun hasOriginal(canonicalPath: String): Boolean {
+        val file = originalFile(canonicalPath)
+        return file.isFile && file.length() > 0L
+    }
+
+    fun originalIfCached(canonicalPath: String): File? =
+        originalFile(canonicalPath).takeIf { it.isFile && it.length() > 0L }
 
     fun deleteCached(canonicalPath: String) {
         deleteOriginalTransferArtifacts(canonicalPath)

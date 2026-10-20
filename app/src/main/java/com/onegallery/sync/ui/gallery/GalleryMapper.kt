@@ -23,6 +23,8 @@ object GalleryMapper {
         val kind = if (isVideoFileName(entity.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
         val localUri = entity.localContentUri?.let { Uri.parse(it) }
         val cached = entity.cachedFilePath?.let { path -> File(path) }
+            ?.takeIf { it.isFile && it.length() > 0L }
+            ?: mediaCacheRepository.originalIfCached(entity.canonicalPath)
         val placeholderThumb = mediaCacheRepository.thumbnailIfCached(entity.canonicalPath)
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }

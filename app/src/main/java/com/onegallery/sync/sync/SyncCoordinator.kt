@@ -1118,14 +1118,26 @@ class SyncCoordinator(
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return false
         if (row.oneDriveItemId.isNullOrBlank()) return false
         if (hasLocalOriginalOnDevice(row)) return false
-        // Original já em cache do app (grade mostra nuvem ✓) — não baixar de novo.
-        if (hasViewableCachedOriginal(row)) return false
-        return true
+        return resolveViewableOriginalFile(row) == null
     }
 
-    private fun hasViewableCachedOriginal(row: SyncMetadataEntity): Boolean {
-        val path = row.cachedFilePath ?: return false
-        return File(path).let { it.isFile && it.length() > 0L }
+    /** Original completo já no aparelho (Galeria ou pasta de cache do app). */
+    private fun resolveViewableOriginalFile(row: SyncMetadataEntity): File? {
+        row.cachedFilePath?.let { path ->
+            File(path).takeIf { it.isFile && it.length() > 0L }?.let { return it }
+        }
+        mediaCacheRepository.originalIfCached(row.canonicalPath)?.let { return it }
+        return null
+    }
+
+    private suspend fun persistCachedOriginalPath(row: SyncMetadataEntity, file: File) {
+        if (row.cachedFilePath == file.absolutePath) return
+        syncMetadataDao.upsert(
+            row.copy(
+                cachedFilePath = file.absolutePath,
+                lastError = null,
+            ),
+        )
     }
 
     /** Baixa da nuvem (se preciso); importação na galeria roda em segundo plano. */
@@ -1152,25 +1164,22 @@ class SyncCoordinator(
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
 
+        resolveViewableOriginalFile(row)?.let { existing ->
+            if (hasLocalOriginalOnDevice(row)) {
+                return Result.success(existing)
+            }
+            persistCachedOriginalPath(row, existing)
+            return Result.success(existing)
+        }
+
         if (hasLocalOriginalOnDevice(row)) {
-            val existing = row.cachedFilePath?.let { path ->
-                File(path).takeIf { it.isFile && it.length() > 0L }
-            }
-            return if (existing != null) {
-                Result.success(existing)
-            } else {
-                Result.failure(IllegalStateException("Original já está no dispositivo"))
-            }
+            return Result.failure(IllegalStateException("Original já está no dispositivo"))
         }
 
         val itemId = row.oneDriveItemId
             ?: return Result.failure(IllegalStateException("Sem referência OneDrive"))
 
-        val cachedOnDisk = row.cachedFilePath
-            ?.let { path -> File(path).takeIf { it.isFile && it.length() > 0L } }
-        val sourceFile = if (cachedOnDisk != null) {
-            cachedOnDisk
-        } else {
+        val sourceFile = run {
             if (!networkMonitor.isOnline()) {
                 return Result.failure(IllegalStateException("Offline — conecte-se para baixar o original"))
             }
@@ -1196,6 +1205,7 @@ class SyncCoordinator(
             target
         }
 
+        persistCachedOriginalPath(row, sourceFile)
         if (!hasLocalOriginalOnDevice(row.copy(cachedFilePath = sourceFile.absolutePath))) {
             scheduleRecalledGalleryImport(canonicalPath, sourceFile)
         }
