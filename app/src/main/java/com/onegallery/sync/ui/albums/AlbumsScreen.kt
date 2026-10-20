@@ -69,7 +69,7 @@ import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
 import com.onegallery.sync.ui.gallery.AlbumListSort
-import com.onegallery.sync.ui.gallery.GalleryFastScrollRailWidth
+import com.onegallery.sync.ui.gallery.GalleryFastScrollRailReservedWidth
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.buildAlbumGridFastScrollMarkers
@@ -293,7 +293,7 @@ fun AlbumsScreen(
                             .then(gridPinch.gridModifier),
                         contentPadding = PaddingValues(
                             start = 12.dp,
-                            end = 12.dp + GalleryFastScrollRailWidth,
+                            end = 12.dp + GalleryFastScrollRailReservedWidth,
                             top = 12.dp,
                             bottom = 12.dp,
                         ),

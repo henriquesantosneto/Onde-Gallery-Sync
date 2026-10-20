@@ -26,18 +26,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 enum class FastScrollMarkerKind {
@@ -53,10 +52,13 @@ data class FastScrollMarker(
     val kind: FastScrollMarkerKind,
 )
 
-/** Espaço reservado na grade (barra repousando). */
+/** Largura visual da barra em repouso. */
 val GalleryFastScrollRailWidth = 32.dp
 
-private val GalleryFastScrollRailWidthActive = 56.dp
+/** Espaço reservado na grade (cabe a barra expandida ao arrastar). */
+val GalleryFastScrollRailReservedWidth = 56.dp
+
+private val GalleryFastScrollRailWidthActive = GalleryFastScrollRailReservedWidth
 private val GalleryFastScrollTrackWidthIdle = 8.dp
 private val GalleryFastScrollTrackWidthActive = 14.dp
 
@@ -112,6 +114,12 @@ fun labelForFastScrollGridPosition(
     return null
 }
 
+fun fastScrollLabelFromMarkers(markers: List<FastScrollMarker>, itemIndex: Int): String? {
+    if (markers.isEmpty()) return null
+    return markers.lastOrNull { it.itemIndex <= itemIndex }?.label
+        ?: markers.firstOrNull()?.label
+}
+
 @Composable
 fun GalleryTimelineFastScrollRail(
     gridState: LazyGridState,
@@ -121,7 +129,7 @@ fun GalleryTimelineFastScrollRail(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    if (!enabled || entries.size < 12) return
+    if (!enabled || entries.size < 6) return
     val markers = remember(entries, timelineGrouping) {
         buildGalleryFastScrollMarkers(entries, timelineGrouping)
     }
@@ -148,11 +156,14 @@ fun GridFastScrollRail(
     labelForScrollIndex: (Int) -> String?,
     modifier: Modifier = Modifier,
 ) {
-    if (itemCount < 8 || markers.isEmpty()) return
+    if (itemCount < 4 || markers.isEmpty()) return
 
     val scope = rememberCoroutineScope()
+    var scrollJob by remember { mutableStateOf<Job?>(null) }
+    val markersState = rememberUpdatedState(markers)
+    val labelResolver = rememberUpdatedState(labelForScrollIndex)
+    val lastIndexState = rememberUpdatedState(lastIndex)
     var railHeightPx by remember { mutableFloatStateOf(0f) }
-    val railHeightState = rememberUpdatedState(railHeightPx)
     var dragging by remember { mutableStateOf(false) }
     var dragLabel by remember { mutableStateOf<String?>(null) }
     var dragThumbFraction by remember { mutableFloatStateOf(0f) }
@@ -178,29 +189,9 @@ fun GridFastScrollRail(
     }
     val thumbFraction = if (dragging) dragThumbFraction else scrollThumbFraction
 
-    fun resolveScrollIndex(fraction: Float): Int {
-        val clamped = fraction.coerceIn(0f, 1f)
-        val targetIndex = (clamped * lastIndex.coerceAtLeast(0)).roundToInt()
-        return markers.minByOrNull { abs(it.itemIndex - targetIndex) }?.itemIndex ?: targetIndex
-    }
-
-    fun applyScrollAtFraction(fraction: Float, animate: Boolean) {
-        val clamped = fraction.coerceIn(0f, 1f)
-        dragThumbFraction = clamped
-        val scrollIndex = resolveScrollIndex(clamped).coerceIn(0, lastIndex)
-        dragLabel = labelForScrollIndex(scrollIndex)
-            ?: markers.minByOrNull { abs(it.itemIndex - scrollIndex) }?.label
-        scope.launch {
-            if (animate) {
-                gridState.animateScrollToItem(scrollIndex)
-            } else {
-                gridState.scrollToItem(scrollIndex)
-            }
-        }
-    }
-
     Box(
         modifier = modifier
+            .zIndex(2f)
             .width(containerWidth)
             .fillMaxHeight()
             .onSizeChanged { railHeightPx = it.height.toFloat() },
@@ -240,29 +231,35 @@ fun GridFastScrollRail(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .pointerInput(itemCount, markers, lastIndex) {
+                .pointerInput(itemCount, lastIndex) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        dragging = true
-                        val height = railHeightState.value
-                        if (height > 0f) {
-                            applyScrollAtFraction(down.position.y / height, animate = false)
+                        val down = awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial,
+                        )
+                        scope.launch { dragging = true }
+                        val height = size.height.toFloat().coerceAtLeast(1f)
+                        fun scrubAtY(yPx: Float) {
+                            val fraction = (yPx / height).coerceIn(0f, 1f)
+                            val maxIndex = lastIndexState.value.coerceAtLeast(0)
+                            val scrollIndex = (fraction * maxIndex).roundToInt().coerceIn(0, maxIndex)
+                            dragThumbFraction = fraction
+                            dragLabel = labelResolver.value(scrollIndex)
+                                ?: fastScrollLabelFromMarkers(markersState.value, scrollIndex)
+                            scrollJob?.cancel()
+                            scrollJob = scope.launch {
+                                gridState.scrollToItem(scrollIndex)
+                            }
                         }
-                        var accumulatedY = down.position.y
+                        scrubAtY(down.position.y)
                         while (true) {
-                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) break
-                            val delta = change.positionChange()
-                            if (delta != Offset.Zero) {
-                                change.consume()
-                            }
-                            accumulatedY = (accumulatedY + delta.y).coerceIn(0f, height)
-                            if (height > 0f) {
-                                applyScrollAtFraction(accumulatedY / height, animate = false)
-                            }
+                            change.consume()
+                            scrubAtY(change.position.y)
                         }
-                        dragging = false
+                        scope.launch { dragging = false }
                     }
                 },
         )

@@ -3,7 +3,6 @@ package com.onegallery.sync.ui.gallery
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import kotlin.math.abs
 
 @Composable
 fun AlbumGridFastScrollRail(
@@ -12,7 +11,7 @@ fun AlbumGridFastScrollRail(
     markers: List<FastScrollMarker>,
     modifier: Modifier = Modifier,
 ) {
-    if (itemCount < 8 || markers.isEmpty()) return
+    if (itemCount < 4 || markers.isEmpty()) return
     GridFastScrollRail(
         gridState = gridState,
         itemCount = itemCount,
@@ -20,7 +19,7 @@ fun AlbumGridFastScrollRail(
         markers = markers,
         modifier = modifier,
         labelForScrollIndex = { index ->
-            markers.minByOrNull { abs(it.itemIndex - index) }?.label
+            fastScrollLabelFromMarkers(markers, index)
         },
     )
 }

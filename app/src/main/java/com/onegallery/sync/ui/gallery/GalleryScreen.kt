@@ -264,7 +264,7 @@ fun GalleryScreen(
                             .then(gridPinch.gridModifier),
                         contentPadding = PaddingValues(
                             start = 8.dp,
-                            end = 8.dp + if (dateTimeline) GalleryFastScrollRailWidth else 0.dp,
+                            end = 8.dp + if (dateTimeline) GalleryFastScrollRailReservedWidth else 0.dp,
                             top = gridTopPadding,
                             bottom = 4.dp,
                         ),
