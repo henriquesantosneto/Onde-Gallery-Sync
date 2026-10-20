@@ -62,6 +62,22 @@ fun SyncMetadataEntity.syncQueueStatusLabel(): String {
     }
 }
 
+/** Mesma prioridade usada na fila da UI e na ordem de processamento do sync. */
+fun SyncMetadataEntity.syncQueueSortOrder(): Int = when {
+    pendingDeleteTarget != PendingDeleteTarget.NONE -> 2
+    cloudState == CloudSyncState.PENDING_UPLOAD -> 0
+    cloudState == CloudSyncState.LOCAL_ONLY -> 0
+    cloudState == CloudSyncState.PENDING_DOWNLOAD -> 1
+    else -> 3
+}
+
+val syncQueueEntityComparator: Comparator<SyncMetadataEntity> =
+    compareBy<SyncMetadataEntity>(
+        { it.syncQueueSortOrder() },
+        { -(it.localModifiedAt ?: it.remoteModifiedAt ?: 0L) },
+        { it.canonicalPath },
+    )
+
 fun SyncMetadataEntity.queueDetailLabel(): String {
     if (pendingDeleteTarget != PendingDeleteTarget.NONE) {
         return when (pendingDeleteTarget) {

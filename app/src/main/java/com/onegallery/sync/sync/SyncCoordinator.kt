@@ -510,7 +510,8 @@ class SyncCoordinator(
                         row.cloudState == CloudSyncState.PENDING_UPLOAD
                     )
         }
-        return plannedUploads + rest
+        return plannedUploads.sortedWith(syncQueueEntityComparator) +
+            rest.sortedWith(syncQueueEntityComparator)
     }
 
     suspend fun getMetadata(canonicalPath: String): SyncMetadataEntity? {
@@ -811,6 +812,15 @@ class SyncCoordinator(
                     val plannedUploads = planUploadsForSync(rows, remoteByPath)
                     val queueEntities = buildSyncRunQueueEntities(plannedUploads, allRows)
                     setRunQueueFromEntities(queueEntities)
+                    val queuePathOrder = queueEntities.mapIndexed { index, entity ->
+                        entity.canonicalPath to index
+                    }.toMap()
+                    val rowsProcessingOrder = rows.sortedWith(
+                        compareBy(
+                            { queuePathOrder[it.canonicalPath] ?: Int.MAX_VALUE },
+                            { it.canonicalPath },
+                        ),
+                    )
                     setSyncProgress(
                         SyncProgressPhase.RECONCILING_LOCAL,
                         "Fila pronta",
@@ -822,7 +832,7 @@ class SyncCoordinator(
                     var localPassIndex = 0
                     val localPassTotal = rows.size
 
-                    for (row in rows) {
+                    for (row in rowsProcessingOrder) {
                         ensureSyncMayContinue()
                         localPassIndex++
                         if (localPassIndex == 1 || localPassIndex % 24 == 0 || localPassIndex == localPassTotal) {

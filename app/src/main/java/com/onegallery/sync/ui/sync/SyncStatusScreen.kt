@@ -162,14 +162,25 @@ fun SyncStatusScreen(
                             }
                         }
                         val queueCap = if (coordinatorState.isRunning) 10 else 8
-                        val queueInStatus = queueForUi.take(queueCap)
+                        val queueWindowStart = if (coordinatorState.isRunning && activeItem != null) {
+                            queueForUi.indexOfFirst { it.canonicalPath == activeItem.canonicalPath }
+                                .coerceAtLeast(0)
+                        } else {
+                            0
+                        }
+                        val queueInStatus = queueForUi
+                            .drop(queueWindowStart)
+                            .take(queueCap)
                         val activeMissingFromList = coordinatorState.isRunning &&
                             activeItem != null &&
                             queueInStatus.none { it.canonicalPath == activeItem.canonicalPath }
                         if (queueInStatus.isNotEmpty() || activeMissingFromList) {
                             Text(
                                 if (coordinatorState.isRunning && queueForUi.size > queueInStatus.size) {
-                                    "Arquivos na fila (mostrando ${queueInStatus.size} de ${queueForUi.size})"
+                                    val from = queueWindowStart + 1
+                                    val to = (queueWindowStart + queueInStatus.size)
+                                        .coerceAtMost(queueForUi.size)
+                                    "Arquivos na fila ($from–$to de ${queueForUi.size})"
                                 } else if (queueForUi.size + (if (activeMissingFromList) 1 else 0) > 1) {
                                     "Arquivos na fila (${queueForUi.size})"
                                 } else {
