@@ -26,8 +26,8 @@ object MediaDetailSheetAnchors {
 
     /** Snap ao âncora mais próximo; fling vertical promove/rebaixa um degrau. */
     fun snap(fraction: Float, velocityYPxPerSec: Float = 0f): Float {
-        val flingUp = velocityYPxPerSec < -650f
-        val flingDown = velocityYPxPerSec > 650f
+        val flingUp = velocityYPxPerSec < -780f
+        val flingDown = velocityYPxPerSec > 480f
         if (flingUp) {
             val idx = anchors.indexOfLast { fraction >= it - 0.04f }.coerceAtLeast(0)
             return anchors[(idx + 1).coerceAtMost(anchors.lastIndex)]
@@ -37,16 +37,24 @@ object MediaDetailSheetAnchors {
                 .let { if (it < 0) anchors.lastIndex else it }
             return anchors[(idx - 1).coerceAtLeast(0)]
         }
+        // Meio-termo entre âncoras (0 / 0,45 / 0,88): evita cair no nível completo ao abrir pouco.
+        val closeBias = when {
+            velocityYPxPerSec > 160f -> 0.08f
+            velocityYPxPerSec < -160f -> -0.04f
+            else -> 0f
+        }
+        val f = (fraction - closeBias).coerceIn(0f, 1f)
         return when {
-            fraction < 0.18f -> 0f
-            fraction >= 0.40f -> FULL
-            else -> SIMPLE
+            f < 0.22f -> 0f
+            f < 0.64f -> SIMPLE
+            else -> FULL
         }
     }
 }
 
-/** Arraste vertical → fração do painel (ganho > 1 = menos arrasto na tela). */
-private const val DETAIL_PANEL_DRAG_GAIN = 2.15f
+/** Ganho ao abrir (menos) vs fechar (mais) — arraste mais confortável nos dois sentidos. */
+private const val DETAIL_PANEL_DRAG_GAIN_OPEN = 1.55f
+private const val DETAIL_PANEL_DRAG_GAIN_CLOSE = 2.85f
 
 private fun panelFractionFromDrag(
     baseFraction: Float,
@@ -54,7 +62,8 @@ private fun panelFractionFromDrag(
     screenHeightPx: Float,
     maxFraction: Float,
 ): Float {
-    return (baseFraction - sumY * DETAIL_PANEL_DRAG_GAIN / screenHeightPx)
+    val gain = if (sumY > 0f) DETAIL_PANEL_DRAG_GAIN_CLOSE else DETAIL_PANEL_DRAG_GAIN_OPEN
+    return (baseFraction - sumY * gain / screenHeightPx)
         .coerceIn(0f, maxFraction)
 }
 
@@ -66,7 +75,7 @@ enum class MediaDetailContentLevel {
 }
 
 fun contentLevelForPanelFraction(fraction: Float): MediaDetailContentLevel {
-    return if (fraction >= 0.58f) {
+    return if (fraction >= 0.64f) {
         MediaDetailContentLevel.Full
     } else {
         MediaDetailContentLevel.Simple
