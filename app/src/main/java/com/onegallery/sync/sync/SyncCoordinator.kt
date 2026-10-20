@@ -1142,6 +1142,8 @@ class SyncCoordinator(
     }
 
     private suspend fun persistCachedOriginalPath(row: SyncMetadataEntity, file: File) {
+        val captureFromFile = row.capturedAtSeconds?.takeIf { it > 0L }
+            ?: mediaCaptureTimeResolver.resolveFromFile(file)?.takeIf { it > 0L }
         val nextCloudState = when {
             row.oneDriveItemId != null &&
                 (
@@ -1150,17 +1152,20 @@ class SyncCoordinator(
                     ) -> CloudSyncState.SYNCED
             else -> row.cloudState
         }
-        if (row.cachedFilePath == file.absolutePath && row.cloudState == nextCloudState) {
+        val nextRow = row.copy(
+            cachedFilePath = file.absolutePath,
+            lastError = null,
+            cloudState = nextCloudState,
+            capturedAtSeconds = captureFromFile ?: row.capturedAtSeconds,
+        )
+        if (nextRow.cachedFilePath == row.cachedFilePath &&
+            nextRow.cloudState == row.cloudState &&
+            nextRow.capturedAtSeconds == row.capturedAtSeconds
+        ) {
             notifyGalleryDisplayRefresh()
             return
         }
-        syncMetadataDao.upsert(
-            row.copy(
-                cachedFilePath = file.absolutePath,
-                lastError = null,
-                cloudState = nextCloudState,
-            ),
-        )
+        syncMetadataDao.upsert(nextRow)
         notifyGalleryDisplayRefresh()
     }
 
@@ -1300,7 +1305,10 @@ class SyncCoordinator(
                 cloudState = CloudSyncState.SYNCED,
             )
         } else {
+            val captureFromFile = row.capturedAtSeconds?.takeIf { it > 0L }
+                ?: mediaCaptureTimeResolver.resolveFromFile(sourceFile)?.takeIf { it > 0L }
             updated = updated.copy(
+                capturedAtSeconds = captureFromFile ?: row.capturedAtSeconds,
                 cloudState = when (updated.cloudState) {
                     CloudSyncState.CLOUD_ONLY, CloudSyncState.PENDING_DOWNLOAD -> CloudSyncState.SYNCED
                     else -> updated.cloudState
@@ -2225,6 +2233,7 @@ class SyncCoordinator(
                 val hasLocal = row.localMediaId != null || row.localContentUri != null || row.cachedFilePath != null
                 val resolved = when {
                     hasLocal -> resolveCaptureTimeForBackfill(row)
+                    row.cachedFilePath != null -> resolveCaptureTimeForBackfill(row)
                     row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
                         cloudProbes++
                         resolveCaptureTimeFromSources(
