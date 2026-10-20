@@ -48,7 +48,9 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
                 }
             }
         },
-    )
+    ).apply {
+        isQuickScaleEnabled = false
+    }
 
     private val panDetector = GestureDetector(
         context,
@@ -73,10 +75,12 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
     init {
         isFocusable = true
         isFocusableInTouchMode = true
+        isMotionEventSplittingEnabled = false
         addView(
             playerView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
+        playerView.isMotionEventSplittingEnabled = false
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -135,58 +139,71 @@ class ZoomablePlayerLayout(context: Context) : FrameLayout(context) {
         onZoomActiveChanged?.invoke(false)
     }
 
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.pointerCount >= 2) {
-            parent?.requestDisallowInterceptTouchEvent(true)
-            scaleDetector.onTouchEvent(event)
-            if (scale > 1.02f && event.pointerCount == 1) {
-                panDetector.onTouchEvent(event)
-            }
-            if (event.actionMasked == MotionEvent.ACTION_UP ||
-                event.actionMasked == MotionEvent.ACTION_CANCEL
-            ) {
-                if (event.pointerCount <= 1 && scale <= 1.02f) {
+    private fun inPinchGesture(event: MotionEvent): Boolean {
+        return scaleDetector.isInProgress ||
+            event.pointerCount >= 2 ||
+            scale > 1.02f
+    }
+
+    private fun handlePinchEnd(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL,
+            -> {
+                if (scale <= 1.02f) {
                     onZoomActiveChanged?.invoke(false)
                 }
             }
-            return true
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.pointerCount - 1 < 2 && scale <= 1.02f && !scaleDetector.isInProgress) {
+                    onZoomActiveChanged?.invoke(false)
+                }
+            }
         }
-        if (scale > 1.02f) {
-            parent?.requestDisallowInterceptTouchEvent(true)
-            scaleDetector.onTouchEvent(event)
+    }
+
+    /**
+     * Um único [ScaleGestureDetector.onTouchEvent] por [MotionEvent] — repetir no
+     * intercept/onTouch quebra a pinça de forma intermitente.
+     */
+    private fun handleZoomTouch(event: MotionEvent): Boolean {
+        scaleDetector.onTouchEvent(event)
+        if (!inPinchGesture(event)) {
+            if (event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+            ) {
+                if (abs(scale - 1f) < 0.02f) {
+                    onZoomActiveChanged?.invoke(false)
+                }
+            }
+            return false
+        }
+        parent?.requestDisallowInterceptTouchEvent(true)
+        if (scale > 1.02f && event.pointerCount == 1) {
             panDetector.onTouchEvent(event)
+        }
+        handlePinchEnd(event)
+        return true
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (handleZoomTouch(event)) {
             return true
         }
-        if (event.pointerCount == 1) {
-            parent?.requestDisallowInterceptTouchEvent(false)
-        }
+        parent?.requestDisallowInterceptTouchEvent(false)
         return super.dispatchTouchEvent(event)
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.pointerCount >= 2) {
+        if (ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN && ev.pointerCount >= 2) {
             parent?.requestDisallowInterceptTouchEvent(true)
+            return true
+        }
+        if (scaleDetector.isInProgress || ev.pointerCount >= 2) {
             return true
         }
         if (scale > 1.02f && ev.actionMasked == MotionEvent.ACTION_MOVE) {
             return true
-        }
-        return false
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.pointerCount >= 2 || scale > 1.02f) {
-            parent?.requestDisallowInterceptTouchEvent(true)
-            scaleDetector.onTouchEvent(event)
-            if (scale > 1.02f && event.pointerCount == 1) {
-                panDetector.onTouchEvent(event)
-            }
-            return true
-        }
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            if (abs(scale - 1f) < 0.02f) {
-                onZoomActiveChanged?.invoke(false)
-            }
         }
         return false
     }
