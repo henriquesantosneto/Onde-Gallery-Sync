@@ -2,6 +2,7 @@ package com.onegallery.sync.ui
 
 import android.Manifest
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
@@ -455,5 +456,14 @@ fun OneGalleryApp(
                 )
             }
         }
+    }
+
+    // Registrado por último: prioridade sobre NavHost (gesto Voltar / borda esquerda no S22).
+    val galleryUi by galleryViewModel.state.collectAsStateWithLifecycle()
+    BackHandler(enabled = galleryUi.selectionMode) {
+        galleryViewModel.clearSelection()
+    }
+    BackHandler(enabled = galleryUi.albumSelectionMode) {
+        galleryViewModel.clearAlbumSelection()
     }
 }
