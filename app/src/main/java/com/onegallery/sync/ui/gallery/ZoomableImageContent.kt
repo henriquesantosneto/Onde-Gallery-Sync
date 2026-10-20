@@ -14,6 +14,7 @@ import coil.request.ImageRequest
 fun ZoomableImageContent(
     model: Any?,
     contentDescription: String?,
+    transform: ZoomTransformHolder,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     onZoomActiveChanged: (Boolean) -> Unit = {},
@@ -22,6 +23,7 @@ fun ZoomableImageContent(
 ) {
     ZoomableMediaContainer(
         resetKey = model,
+        transform = transform,
         modifier = modifier,
         interceptSingleTap = true,
         onZoomActiveChanged = onZoomActiveChanged,

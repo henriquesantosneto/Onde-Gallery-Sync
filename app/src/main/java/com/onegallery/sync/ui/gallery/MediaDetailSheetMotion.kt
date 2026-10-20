@@ -81,7 +81,7 @@ fun rememberMediaDetailSheetFraction(
     return animatable.value
 }
 
-private const val VERTICAL_DOMINANCE_RATIO = 1.15f
+private const val VERTICAL_DOMINANCE_RATIO = 1.02f
 
 /**
  * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
@@ -104,7 +104,7 @@ fun Modifier.draggableDetailPanelHeight(
         val maxFraction = MediaDetailSheetAnchors.FULL
         val edgeFraction = activationEdgeHeightFraction.coerceIn(0.05f, 1f)
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             if (edgeFraction < 1f) {
                 val minY = size.height * (1f - edgeFraction)
                 if (down.position.y < minY) {
@@ -120,9 +120,8 @@ fun Modifier.draggableDetailPanelHeight(
             val velocityTracker = VelocityTracker()
 
             while (true) {
-                val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                 if (event.changes.count { it.pressed } >= 2) {
-                    passedToChildren = true
                     break
                 }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
@@ -138,9 +137,18 @@ fun Modifier.draggableDetailPanelHeight(
                     sumY += delta.y
                     val ax = abs(sumX)
                     val ay = abs(sumY)
-                    if (ax < touchSlop && ay < touchSlop) continue
+                    val slop = touchSlop * if (baseFraction > 0.03f) 0.45f else 1f
+                    if (ax < slop && ay < slop) continue
 
                     when {
+                        baseFraction > 0.03f && ay > slop && ay >= ax -> {
+                            lockedVertical = true
+                            change.consume()
+                            dragging = true
+                            onDragStart()
+                            val fraction = (baseFraction - sumY / screenHeightPx).coerceIn(0f, maxFraction)
+                            onDragFraction(fraction)
+                        }
                         ay > ax * VERTICAL_DOMINANCE_RATIO -> {
                             lockedVertical = true
                             change.consume()

@@ -27,6 +27,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,6 +81,7 @@ fun MediaDetailScreen(
     var pagerScrollEnabled by remember { mutableStateOf(true) }
     var multiTouchOnPhoto by remember { mutableStateOf(false) }
     var photoZoomActive by remember { mutableStateOf(false) }
+    var activePageZoomTransform by remember { mutableStateOf<ZoomTransformHolder?>(null) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -261,6 +263,24 @@ fun MediaDetailScreen(
                         multiTouchOnPhoto = active
                         if (active) pagerScrollEnabled = false
                     }
+                    .then(
+                        activePageZoomTransform?.let { zoomTransform ->
+                            Modifier.detailPhotoPinchZoom(
+                                transform = zoomTransform,
+                                onPinching = { pinching ->
+                                    if (pinching) {
+                                        multiTouchOnPhoto = true
+                                        pagerScrollEnabled = false
+                                    }
+                                },
+                                onTransformChanged = {
+                                    val zoomed = zoomTransform.scale > 1.02f
+                                    photoZoomActive = zoomed
+                                    pagerScrollEnabled = !zoomed
+                                },
+                            )
+                        } ?: Modifier,
+                    )
                     .draggableDetailPanelHeight(
                         enabled = swipeUpForDetails &&
                             !photoZoomActive &&
@@ -306,6 +326,7 @@ fun MediaDetailScreen(
                         }
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
+                    onActiveZoomTransform = { activePageZoomTransform = it },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -476,8 +497,20 @@ private fun MediaDetailPage(
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
+    onActiveZoomTransform: (ZoomTransformHolder?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
+    DisposableEffect(isActivePage, canonicalPath) {
+        if (isActivePage) {
+            onActiveZoomTransform(zoomTransform)
+        }
+        onDispose {
+            if (isActivePage) {
+                onActiveZoomTransform(null)
+            }
+        }
+    }
     var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
     var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
     var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }
@@ -629,6 +662,7 @@ private fun MediaDetailPage(
                             ) {
                                 ZoomableMediaContainer(
                                     resetKey = canonicalPath,
+                                    transform = zoomTransform,
                                     modifier = Modifier.fillMaxSize(),
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onSingleTap = onToggleImmersive,
@@ -654,6 +688,7 @@ private fun MediaDetailPage(
                                 ZoomableImageContent(
                                     model = display.detailPreviewModel(),
                                     contentDescription = display.displayName,
+                                    transform = zoomTransform,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Fit,
                                     onZoomActiveChanged = onZoomActiveChanged,
@@ -671,6 +706,7 @@ private fun MediaDetailPage(
                             ) {
                                 ZoomableMediaContainer(
                                     resetKey = canonicalPath,
+                                    transform = zoomTransform,
                                     modifier = Modifier.fillMaxSize(),
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onSingleTap = onToggleImmersive,
