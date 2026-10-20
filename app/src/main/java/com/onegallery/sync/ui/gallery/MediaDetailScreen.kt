@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -267,7 +269,6 @@ fun MediaDetailScreen(
                             !multiTouchOnPhoto &&
                             pagerScrollEnabled,
                         screenHeightPx = screenHeightPx,
-                        activationEdgeHeightFraction = 0.22f,
                         fractionBaseState = gestureBaseFraction,
                         onDragStart = {
                             detailsDragging = true
