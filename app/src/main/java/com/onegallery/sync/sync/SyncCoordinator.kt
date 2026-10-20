@@ -1117,7 +1117,15 @@ class SyncCoordinator(
     suspend fun needsOriginalRecall(canonicalPath: String): Boolean {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return false
         if (row.oneDriveItemId.isNullOrBlank()) return false
-        return !hasLocalOriginalOnDevice(row)
+        if (hasLocalOriginalOnDevice(row)) return false
+        // Original já em cache do app (grade mostra nuvem ✓) — não baixar de novo.
+        if (hasViewableCachedOriginal(row)) return false
+        return true
+    }
+
+    private fun hasViewableCachedOriginal(row: SyncMetadataEntity): Boolean {
+        val path = row.cachedFilePath ?: return false
+        return File(path).let { it.isFile && it.length() > 0L }
     }
 
     /** Baixa da nuvem (se preciso); importação na galeria roda em segundo plano. */
