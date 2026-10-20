@@ -102,7 +102,8 @@ fun rememberMediaDetailSheetFraction(
     return animatable.value
 }
 
-private const val VERTICAL_DOMINANCE_RATIO = 1.42f
+/** Igual ao ajuste “arraste confortável” (c8f41e4): vertical ganha cedo ao puxar detalhes. */
+private const val VERTICAL_DOMINANCE_RATIO = 1.02f
 
 /**
  * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
@@ -182,7 +183,7 @@ fun Modifier.draggableDetailPanelHeight(
                             )
                             onDragFraction(fraction)
                         }
-                        ax > ay * 1.08f -> passedToChildren = true
+                        ax > ay * VERTICAL_DOMINANCE_RATIO -> passedToChildren = true
                         baseFraction < 0.05f && sumY > touchSlop -> passedToChildren = true
                     }
                 } else {

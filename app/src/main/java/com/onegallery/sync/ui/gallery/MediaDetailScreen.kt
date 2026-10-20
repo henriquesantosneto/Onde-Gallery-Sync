@@ -251,7 +251,6 @@ fun MediaDetailScreen(
             detailsSettleFraction,
             max(detailsDisplayFraction, if (detailsDragging) detailsDragFraction else 0f),
         )
-        val panelClosed = gestureBaseFraction.floatValue < 0.05f && !detailsDragging
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
@@ -262,7 +261,6 @@ fun MediaDetailScreen(
                         enabled = swipeUpForDetails && pagerScrollEnabled,
                         screenHeightPx = screenHeightPx,
                         fractionBaseState = gestureBaseFraction,
-                        activationEdgeHeightFraction = if (panelClosed) 0.36f else 1f,
                         onDragStart = {
                             detailsDragging = true
                             detailsDragFraction = gestureBaseFraction.floatValue
