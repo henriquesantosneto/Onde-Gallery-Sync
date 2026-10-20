@@ -28,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -147,6 +148,13 @@ class SyncCoordinator(
     private val longTaskMutex = Mutex()
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
+    private var thumbGalleryRefreshJob: Job? = null
+
+    init {
+        mediaCacheRepository.onThumbnailCommitted = {
+            scheduleDebouncedGalleryRefreshAfterThumbnail()
+        }
+    }
 
     private fun setSyncProgress(
         phase: SyncProgressPhase,
@@ -454,6 +462,21 @@ class SyncCoordinator(
 
     fun notifyGalleryDisplayRefresh() {
         _galleryDisplayRefreshEpoch.value = System.nanoTime()
+    }
+
+    private fun scheduleDebouncedGalleryRefreshAfterThumbnail() {
+        val scope = backgroundScope ?: return
+        thumbGalleryRefreshJob?.cancel()
+        thumbGalleryRefreshJob = scope.launch {
+            delay(THUMB_GALLERY_REFRESH_DEBOUNCE_MS)
+            notifyGalleryDisplayRefresh()
+        }
+    }
+
+    private fun flushDebouncedGalleryRefreshAfterThumbnail() {
+        thumbGalleryRefreshJob?.cancel()
+        thumbGalleryRefreshJob = null
+        notifyGalleryDisplayRefresh()
     }
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
     val pendingOperationCount: Flow<Int> = syncMetadataDao.observePendingCount()
@@ -2239,6 +2262,7 @@ class SyncCoordinator(
                 },
             )
         }
+        flushDebouncedGalleryRefreshAfterThumbnail()
     }
 
     private suspend fun runMissingThumbnailPrefetch(
@@ -2668,6 +2692,7 @@ class SyncCoordinator(
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280
+        const val THUMB_GALLERY_REFRESH_DEBOUNCE_MS = 850L
         const val GPS_BACKFILL_ROUNDS = 4
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 250

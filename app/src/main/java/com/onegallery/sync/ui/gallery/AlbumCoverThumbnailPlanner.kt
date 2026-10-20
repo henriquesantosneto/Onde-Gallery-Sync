@@ -44,7 +44,7 @@ object AlbumCoverThumbnailPlanner {
         paths: MutableSet<String>,
     ) {
         if (group.isEmpty()) return
-        if (resolveAlbumCoverItem(group) != null) return
+        if (resolveAlbumCoverItem(group, mediaCacheRepository) != null) return
         val candidate = group
             .asSequence()
             .sortedByDescending { it.sortTimestamp }

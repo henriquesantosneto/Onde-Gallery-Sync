@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -95,6 +96,9 @@ class GalleryViewModel(
     private val albumSelectionMode = MutableStateFlow(false)
     private val selectedAlbumTitles = MutableStateFlow<Set<String>>(emptySet())
 
+    private val albumCoverLocalIndex = AlbumCoverLocalIndex()
+    private var lastAlbumCoverRefreshEpoch = 0L
+
     private data class LibrarySnapshot(
         val allItems: List<GalleryDisplayItem>,
         val userAlbums: List<UserAlbumEntity>,
@@ -142,7 +146,15 @@ class GalleryViewModel(
         )
     }
 
-    val state: StateFlow<GalleryUiState> = combine(librarySnapshot, uiControls) { snapshot, controls ->
+    val state: StateFlow<GalleryUiState> = combine(
+        librarySnapshot,
+        uiControls,
+        syncCoordinator.galleryDisplayRefreshEpoch,
+    ) { snapshot, controls, coverRefreshEpoch ->
+        if (coverRefreshEpoch != lastAlbumCoverRefreshEpoch) {
+            lastAlbumCoverRefreshEpoch = coverRefreshEpoch
+            albumCoverLocalIndex.invalidateAfterThumbnailBatch()
+        }
         val allItems = snapshot.allItems
         val userAlbums = snapshot.userAlbums
         val items = allItems
@@ -165,8 +177,11 @@ class GalleryViewModel(
         GalleryUiState(
             isLoading = controls.isLoading,
             items = items,
-            albums = buildAlbums(allItems, userAlbums, controls.albumSort),
-            placeAlbums = sortPlaceAlbums(buildPlaceAlbums(allItems), controls.albumSort),
+            albums = buildAlbums(allItems, userAlbums, controls.albumSort, albumCoverLocalIndex, mediaCacheRepository),
+            placeAlbums = sortPlaceAlbums(
+                buildPlaceAlbums(allItems, albumCoverLocalIndex, mediaCacheRepository),
+                controls.albumSort,
+            ),
             userAlbums = userAlbums,
             albumFilter = albumFilter,
             locationFilter = locationFilter,
@@ -186,6 +201,10 @@ class GalleryViewModel(
     init {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { syncCoordinator.compactDuplicateIndexRows() }
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            syncCoordinator.galleryMetadata.first()
+            syncCoordinator.notifyGalleryDisplayRefresh()
         }
         refresh()
     }
@@ -413,6 +432,8 @@ private fun buildAlbums(
     mirrored: List<GalleryDisplayItem>,
     userAlbums: List<UserAlbumEntity>,
     sort: AlbumListSort,
+    albumCoverLocalIndex: AlbumCoverLocalIndex,
+    mediaCacheRepository: MediaCacheRepository,
 ): List<MediaAlbum> {
     val grouped = mirrored.groupBy { it.albumName }
     val titles = (userAlbums.map { it.title } + grouped.keys).distinct()
@@ -429,7 +450,11 @@ private fun buildAlbums(
             itemCount = items.size,
             photoCount = photoCount,
             videoCount = videoCount,
-            coverModel = resolveAlbumCoverModel(items),
+            coverModel = albumCoverLocalIndex.coverModelForKey(
+                cacheKey = "folder:$title",
+                items = items,
+                mediaCacheRepository = mediaCacheRepository,
+            ),
             sortTimestamp = latest,
             isUserManaged = userMeta != null,
             userAlbumId = userMeta?.id,
@@ -447,7 +472,11 @@ private fun sortMediaAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List
     }
 }
 
-private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> {
+private fun buildPlaceAlbums(
+    items: List<GalleryDisplayItem>,
+    albumCoverLocalIndex: AlbumCoverLocalIndex,
+    mediaCacheRepository: MediaCacheRepository,
+): List<MediaAlbum> {
     val located = items.mapNotNull { item ->
         val label = item.locationLabel?.trim().orEmpty()
         val components = PlaceComponents.forItem(item)
@@ -477,7 +506,11 @@ private fun buildPlaceAlbums(items: List<GalleryDisplayItem>): List<MediaAlbum> 
                 itemCount = group.size,
                 photoCount = photoCount,
                 videoCount = videoCount,
-                coverModel = resolveAlbumCoverModel(group),
+                coverModel = albumCoverLocalIndex.coverModelForKey(
+                    cacheKey = "place:$encodedKey",
+                    items = group,
+                    mediaCacheRepository = mediaCacheRepository,
+                ),
                 sortTimestamp = latest,
             )
         }

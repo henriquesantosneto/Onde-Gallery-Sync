@@ -1,44 +1,54 @@
 package com.onegallery.sync.ui.gallery
 
+import android.net.Uri
 import com.onegallery.sync.data.local.MediaCacheRepository
 import java.io.File
 
 /**
- * Capa de álbum: usa a mídia mais recente que **já** tenha algo para exibir (URI local, original
- * em cache ou miniatura gerada). Não espera a foto mais nova do álbum ganhar miniatura no sync.
+ * Capa de álbum: mídia **mais recente** do grupo que já tenha fonte local para exibir.
+ * Consulta a pasta de miniaturas ao vivo — não depende do snapshot da galeria nem do fim do sync.
  */
-fun resolveAlbumCoverItem(items: List<GalleryDisplayItem>): GalleryDisplayItem? {
+fun resolveAlbumCoverItem(
+    items: List<GalleryDisplayItem>,
+    mediaCacheRepository: MediaCacheRepository,
+): GalleryDisplayItem? {
     return items
         .asSequence()
-        .mapNotNull { item -> resolveGalleryCoverModel(item)?.let { item to it } }
+        .filter { galleryItemCoverReady(it, mediaCacheRepository) }
         .maxWithOrNull(albumCoverItemComparator)
-        ?.first
 }
 
-fun resolveAlbumCoverModel(items: List<GalleryDisplayItem>): Any? {
-    return resolveAlbumCoverItem(items)?.let { resolveGalleryCoverModel(it) }
-}
-
-/** Ordem: data da mídia (mais recente primeiro), depois miniatura local gerada mais recente. */
-private val albumCoverItemComparator = compareBy<Pair<GalleryDisplayItem, Any>> { it.first.sortTimestamp }
-    .thenBy { (_, model) ->
-        when (model) {
-            is File -> model.lastModified()
-            else -> 0L
-        }
+fun resolveAlbumCoverModel(
+    items: List<GalleryDisplayItem>,
+    mediaCacheRepository: MediaCacheRepository,
+): Any? {
+    return resolveAlbumCoverItem(items, mediaCacheRepository)?.let {
+        resolveGalleryCoverModel(it, mediaCacheRepository)
     }
+}
+
+private val albumCoverItemComparator = compareBy<GalleryDisplayItem>(
+    { it.sortTimestamp },
+    { item ->
+        item.cachedPlaceholderThumb?.takeIf { it.isFile }?.lastModified()
+            ?: 0L
+    },
+)
 
 fun galleryItemCoverReady(
     item: GalleryDisplayItem,
-    mediaCacheRepository: MediaCacheRepository? = null,
+    mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (resolveGalleryCoverModel(item) != null) return true
-    return mediaCacheRepository?.thumbnailIfCached(item.canonicalPath)?.isFile == true
+    return resolveGalleryCoverModel(item, mediaCacheRepository) != null
 }
 
-fun resolveGalleryCoverModel(item: GalleryDisplayItem): Any? {
+fun resolveGalleryCoverModel(
+    item: GalleryDisplayItem,
+    mediaCacheRepository: MediaCacheRepository? = null,
+): Any? {
     item.localUri?.let { return it }
-    item.cachedOriginal?.takeIf { it.exists() }?.let { return it }
-    item.cachedPlaceholderThumb?.takeIf { it.exists() }?.let { return it }
+    item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
+    mediaCacheRepository?.thumbnailIfCached(item.canonicalPath)?.takeIf { it.isFile }?.let { return it }
+    item.cachedPlaceholderThumb?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
     return item.thumbnailModel
 }
