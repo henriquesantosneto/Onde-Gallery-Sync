@@ -1,6 +1,5 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
