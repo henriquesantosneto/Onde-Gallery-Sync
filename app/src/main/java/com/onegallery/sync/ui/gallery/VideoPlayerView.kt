@@ -34,16 +34,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 
 @Composable
 fun VideoPlayerView(
     uri: Uri,
     modifier: Modifier = Modifier,
     playWhenReady: Boolean = true,
-    onZoomActiveChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
-    val zoomCallback = rememberUpdatedState(onZoomActiveChanged)
     var muted by remember(uri) { mutableStateOf(true) }
     val mutedState = rememberUpdatedState(muted)
     val focusRequester = remember(uri) { FocusRequester() }
@@ -89,22 +88,17 @@ fun VideoPlayerView(
         AndroidView(
             modifier = Modifier.matchParentSize(),
             factory = { ctx ->
-                ZoomablePlayerLayout(ctx).also { layout ->
-                    layout.playerView.player = player
-                    layout.playerView.useController = true
-                    layout.playerView.controllerShowTimeoutMs = 5_000
-                    layout.onZoomActiveChanged = { active -> zoomCallback.value(active) }
-                    layout.onVolumeKeyPressed = { unmuteIfNeeded() }
-                    layout.requestFocus()
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    controllerShowTimeoutMs = 5_000
+                    isMotionEventSplittingEnabled = false
                 }
             },
-            update = { layout ->
-                layout.onZoomActiveChanged = { active -> zoomCallback.value(active) }
-                layout.onVolumeKeyPressed = { unmuteIfNeeded() }
-                if (layout.playerView.player != player) {
-                    layout.playerView.player = player
+            update = { view ->
+                if (view.player != player) {
+                    view.player = player
                 }
-                layout.requestFocus()
             },
         )
         IconButton(

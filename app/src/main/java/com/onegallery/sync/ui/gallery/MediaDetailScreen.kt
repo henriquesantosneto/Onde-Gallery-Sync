@@ -618,13 +618,12 @@ private fun MediaDetailPage(
     val display = item
     val statusItem = liveItem ?: display
     val playbackUri = display?.playbackUri()
-    LaunchedEffect(isActivePage, display?.kind, playbackUri, canonicalPath) {
+    LaunchedEffect(isActivePage, canonicalPath) {
         if (!isActivePage) {
             onActiveZoomTransform(null)
             return@LaunchedEffect
         }
-        val playableVideo = display?.kind == MediaKind.VIDEO && playbackUri != null
-        onActiveZoomTransform(if (playableVideo) null else zoomTransform)
+        onActiveZoomTransform(zoomTransform)
     }
 
     Box(modifier = modifier) {
@@ -651,12 +650,20 @@ private fun MediaDetailPage(
                                 contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
-                                VideoPlayerView(
-                                    uri = playback,
+                                ZoomableMediaContainer(
+                                    resetKey = canonicalPath,
+                                    transform = zoomTransform,
                                     modifier = Modifier.fillMaxSize(),
-                                    playWhenReady = true,
+                                    interceptSingleTap = false,
                                     onZoomActiveChanged = onZoomActiveChanged,
-                                )
+                                    onSingleTap = onToggleImmersive,
+                                ) {
+                                    VideoPlayerView(
+                                        uri = playback,
+                                        modifier = Modifier.fillMaxSize(),
+                                        playWhenReady = true,
+                                    )
+                                }
                             }
                         }
                         display.kind == MediaKind.VIDEO -> {
