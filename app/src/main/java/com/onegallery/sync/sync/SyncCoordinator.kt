@@ -2185,33 +2185,24 @@ class SyncCoordinator(
         registerManagedSyncJob(job)
     }
 
-    /** Capas da aba Álbuns — só o necessário por álbum, sempre antes do GPS. */
-    private suspend fun ensureAlbumCoverThumbnails(maxTotal: Int = ALBUM_COVER_THUMB_MAX) {
-        var totalCached = 0
-        var round = 0
-        while (round < 16 && totalCached < maxTotal) {
-            ensureNotCancelled()
-            val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
-                syncMetadataDao.getAll(),
-                mediaCacheRepository,
-            )
-            if (paths.isEmpty()) break
-            val rows = paths
-                .take(THUMB_PREFETCH_BATCH)
-                .mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
-            if (rows.isEmpty()) break
-            setRunQueueFromEntities(rows)
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Capas dos álbuns…",
-                "${paths.size} álbum(s) sem capa · prioridade antes do restante.",
-                alsoUpdateLastMessage = false,
-            )
-            val batch = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
-            totalCached += batch
-            round++
-            if (batch == 0) break
-        }
+    /** Uma leva: no máximo uma miniatura por álbum ainda sem capa (UI usa qualquer thumb local). */
+    private suspend fun ensureAlbumCoverThumbnails() {
+        ensureNotCancelled()
+        val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
+            syncMetadataDao.getAll(),
+            mediaCacheRepository,
+        )
+        if (paths.isEmpty()) return
+        val rows = paths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
+        if (rows.isEmpty()) return
+        setRunQueueFromEntities(rows)
+        setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Capas dos álbuns…",
+            "${paths.size} álbum(s) · 1 miniatura cada; demais na rolagem.",
+            alsoUpdateLastMessage = false,
+        )
+        runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
     }
 
     /** Miniaturas locais + nuvem para grade/mapa — várias levas na mesma sync. */
@@ -2671,7 +2662,6 @@ class SyncCoordinator(
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280
         const val THUMB_PREFETCH_MAX_TOTAL = 1680
-        const val ALBUM_COVER_THUMB_MAX = 900
         const val GPS_BACKFILL_ROUNDS = 4
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 250

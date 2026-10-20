@@ -1,13 +1,10 @@
 package com.onegallery.sync.ui.gallery
 
-import android.net.Uri
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceComponents
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
-import java.io.File
-
-/** Escolhe itens cuja miniatura falta para cada álbum (pasta ou local) ter capa na grade. */
+/** No sync: no máximo um item por álbum sem capa; o resto vem na rolagem da grade. */
 object AlbumCoverThumbnailPlanner {
 
     fun coverPathsNeedingThumbnail(
@@ -47,28 +44,15 @@ object AlbumCoverThumbnailPlanner {
         paths: MutableSet<String>,
     ) {
         if (group.isEmpty()) return
-        if (group.any { albumCoverReady(it, mediaCacheRepository) }) return
-        val sorted = group.sortedByDescending { it.sortTimestamp }
-        for (item in sorted) {
-            if (!canBuildThumbnail(item)) continue
-            if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath)?.isFile == true &&
-                albumCoverReady(item, mediaCacheRepository)
-            ) {
-                return
-            }
-            if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath) == null) {
-                paths.add(item.canonicalPath)
-                return
-            }
+        if (resolveAlbumCoverItem(group) != null) return
+        val candidate = group
+            .asSequence()
+            .sortedByDescending { it.sortTimestamp }
+            .firstOrNull { canBuildThumbnail(it) }
+            ?: return
+        if (mediaCacheRepository.thumbnailIfCached(candidate.canonicalPath) == null) {
+            paths.add(candidate.canonicalPath)
         }
-    }
-
-    private fun albumCoverReady(item: GalleryDisplayItem, mediaCacheRepository: MediaCacheRepository): Boolean {
-        when (val model = resolveGalleryCoverModel(item)) {
-            is Uri -> return true
-            is File -> if (model.isFile && model.length() > 0L) return true
-        }
-        return mediaCacheRepository.thumbnailIfCached(item.canonicalPath)?.isFile == true
     }
 
     private fun canBuildThumbnail(item: GalleryDisplayItem): Boolean {
