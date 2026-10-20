@@ -30,7 +30,10 @@ object MediaDetailSheetAnchors {
         val flingDown = velocityYPxPerSec > 480f
         if (flingUp) {
             val idx = anchors.indexOfLast { fraction >= it - 0.04f }.coerceAtLeast(0)
-            return anchors[(idx + 1).coerceAtMost(anchors.lastIndex)]
+            val next = (idx + 1).coerceAtMost(anchors.lastIndex)
+            // Reabrindo do fechado: no máximo um degrau (não pular direto para FULL).
+            if (fraction < SIMPLE * 0.55f && next > 1) return anchors[1]
+            return anchors[next]
         }
         if (flingDown) {
             val idx = anchors.indexOfFirst { fraction <= it + 0.04f }

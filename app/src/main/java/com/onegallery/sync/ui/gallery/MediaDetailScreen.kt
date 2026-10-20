@@ -31,7 +31,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import kotlin.math.max
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -246,11 +245,14 @@ fun MediaDetailScreen(
         }
         val detailsVisible = detailsDisplayFraction > 0.02f
         val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
+        // Base do arraste = settle (ou drag ativo). Não usar display animado: após fechar,
+        // o Animatable ainda desce e max(display) fazia a 2ª puxada partir ~0,45 → nível 2.
         val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
-        gestureBaseFraction.floatValue = max(
-            detailsSettleFraction,
-            max(detailsDisplayFraction, if (detailsDragging) detailsDragFraction else 0f),
-        )
+        gestureBaseFraction.floatValue = if (detailsDragging) {
+            detailsDragFraction
+        } else {
+            detailsSettleFraction
+        }
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
