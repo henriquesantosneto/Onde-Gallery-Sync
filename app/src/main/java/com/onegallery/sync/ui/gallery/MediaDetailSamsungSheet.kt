@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +37,7 @@ fun MediaDetailSamsungSheet(
     showAdvancedToggle: Boolean = true,
     contentOnDark: Boolean = false,
     scrollContentInternally: Boolean = true,
+    scrollBelowMapOnly: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val effectiveAdvanced = showAdvanced || contentLevel == MediaDetailContentLevel.Full
@@ -49,12 +51,19 @@ fun MediaDetailSamsungSheet(
     }
 
     val scroll = rememberScrollState()
+    val belowMapScroll = rememberScrollState()
+    val scrollWholeColumn = showExpandedContent &&
+        scrollContentInternally &&
+        !scrollBelowMapOnly
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .then(
-                if (showExpandedContent && scrollContentInternally) {
+                if (scrollWholeColumn) {
                     Modifier.verticalScroll(scroll)
+                } else if (scrollBelowMapOnly) {
+                    Modifier.fillMaxHeight()
                 } else {
                     Modifier
                 },
@@ -176,41 +185,20 @@ fun MediaDetailSamsungSheet(
                 }
 
                 if (effectiveAdvanced) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = if (contentOnDark) {
-                            Color.White.copy(alpha = 0.12f)
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                        },
-                    )
-                    Text(
-                        info.syncLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = secondaryText,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                    info.advancedRows.forEachIndexed { index, (label, value) ->
-                        if (index > 0) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 6.dp),
-                                color = if (contentOnDark) {
-                                    Color.White.copy(alpha = 0.08f)
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                },
-                            )
-                        }
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = secondaryText,
-                        )
-                        Text(
-                            value,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = primaryText,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                    val advancedModifier = if (scrollBelowMapOnly) {
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(belowMapScroll)
+                    } else {
+                        Modifier.fillMaxWidth()
+                    }
+                    Column(modifier = advancedModifier) {
+                        MediaDetailSamsungAdvancedBlock(
+                            info = info,
+                            contentOnDark = contentOnDark,
+                            primaryText = primaryText,
+                            secondaryText = secondaryText,
                         )
                     }
                 }
@@ -224,5 +212,51 @@ fun MediaDetailSamsungSheet(
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun MediaDetailSamsungAdvancedBlock(
+    info: MediaDetailInfo,
+    contentOnDark: Boolean,
+    primaryText: Color,
+    secondaryText: Color,
+) {
+    HorizontalDivider(
+        modifier = Modifier.padding(vertical = 8.dp),
+        color = if (contentOnDark) {
+            Color.White.copy(alpha = 0.12f)
+        } else {
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        },
+    )
+    Text(
+        info.syncLabel,
+        style = MaterialTheme.typography.labelMedium,
+        color = secondaryText,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    info.advancedRows.forEachIndexed { index, (label, value) ->
+        if (index > 0) {
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 6.dp),
+                color = if (contentOnDark) {
+                    Color.White.copy(alpha = 0.08f)
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                },
+            )
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = secondaryText,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = primaryText,
+            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+        )
     }
 }

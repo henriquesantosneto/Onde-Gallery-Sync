@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.content.Context
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,6 +56,8 @@ fun MediaSamsungDetailsContent(
     showAdvancedToggle: Boolean = true,
     /** false quando um [verticalScroll] pai já rola o conteúdo (evita crash). */
     scrollContentInternally: Boolean = true,
+    /** Rola só o bloco técnico abaixo do mapa (painel de detalhes da foto). */
+    scrollBelowMapOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     var infos by remember(canonicalPaths) { mutableStateOf<List<MediaDetailInfo>>(emptyList()) }
@@ -87,10 +90,15 @@ fun MediaSamsungDetailsContent(
             SamsungDetailBlock(
                 info = infos.first(),
                 error = error,
-                modifier = modifier,
+                modifier = if (scrollBelowMapOnly) {
+                    modifier.fillMaxWidth().fillMaxHeight()
+                } else {
+                    modifier
+                },
                 contentLevel = contentLevel,
                 showAdvancedToggle = showAdvancedToggle,
-                scrollContentInternally = scrollContentInternally,
+                scrollContentInternally = scrollContentInternally && !scrollBelowMapOnly,
+                scrollBelowMapOnly = scrollBelowMapOnly,
             )
             footer?.invoke()
         }
@@ -131,6 +139,7 @@ private fun SamsungDetailBlock(
     contentLevel: MediaDetailContentLevel = MediaDetailContentLevel.Full,
     showAdvancedToggle: Boolean = true,
     scrollContentInternally: Boolean = true,
+    scrollBelowMapOnly: Boolean = false,
 ) {
     var showAdvanced by remember(info.displayName) { mutableStateOf(false) }
     MediaDetailSamsungSheet(
@@ -144,6 +153,7 @@ private fun SamsungDetailBlock(
         showAdvancedToggle = showAdvancedToggle,
         contentOnDark = true,
         scrollContentInternally = scrollContentInternally,
+        scrollBelowMapOnly = scrollBelowMapOnly,
         modifier = modifier,
     )
 }
