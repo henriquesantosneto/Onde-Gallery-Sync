@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
@@ -431,6 +432,7 @@ private fun MediaThumbnail(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val context = LocalContext.current
     val overlayPad = gridOverlayPadding(gridZoomScale)
     val overlayIconSize = gridOverlayIconSize(gridZoomScale)
     Box(
@@ -464,7 +466,7 @@ private fun MediaThumbnail(
                     .size(overlayIconSize),
             )
         }
-        galleryCloudOverlayState(item)?.let { cloudState ->
+        galleryCloudOverlayState(item, context)?.let { cloudState ->
             GalleryCloudBadge(
                 state = cloudState,
                 iconSize = overlayIconSize,

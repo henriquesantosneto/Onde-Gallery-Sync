@@ -13,9 +13,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.sync.CloudSyncState
+import android.content.Context
 
 fun cloudBadgeState(item: GalleryDisplayItem): CloudSyncState {
     if (item.localReleasedForSpace && item.localUri == null && item.oneDriveItemId != null) {
@@ -24,19 +26,13 @@ fun cloudBadgeState(item: GalleryDisplayItem): CloudSyncState {
     return item.cloudState
 }
 
-private fun hasLocalMediaCopy(item: GalleryDisplayItem): Boolean {
-    if (item.localUri != null) return true
-    val cached = item.cachedOriginal
-    return cached?.isFile == true && cached.length() > 0L
-}
-
 /** Ícone no canto da grade / detalhe: celular (só local), nuvem ou nuvem com ✓. */
-fun galleryCloudOverlayState(item: GalleryDisplayItem): CloudSyncState? {
+fun galleryCloudOverlayState(item: GalleryDisplayItem, context: Context): CloudSyncState? {
     val hasCloud = item.oneDriveItemId != null
     if (!hasCloud) {
-        return if (item.isDeviceOnlyBadge()) CloudSyncState.LOCAL_ONLY else null
+        return if (item.isDeviceOnlyBadge(context)) CloudSyncState.LOCAL_ONLY else null
     }
-    if (hasLocalMediaCopy(item)) return CloudSyncState.SYNCED
+    if (item.hasViewableLocalOriginal(context)) return CloudSyncState.SYNCED
     val badge = cloudBadgeState(item)
     return when (badge) {
         CloudSyncState.CLOUD_ONLY,
@@ -48,19 +44,23 @@ fun galleryCloudOverlayState(item: GalleryDisplayItem): CloudSyncState? {
 }
 
 /** Estado do ícone de nuvem na visualização expandida (recall / cópia local). */
-fun detailCloudBadgeState(item: GalleryDisplayItem, recalling: Boolean): CloudSyncState? {
+fun detailCloudBadgeState(
+    item: GalleryDisplayItem,
+    recalling: Boolean,
+    context: Context,
+): CloudSyncState? {
     if (recalling) return CloudSyncState.CLOUD_ONLY
-    return galleryCloudOverlayState(item)
-        ?: if (item.isDeviceOnlyBadge()) CloudSyncState.LOCAL_ONLY else null
+    return galleryCloudOverlayState(item, context)
+        ?: if (item.isDeviceOnlyBadge(context)) CloudSyncState.LOCAL_ONLY else null
 }
 
-private fun GalleryDisplayItem.isDeviceOnlyBadge(): Boolean {
+private fun GalleryDisplayItem.isDeviceOnlyBadge(context: Context): Boolean {
     if (oneDriveItemId != null) return false
     if (localReleasedForSpace) return false
     return when (cloudState) {
         CloudSyncState.LOCAL_ONLY,
         CloudSyncState.PENDING_UPLOAD,
-        -> hasLocalMediaCopy(this) || localMediaId != null
+        -> hasViewableLocalOriginal(context)
         else -> false
     }
 }
@@ -100,7 +100,8 @@ fun MediaDetailCloudOverlay(
     contentAspectRatio: Float?,
     modifier: Modifier = Modifier,
 ) {
-    val state = detailCloudBadgeState(item, recalling) ?: return
+    val context = LocalContext.current
+    val state = detailCloudBadgeState(item, recalling, context) ?: return
     MediaContentFitOverlayHost(
         contentAspectRatio = contentAspectRatio,
         modifier = modifier,

@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -465,6 +466,7 @@ private fun MediaDetailPage(
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
     var contentAspectRatio by remember(canonicalPath) { mutableStateOf<Float?>(null) }
+    val viewContext = LocalContext.current
 
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
         withContext(Dispatchers.Default) {
@@ -479,6 +481,8 @@ private fun MediaDetailPage(
         }
 
     suspend fun loadFullOriginalForViewing() {
+        val preview = item ?: liveItem
+        if (preview?.hasViewableLocalOriginal(viewContext) == true) return
         if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
         loadingFull = true
         error = null
@@ -525,9 +529,13 @@ private fun MediaDetailPage(
         }
     }
 
-    LaunchedEffect(canonicalPath, isActivePage) {
+    LaunchedEffect(canonicalPath, isActivePage, item, liveItem) {
         if (!isActivePage) return@LaunchedEffect
         try {
+            val previewItem = item ?: liveItem
+            if (previewItem?.hasViewableLocalOriginal(viewContext) == true) {
+                return@LaunchedEffect
+            }
             val needsRecall = withContext(Dispatchers.Default) {
                 syncCoordinator.needsOriginalRecall(canonicalPath)
             }

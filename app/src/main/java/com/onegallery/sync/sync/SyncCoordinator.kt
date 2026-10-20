@@ -1117,8 +1117,12 @@ class SyncCoordinator(
     suspend fun needsOriginalRecall(canonicalPath: String): Boolean {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return false
         if (row.oneDriveItemId.isNullOrBlank()) return false
+        resolveViewableOriginalFile(row)?.let { cached ->
+            persistCachedOriginalPath(row, cached)
+            return false
+        }
         if (hasLocalOriginalOnDevice(row)) return false
-        return resolveViewableOriginalFile(row) == null
+        return true
     }
 
     /** Original completo já no aparelho (Galeria ou pasta de cache do app). */
