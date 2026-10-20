@@ -101,7 +101,7 @@ fun Modifier.draggableDetailPanelHeight(
         val touchSlop = viewConfiguration.touchSlop
         val maxFraction = MediaDetailSheetAnchors.FULL
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
             var sumX = 0f
             var sumY = 0f
             var lockedVertical = false
@@ -111,7 +111,11 @@ fun Modifier.draggableDetailPanelHeight(
             val velocityTracker = VelocityTracker()
 
             while (true) {
-                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                if (event.changes.count { it.pressed } >= 2) {
+                    passedToChildren = true
+                    break
+                }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (!change.pressed) break
                 if (passedToChildren) break

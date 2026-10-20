@@ -78,6 +78,7 @@ fun MediaDetailScreen(
     /** true = oculta barras e carrossel (toque na foto alterna). */
     var immersive by remember { mutableStateOf(false) }
     var pagerScrollEnabled by remember { mutableStateOf(true) }
+    var multiTouchOnPhoto by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
@@ -255,8 +256,12 @@ fun MediaDetailScreen(
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
                     .align(Alignment.TopCenter)
+                    .observeMultiTouchPinch { active ->
+                        multiTouchOnPhoto = active
+                        if (active) pagerScrollEnabled = false
+                    }
                     .draggableDetailPanelHeight(
-                        enabled = swipeUpForDetails && pagerScrollEnabled,
+                        enabled = swipeUpForDetails && pagerScrollEnabled && !multiTouchOnPhoto,
                         screenHeightPx = screenHeightPx,
                         fractionBaseState = gestureBaseFraction,
                         onDragStart = {
@@ -276,7 +281,7 @@ fun MediaDetailScreen(
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled,
+                userScrollEnabled = pagerScrollEnabled && !multiTouchOnPhoto,
                 key = { page -> pagerPaths[page] },
             ) { page ->
                 val path = pagerPaths[page]
@@ -288,7 +293,9 @@ fun MediaDetailScreen(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onToggleImmersive = { immersive = !immersive },
-                    onZoomActiveChanged = { active -> pagerScrollEnabled = !active },
+                    onZoomActiveChanged = { active ->
+                        pagerScrollEnabled = !active && !multiTouchOnPhoto
+                    },
                     onActivePageError = { err ->
                         if (page == pagerState.currentPage) {
                             activePageError = err
