@@ -52,15 +52,18 @@ data class FastScrollMarker(
     val kind: FastScrollMarkerKind,
 )
 
-/** Largura visual da barra em repouso. */
-val GalleryFastScrollRailWidth = 32.dp
+/** Faixa lateral reservada na grade (~2 mm úteis; o resto é sobreposição na borda). */
+val GalleryFastScrollRailReservedWidth = 8.dp
 
-/** Espaço reservado na grade (cabe a barra expandida ao arrastar). */
-val GalleryFastScrollRailReservedWidth = 56.dp
+/** Largura da área de toque invisível em repouso (não empurra a grade). */
+private val GalleryFastScrollHitWidthIdle = 22.dp
 
-private val GalleryFastScrollRailWidthActive = GalleryFastScrollRailReservedWidth
-private val GalleryFastScrollTrackWidthIdle = 8.dp
-private val GalleryFastScrollTrackWidthActive = 14.dp
+/** Área de toque um pouco maior ao arrastar; o rótulo flutuante fica à esquerda. */
+private val GalleryFastScrollHitWidthActive = 34.dp
+
+/** Trilho visível (~2 mm em telas comuns). */
+private val GalleryFastScrollTrackWidthIdle = 5.dp
+private val GalleryFastScrollTrackWidthActive = 9.dp
 
 /** Marcadores da barra lateral a partir dos cabeçalhos da grade (ano / mês / dia). */
 fun buildGalleryFastScrollMarkers(
@@ -170,9 +173,9 @@ fun GridFastScrollRail(
     val density = LocalDensity.current
     val thumbPadPx = with(density) { 20.dp.toPx() }
 
-    val containerWidth by animateDpAsState(
-        targetValue = if (dragging) GalleryFastScrollRailWidthActive else GalleryFastScrollRailWidth,
-        label = "fastScrollRailWidth",
+    val hitWidth by animateDpAsState(
+        targetValue = if (dragging) GalleryFastScrollHitWidthActive else GalleryFastScrollHitWidthIdle,
+        label = "fastScrollHitWidth",
     )
     val trackWidth by animateDpAsState(
         targetValue = if (dragging) GalleryFastScrollTrackWidthActive else GalleryFastScrollTrackWidthIdle,
@@ -192,7 +195,7 @@ fun GridFastScrollRail(
     Box(
         modifier = modifier
             .zIndex(2f)
-            .width(containerWidth)
+            .width(hitWidth)
             .fillMaxHeight()
             .onSizeChanged { railHeightPx = it.height.toFloat() },
     ) {
@@ -269,7 +272,7 @@ fun GridFastScrollRail(
             Surface(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(end = containerWidth + 6.dp),
+                    .padding(end = hitWidth + 6.dp),
                 shape = RoundedCornerShape(10.dp),
                 color = MaterialTheme.colorScheme.inverseSurface,
                 shadowElevation = 6.dp,
