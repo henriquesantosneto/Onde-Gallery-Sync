@@ -13,10 +13,14 @@ fun Modifier.observeMultiTouchPinch(
     onMultiTouchActive: (Boolean) -> Unit,
 ): Modifier = pointerInput(Unit) {
     awaitPointerEventScope {
+        var lastActive = false
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Initial)
             val active = event.changes.count { it.pressed } >= 2
-            onMultiTouchActive(active)
+            if (active != lastActive) {
+                lastActive = active
+                onMultiTouchActive(active)
+            }
         }
     }
 }
