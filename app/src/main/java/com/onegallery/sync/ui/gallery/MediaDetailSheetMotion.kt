@@ -1,7 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
@@ -92,24 +91,16 @@ fun rememberMediaDetailSheetFraction(
     dragging: Boolean,
 ): Float {
     val animatable = remember { Animatable(0f) }
-    LaunchedEffect(dragging, dragFraction) {
-        if (!dragging) {
-            animatable.snapTo(dragFraction)
-        }
-    }
     LaunchedEffect(dragging, settleTarget) {
         if (!dragging) {
-            animatable.animateTo(settleTarget, tween(durationMillis = 220))
+            animatable.snapTo(settleTarget)
         }
     }
-    // Durante o arraste usa fração direta (LaunchedEffect snap atrasava 1 frame → tremor).
     return if (dragging) dragFraction else animatable.value
 }
 
-/** Painel aberto: vertical ganha cedo. Fechado: exige gesto mais vertical (pager não treme). */
-private const val VERTICAL_DOMINANCE_PANEL_OPEN = 1.05f
-private const val VERTICAL_DOMINANCE_PANEL_CLOSED_UP = 1.14f
-private const val HORIZONTAL_PASS_RATIO = 1.06f
+private const val VERTICAL_DOMINANCE_RATIO = 1.08f
+private const val HORIZONTAL_PASS_RATIO = 1.12f
 
 /**
  * Arraste vertical contínuo: o painel acompanha o dedo até soltar (snap nos âncoras).
@@ -132,7 +123,7 @@ fun Modifier.draggableDetailPanelHeight(
         val maxFraction = MediaDetailSheetAnchors.FULL
         val edgeFraction = activationEdgeHeightFraction.coerceIn(0.05f, 1f)
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
             if (edgeFraction < 1f) {
                 val minY = size.height * (1f - edgeFraction)
                 if (down.position.y < minY) {
@@ -148,8 +139,12 @@ fun Modifier.draggableDetailPanelHeight(
             val velocityTracker = VelocityTracker()
 
             while (true) {
-                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                val event = awaitPointerEvent(pass = PointerEventPass.Main)
                 if (event.changes.count { it.pressed } >= 2) {
+                    if (dragging) {
+                        onDragEnd(0f)
+                        dragging = false
+                    }
                     break
                 }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
@@ -168,38 +163,27 @@ fun Modifier.draggableDetailPanelHeight(
                     val slop = touchSlop * if (baseFraction > 0.03f) 0.45f else 1f
                     if (ax < slop && ay < slop) continue
 
-                    val panelOpen = baseFraction > 0.03f
-                    val verticalRatio = when {
-                        panelOpen -> VERTICAL_DOMINANCE_PANEL_OPEN
-                        sumY < 0f -> VERTICAL_DOMINANCE_PANEL_CLOSED_UP
-                        else -> VERTICAL_DOMINANCE_PANEL_CLOSED_UP
-                    }
                     when {
-                        panelOpen && ay > slop && ay >= ax -> {
+                        baseFraction > 0.03f && ay > slop && ay >= ax -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
                             onDragStart()
-                            val fraction = panelFractionFromDrag(
-                                baseFraction, sumY, screenHeightPx, maxFraction,
+                            onDragFraction(
+                                panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
-                            onDragFraction(fraction)
                         }
-                        !panelOpen && sumY < 0f && ay > ax * verticalRatio -> {
+                        sumY < 0f && ay > ax * VERTICAL_DOMINANCE_RATIO -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
                             onDragStart()
-                            val fraction = panelFractionFromDrag(
-                                baseFraction, sumY, screenHeightPx, maxFraction,
+                            onDragFraction(
+                                panelFractionFromDrag(baseFraction, sumY, screenHeightPx, maxFraction),
                             )
-                            onDragFraction(fraction)
-                        }
-                        !panelOpen && ay > ax * verticalRatio && sumY >= 0f -> {
-                            passedToChildren = true
                         }
                         ax > ay * HORIZONTAL_PASS_RATIO -> passedToChildren = true
-                        !panelOpen && sumY > touchSlop -> passedToChildren = true
+                        sumY > touchSlop -> passedToChildren = true
                     }
                 } else {
                     change.consume()
