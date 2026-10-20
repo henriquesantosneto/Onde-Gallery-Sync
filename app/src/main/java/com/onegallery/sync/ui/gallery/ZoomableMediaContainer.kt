@@ -1,9 +1,8 @@
 package com.onegallery.sync.ui.gallery
 
-import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -13,16 +12,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
 
@@ -52,19 +48,30 @@ private class ZoomTransformHolder {
         )
     }
 
-    /** [focus] em coordenadas locais; usa [ScaleGestureDetector] (suavizado pelo sistema). */
-    fun applyScaleFactor(scaleFactor: Float, focus: Offset) {
-        if (!scaleFactor.isFinite() || abs(scaleFactor - 1f) < 0.001f) return
+    fun applyTransform(centroid: Offset, zoomFactor: Float, pan: Offset) {
+        if (!zoomFactor.isFinite()) return
         val previousScale = scale
-        val newScale = (previousScale * scaleFactor).coerceIn(MIN_SCALE, MAX_SCALE)
-        val factor = newScale / previousScale
-        val focal = focus - layerCenter()
-        offset = clampOffset(
-            focal - (focal - offset) * factor,
-            newScale,
-        )
-        scale = newScale
-        if (newScale <= MIN_SCALE + 0.001f) {
+        val hasZoom = abs(zoomFactor - 1f) >= 0.002f
+        val hasPan = pan != Offset.Zero
+        if (!hasZoom && !hasPan) return
+
+        val newScale = if (hasZoom) {
+            (previousScale * zoomFactor).coerceIn(MIN_SCALE, MAX_SCALE)
+        } else {
+            previousScale
+        }
+        if (hasZoom && previousScale > 0f) {
+            val scaleFactor = newScale / previousScale
+            val focal = centroid - layerCenter()
+            offset = clampOffset(
+                focal - (focal - offset) * scaleFactor + if (hasPan) pan else Offset.Zero,
+                newScale,
+            )
+            scale = newScale
+        } else if (hasPan && previousScale > ZOOM_ACTIVE_THRESHOLD) {
+            offset = clampOffset(offset + pan, previousScale)
+        }
+        if (scale <= MIN_SCALE + 0.001f) {
             scale = MIN_SCALE
             offset = Offset.Zero
         }
@@ -76,7 +83,6 @@ private class ZoomTransformHolder {
     }
 }
 
-@androidx.compose.ui.ExperimentalComposeUiApi
 @Composable
 fun ZoomableMediaContainer(
     resetKey: Any?,
@@ -86,45 +92,16 @@ fun ZoomableMediaContainer(
     onSingleTap: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
     val transform = remember(resetKey) { ZoomTransformHolder() }
-    val scalingFlag = remember(resetKey) { mutableStateOf(false) }
     val zoomActiveCallback = rememberUpdatedState(onZoomActiveChanged)
     var lastZoomActiveReported by remember(resetKey) { mutableStateOf(false) }
 
     fun reportZoomActive() {
-        val active = scalingFlag.value || transform.scale > ZOOM_ACTIVE_THRESHOLD
+        val active = transform.scale > ZOOM_ACTIVE_THRESHOLD
         if (active != lastZoomActiveReported) {
             lastZoomActiveReported = active
             zoomActiveCallback.value(active)
         }
-    }
-    val scaleDetector = remember(resetKey, context) {
-        ScaleGestureDetector(
-            context,
-            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                    scalingFlag.value = true
-                    return true
-                }
-
-                override fun onScale(detector: ScaleGestureDetector): Boolean {
-                    transform.applyScaleFactor(
-                        detector.scaleFactor,
-                        Offset(detector.focusX, detector.focusY),
-                    )
-                    return true
-                }
-
-                override fun onScaleEnd(detector: ScaleGestureDetector) {
-                    scalingFlag.value = false
-                }
-            },
-        )
-    }
-
-    LaunchedEffect(scalingFlag.value, transform.scale) {
-        reportZoomActive()
     }
 
     Box(
@@ -141,29 +118,15 @@ fun ZoomableMediaContainer(
                     translationY = transform.offset.y
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .pointerInteropFilter { event ->
-                    scaleDetector.onTouchEvent(event)
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_UP,
-                        MotionEvent.ACTION_CANCEL,
-                        -> {
-                            if (event.pointerCount <= 1) {
-                                scalingFlag.value = false
-                            }
-                        }
-                        MotionEvent.ACTION_POINTER_UP -> {
-                            if (event.pointerCount - 1 < 2) {
-                                scalingFlag.value = false
-                            }
-                        }
+                .pointerInput(resetKey) {
+                    detectTransformGestures(panZoomLock = true) { centroid, pan, zoom, _ ->
+                        transform.applyTransform(centroid, zoom, pan)
+                        reportZoomActive()
                     }
-                    scalingFlag.value || event.pointerCount >= 2
                 }
                 .pointerInput(resetKey) {
                     detectDragGestures { change, dragAmount ->
-                        if (scalingFlag.value || transform.scale <= ZOOM_ACTIVE_THRESHOLD) {
-                            return@detectDragGestures
-                        }
+                        if (transform.scale <= ZOOM_ACTIVE_THRESHOLD) return@detectDragGestures
                         change.consume()
                         transform.panBy(dragAmount)
                     }

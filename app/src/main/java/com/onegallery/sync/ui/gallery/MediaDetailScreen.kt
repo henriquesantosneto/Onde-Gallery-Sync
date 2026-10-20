@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -266,8 +264,7 @@ fun MediaDetailScreen(
                     .draggableDetailPanelHeight(
                         enabled = swipeUpForDetails &&
                             !photoZoomActive &&
-                            !multiTouchOnPhoto &&
-                            pagerScrollEnabled,
+                            !multiTouchOnPhoto,
                         screenHeightPx = screenHeightPx,
                         fractionBaseState = gestureBaseFraction,
                         onDragStart = {
@@ -301,7 +298,7 @@ fun MediaDetailScreen(
                     onToggleImmersive = { immersive = !immersive },
                     onZoomActiveChanged = { active ->
                         photoZoomActive = active
-                        pagerScrollEnabled = !active && !multiTouchOnPhoto
+                        pagerScrollEnabled = !active
                     },
                     onActivePageError = { err ->
                         if (page == pagerState.currentPage) {
