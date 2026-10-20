@@ -458,12 +458,13 @@ fun OneGalleryApp(
         }
     }
 
-    // Registrado por último: prioridade sobre NavHost (gesto Voltar / borda esquerda no S22).
+    // Um handler só, registrado por último (prioridade sobre NavHost / gesto na borda S22).
     val galleryUi by galleryViewModel.state.collectAsStateWithLifecycle()
-    BackHandler(enabled = galleryUi.selectionMode) {
-        galleryViewModel.clearSelection()
-    }
-    BackHandler(enabled = galleryUi.albumSelectionMode) {
-        galleryViewModel.clearAlbumSelection()
+    val interceptBackForSelection = galleryUi.selectionMode || galleryUi.albumSelectionMode
+    BackHandler(enabled = interceptBackForSelection) {
+        when {
+            galleryUi.selectionMode -> galleryViewModel.clearSelection()
+            galleryUi.albumSelectionMode -> galleryViewModel.clearAlbumSelection()
+        }
     }
 }

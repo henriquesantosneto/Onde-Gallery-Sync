@@ -156,9 +156,8 @@ fun MediaDetailScreen(
         }
     }
 
+    // Mantém a fila completa durante seleção — evita crash/trava ao cancelar (pager encolhia).
     val pagerPaths = when {
-        state.selectionMode && state.selectedPaths.isNotEmpty() ->
-            state.selectedPaths.toList()
         frozenPaths.isNotEmpty() -> frozenPaths.toList()
         else -> contextItems.map { it.canonicalPath }
     }
@@ -166,6 +165,13 @@ fun MediaDetailScreen(
     val pagerState = rememberPagerState(
         initialPage = initialPage.coerceIn(0, (pagerPaths.size - 1).coerceAtLeast(0)),
     ) { pagerPaths.size.coerceAtLeast(1) }
+
+    LaunchedEffect(pagerPaths.size) {
+        val lastIndex = (pagerPaths.size - 1).coerceAtLeast(0)
+        if (pagerState.currentPage > lastIndex) {
+            pagerState.scrollToPage(lastIndex)
+        }
+    }
 
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
     val currentItem = currentPath?.let { path -> itemsByPath[path] }
@@ -233,9 +239,6 @@ fun MediaDetailScreen(
         else -> detailsSettleFraction > 0.05f
     } && detailPaths.isNotEmpty()
 
-    BackHandler(enabled = state.selectionMode) {
-        viewModel.clearSelection()
-    }
     val showFilmstrip = chromeVisible &&
         !state.selectionMode &&
         !detailsPanelOpen &&
