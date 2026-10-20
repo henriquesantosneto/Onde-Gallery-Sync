@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -13,7 +14,7 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
 
 /**
- * Pinça na foto aberta — passe [PointerEventPass.Initial], antes do [HorizontalPager] consumir.
+ * Pinça na passagem Initial (antes do arraste do painel no mesmo ancestral).
  */
 fun Modifier.detailPhotoPinchZoom(
     transform: ZoomTransformHolder,
@@ -21,12 +22,21 @@ fun Modifier.detailPhotoPinchZoom(
     onTransformChanged: () -> Unit,
 ): Modifier = pointerInput(transform) {
     awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         var previousDistance = 0f
         var pinching = false
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Initial)
             val pressed = event.changes.filter { it.pressed }
             when {
+                pressed.isEmpty() -> {
+                    previousDistance = 0f
+                    if (pinching) {
+                        pinching = false
+                        onPinching(false)
+                    }
+                    break
+                }
                 pressed.size >= 2 -> {
                     if (!pinching) {
                         pinching = true
@@ -46,16 +56,7 @@ fun Modifier.detailPhotoPinchZoom(
                     previousDistance = distance
                     pressed.forEach { it.consume() }
                 }
-                pressed.isEmpty() -> {
-                    previousDistance = 0f
-                    if (pinching) {
-                        pinching = false
-                        onPinching(false)
-                    }
-                }
-                else -> {
-                    if (!pinching) previousDistance = 0f
-                }
+                else -> break
             }
         }
     }

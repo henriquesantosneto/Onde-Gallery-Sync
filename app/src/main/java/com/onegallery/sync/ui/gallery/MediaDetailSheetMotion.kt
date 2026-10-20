@@ -143,13 +143,19 @@ fun Modifier.draggableDetailPanelHeight(
             var lockedVertical = false
             var passedToChildren = false
             var dragging = false
+            var abortedForPinch = false
+            var maxPointers = 1
             var baseFraction = fractionBaseState.floatValue.coerceIn(0f, maxFraction)
             val velocityTracker = VelocityTracker()
             val panelClosed = baseFraction < 0.05f
 
             while (true) {
                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
-                if (event.changes.count { it.pressed } >= 2) {
+                val pointerCount = event.changes.count { it.pressed }
+                maxPointers = maxOf(maxPointers, pointerCount)
+                if (pointerCount >= 2) {
+                    abortedForPinch = dragging
+                    dragging = false
                     break
                 }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
@@ -175,7 +181,8 @@ fun Modifier.draggableDetailPanelHeight(
                     when {
                         ax > ay * HORIZONTAL_PASS_RATIO -> passedToChildren = true
                         panelClosed && sumY > touchSlop -> passedToChildren = true
-                        panelClosed && sumY < -slop * 0.35f && ay > ax * VERTICAL_OPEN_RATIO_CLOSED -> {
+                        panelClosed && maxPointers == 1 &&
+                            sumY < -slop * 0.35f && ay > ax * VERTICAL_OPEN_RATIO_CLOSED -> {
                             lockedVertical = true
                             change.consume()
                             dragging = true
@@ -211,7 +218,7 @@ fun Modifier.draggableDetailPanelHeight(
                     )
                 }
             }
-            if (dragging) {
+            if (dragging && !abortedForPinch) {
                 onDragEnd(velocityTracker.calculateVelocity().y)
             }
         }
