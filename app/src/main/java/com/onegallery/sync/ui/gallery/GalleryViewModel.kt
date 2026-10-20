@@ -111,8 +111,7 @@ class GalleryViewModel(
     private val librarySnapshot = combine(
         syncCoordinator.galleryMetadata,
         syncCoordinator.userAlbums,
-        syncCoordinator.galleryDisplayRefreshEpoch,
-    ) { metadata, userAlbums, _ ->
+    ) { metadata, userAlbums ->
         metadata to userAlbums
     }.conflate()
         .map { (metadata, userAlbums) ->

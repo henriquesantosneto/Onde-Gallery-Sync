@@ -149,6 +149,7 @@ class SyncCoordinator(
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
     private var thumbGalleryRefreshJob: Job? = null
+    private var lastAlbumCoverRefreshWallMs = 0L
 
     init {
         mediaCacheRepository.onThumbnailCommitted = {
@@ -465,10 +466,23 @@ class SyncCoordinator(
     }
 
     private fun scheduleDebouncedGalleryRefreshAfterThumbnail() {
+        val phase = _state.value.progressPhase
+        if (_state.value.isRunning &&
+            (
+                phase == SyncProgressPhase.PREFETCH_THUMBNAILS ||
+                    phase == SyncProgressPhase.BACKFILL_GPS ||
+                    phase == SyncProgressPhase.BACKFILL_CAPTURE_DATE
+                )
+        ) {
+            return
+        }
         val scope = backgroundScope ?: return
         thumbGalleryRefreshJob?.cancel()
         thumbGalleryRefreshJob = scope.launch {
             delay(THUMB_GALLERY_REFRESH_DEBOUNCE_MS)
+            val now = System.currentTimeMillis()
+            if (now - lastAlbumCoverRefreshWallMs < THUMB_GALLERY_REFRESH_MIN_INTERVAL_MS) return@launch
+            lastAlbumCoverRefreshWallMs = now
             notifyGalleryDisplayRefresh()
         }
     }
@@ -476,6 +490,7 @@ class SyncCoordinator(
     private fun flushDebouncedGalleryRefreshAfterThumbnail() {
         thumbGalleryRefreshJob?.cancel()
         thumbGalleryRefreshJob = null
+        lastAlbumCoverRefreshWallMs = System.currentTimeMillis()
         notifyGalleryDisplayRefresh()
     }
     val pendingDeleteItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingDeletes()
@@ -2692,7 +2707,8 @@ class SyncCoordinator(
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280
-        const val THUMB_GALLERY_REFRESH_DEBOUNCE_MS = 850L
+        const val THUMB_GALLERY_REFRESH_DEBOUNCE_MS = 1_200L
+        const val THUMB_GALLERY_REFRESH_MIN_INTERVAL_MS = 4_000L
         const val GPS_BACKFILL_ROUNDS = 4
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 250
