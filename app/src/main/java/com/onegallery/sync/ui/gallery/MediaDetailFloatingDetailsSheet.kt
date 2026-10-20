@@ -3,6 +3,7 @@ package com.onegallery.sync.ui.gallery
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,7 +58,7 @@ fun MediaDetailPushDetailsSheet(
     val gestureBaseFraction = remember { mutableFloatStateOf(panelFraction) }
     gestureBaseFraction.floatValue = panelFraction
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
@@ -68,7 +69,6 @@ fun MediaDetailPushDetailsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .align(Alignment.TopCenter)
                 .draggableDetailPanelHeight(
                     enabled = true,
                     screenHeightPx = screenHeightPx,
@@ -93,11 +93,12 @@ fun MediaDetailPushDetailsSheet(
         } else {
             Modifier
         }
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 24.dp)
-                .then(scrollModifier),
+                .weight(1f)
+                .fillMaxWidth()
+                .then(scrollModifier)
+                .padding(bottom = 16.dp),
         ) {
             MediaSamsungDetailsContent(
                 canonicalPaths = canonicalPaths,

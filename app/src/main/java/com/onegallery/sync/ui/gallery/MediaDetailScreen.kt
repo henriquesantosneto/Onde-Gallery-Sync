@@ -244,32 +244,29 @@ fun MediaDetailScreen(
             detailsSettleFraction,
             max(detailsDisplayFraction, if (detailsDragging) detailsDragFraction else 0f),
         )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .draggableDetailPanelHeight(
-                    enabled = swipeUpForDetails && pagerScrollEnabled,
-                    screenHeightPx = screenHeightPx,
-                    fractionBaseState = gestureBaseFraction,
-                    onDragStart = {
-                        detailsDragging = true
-                        detailsDragFraction = gestureBaseFraction.floatValue
-                    },
-                    onDragFraction = { fraction ->
-                        detailsDragging = true
-                        detailsDragFraction = fraction
-                    },
-                    onDragEnd = { velocityY ->
-                        snapDetailsPanel(velocityY)
-                        detailsDragging = false
-                    },
-                ),
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsVisible) photoHeightFraction else 1f)
-                    .align(Alignment.TopCenter),
+                    .align(Alignment.TopCenter)
+                    .draggableDetailPanelHeight(
+                        enabled = swipeUpForDetails && pagerScrollEnabled,
+                        screenHeightPx = screenHeightPx,
+                        fractionBaseState = gestureBaseFraction,
+                        onDragStart = {
+                            detailsDragging = true
+                            detailsDragFraction = gestureBaseFraction.floatValue
+                        },
+                        onDragFraction = { fraction ->
+                            detailsDragging = true
+                            detailsDragFraction = fraction
+                        },
+                        onDragEnd = { velocityY ->
+                            snapDetailsPanel(velocityY)
+                            detailsDragging = false
+                        },
+                    ),
             ) {
             HorizontalPager(
                 state = pagerState,
