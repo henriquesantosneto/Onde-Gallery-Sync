@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -18,8 +19,8 @@ fun Modifier.detailPhotoPinchZoom(
     transform: ZoomTransformHolder,
     onPinching: (Boolean) -> Unit,
     onTransformChanged: () -> Unit,
-): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
+): Modifier = pointerInput(transform) {
+    awaitEachGesture {
         var previousDistance = 0f
         var pinching = false
         while (true) {

@@ -1,7 +1,9 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -192,21 +194,34 @@ fun MediaDetailSamsungSheet(
                 }
 
                 if (effectiveAdvanced) {
-                    val advancedModifier = if (scrollBelowMapOnly) {
-                        Modifier
-                            .weight(1f, fill = true)
-                            .fillMaxWidth()
-                            .verticalScroll(belowMapScroll)
+                    if (scrollBelowMapOnly) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f, fill = true)
+                                .fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(belowMapScroll),
+                            ) {
+                                MediaDetailSamsungAdvancedBlock(
+                                    info = info,
+                                    contentOnDark = contentOnDark,
+                                    primaryText = primaryText,
+                                    secondaryText = secondaryText,
+                                )
+                            }
+                        }
                     } else {
-                        Modifier.fillMaxWidth()
-                    }
-                    Column(modifier = advancedModifier) {
-                        MediaDetailSamsungAdvancedBlock(
-                            info = info,
-                            contentOnDark = contentOnDark,
-                            primaryText = primaryText,
-                            secondaryText = secondaryText,
-                        )
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            MediaDetailSamsungAdvancedBlock(
+                                info = info,
+                                contentOnDark = contentOnDark,
+                                primaryText = primaryText,
+                                secondaryText = secondaryText,
+                            )
+                        }
                     }
                 }
             }
