@@ -925,12 +925,20 @@ class SyncCoordinator(
                         )
                     }
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
+                    // Pós-sync: fila residual → capas (álbuns) → miniaturas gerais → metadados (GPS/data) → sanitização
+                    drainRemainingRunQueueBeforePrefetch()
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
                         "Capas dos álbuns…",
-                        "Garantindo miniatura de capa em cada álbum (pastas e locais).",
+                        "Uma miniatura por álbum (pastas e locais), antes de indexar GPS.",
                     )
                     ensureAlbumCoverThumbnails()
+                    setSyncProgress(
+                        SyncProgressPhase.PREFETCH_THUMBNAILS,
+                        "Miniaturas na galeria…",
+                        "Grade, mapa e itens restantes — originais completos sob demanda.",
+                    )
+                    prefetchMissingThumbnails()
                     setSyncProgress(
                         SyncProgressPhase.BACKFILL_GPS,
                         "Indexando localização (GPS)…",
@@ -948,13 +956,6 @@ class SyncCoordinator(
                         SyncPaths.canonicalFromLocal(it)
                     }.toSet()
                     indexPassLocalItemsById = emptyMap()
-                    drainRemainingRunQueueBeforePrefetch()
-                    setSyncProgress(
-                        SyncProgressPhase.PREFETCH_THUMBNAILS,
-                        "Gerando e baixando miniaturas…",
-                        "Grade e mapa — originais completos sob demanda.",
-                    )
-                    prefetchMissingThumbnails()
                     setSyncProgress(
                         SyncProgressPhase.SANITIZING_INDEX,
                         "Verificando consistência do índice…",
@@ -2184,7 +2185,7 @@ class SyncCoordinator(
         registerManagedSyncJob(job)
     }
 
-    /** Capas da aba Álbuns antes do GPS e do prefetch geral. */
+    /** Capas da aba Álbuns — só o necessário por álbum, sempre antes do GPS. */
     private suspend fun ensureAlbumCoverThumbnails(maxTotal: Int = ALBUM_COVER_THUMB_MAX) {
         var totalCached = 0
         var round = 0
