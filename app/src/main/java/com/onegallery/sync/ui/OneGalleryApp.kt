@@ -66,8 +66,9 @@ import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
 import com.onegallery.sync.ui.welcome.WelcomeScreen
+import com.onegallery.sync.ui.navigation.decodeBrowseNavKey
+import com.onegallery.sync.ui.navigation.encodeBrowseNavKey
 import java.net.URLDecoder
-import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.launch
 
@@ -75,12 +76,6 @@ private const val PLACES_MAP_ROUTE = "places_map"
 /** Conteúdo filtrado de um álbum/local; mantém a aba Álbuns selecionada na barra inferior. */
 private const val ALBUM_BROWSE_FOLDER_ROUTE = "albums/browse/folder/{folderKey}"
 private const val ALBUM_BROWSE_PLACE_ROUTE = "albums/browse/place/{placeKey}/{placeTitle}"
-
-private fun String.encodeNavArg(): String =
-    URLEncoder.encode(this, StandardCharsets.UTF_8.name())
-
-private fun String.decodeNavArg(): String =
-    URLDecoder.decode(this, StandardCharsets.UTF_8.name())
 
 private fun isAlbumBrowseRoute(route: String?): Boolean =
     route?.startsWith("albums/browse/") == true
@@ -433,17 +428,19 @@ fun OneGalleryApp(
                     galleryPreferences = galleryPreferences,
                     albumsBackStackEntry = entry,
                     onOpenFolderAlbum = { filterKey ->
+                        galleryViewModel.setAlbumFilter(filterKey)
                         navController.navigate(
-                            "albums/browse/folder/${filterKey.encodeNavArg()}",
+                            "albums/browse/folder/${encodeBrowseNavKey(filterKey)}",
                         ) {
-                            launchSingleTop = true
+                            launchSingleTop = false
                         }
                     },
                     onOpenPlaceAlbum = { title, matchKey ->
+                        galleryViewModel.setPlaceFilter(title, matchKey)
                         navController.navigate(
-                            "albums/browse/place/${matchKey.encodeNavArg()}/${title.encodeNavArg()}",
+                            "albums/browse/place/${encodeBrowseNavKey(matchKey)}/${encodeBrowseNavKey(title)}",
                         ) {
-                            launchSingleTop = true
+                            launchSingleTop = false
                         }
                     },
                     onOpenMap = {
@@ -468,7 +465,10 @@ fun OneGalleryApp(
                     navArgument("folderKey") { type = NavType.StringType },
                 ),
             ) { entry ->
-                val folderKey = entry.arguments?.getString("folderKey")?.decodeNavArg().orEmpty()
+                val folderKey = entry.arguments?.getString("folderKey")
+                    ?.let { runCatching { decodeBrowseNavKey(it) }.getOrNull() }
+                    .orEmpty()
+                androidx.compose.runtime.key("browse-folder-$folderKey") {
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
@@ -484,6 +484,7 @@ fun OneGalleryApp(
                         navController.popBackStack(MainTab.Albums.route, inclusive = false)
                     },
                 )
+                }
             }
             composable(
                 route = ALBUM_BROWSE_PLACE_ROUTE,
@@ -492,8 +493,13 @@ fun OneGalleryApp(
                     navArgument("placeTitle") { type = NavType.StringType },
                 ),
             ) { entry ->
-                val placeKey = entry.arguments?.getString("placeKey")?.decodeNavArg().orEmpty()
-                val placeTitle = entry.arguments?.getString("placeTitle")?.decodeNavArg().orEmpty()
+                val placeKey = entry.arguments?.getString("placeKey")
+                    ?.let { runCatching { decodeBrowseNavKey(it) }.getOrNull() }
+                    .orEmpty()
+                val placeTitle = entry.arguments?.getString("placeTitle")
+                    ?.let { runCatching { decodeBrowseNavKey(it) }.getOrNull() }
+                    .orEmpty()
+                androidx.compose.runtime.key("browse-place-$placeKey") {
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
@@ -510,6 +516,7 @@ fun OneGalleryApp(
                         navController.popBackStack(MainTab.Albums.route, inclusive = false)
                     },
                 )
+                }
             }
             composable(MainTab.Settings.route) {
                 SettingsScreen(

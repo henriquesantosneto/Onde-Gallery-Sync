@@ -1,0 +1,37 @@
+package com.onegallery.sync.ui.gallery
+
+import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.matchesPlace
+
+/** Lista da grade: rota manda no filtro (evita álbum errado por estado atrasado do ViewModel). */
+fun resolveBrowseGridItems(
+    requiresActiveBrowseFilter: Boolean,
+    libraryItems: List<GalleryDisplayItem>,
+    browseItemsFromState: List<GalleryDisplayItem>,
+    sortOrder: GallerySortOrder,
+    routeAlbumFolderKey: String?,
+    routePlaceMatchKey: String?,
+    routePlaceTitle: String?,
+): List<GalleryDisplayItem> {
+    if (!requiresActiveBrowseFilter) {
+        return libraryItems
+    }
+    if (!routeAlbumFolderKey.isNullOrBlank()) {
+        return libraryItems
+            .filter { it.albumName == routeAlbumFolderKey }
+            .sortedBy(sortOrder)
+    }
+    if (!routePlaceMatchKey.isNullOrBlank()) {
+        val matchKey = PlaceMatchKey.decode(routePlaceMatchKey)
+        return libraryItems
+            .filter { item ->
+                when {
+                    matchKey != null -> item.matchesPlace(matchKey)
+                    !routePlaceTitle.isNullOrBlank() -> item.locationLabel == routePlaceTitle
+                    else -> false
+                }
+            }
+            .sortedBy(sortOrder)
+    }
+    return browseItemsFromState
+}

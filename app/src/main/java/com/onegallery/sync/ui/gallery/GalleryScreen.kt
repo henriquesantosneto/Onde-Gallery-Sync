@@ -88,7 +88,15 @@ fun GalleryScreen(
             viewModel.setPlaceFilter(routePlaceTitle, routePlaceMatchKey)
         }
     }
-    val gridItems = if (requiresActiveBrowseFilter) state.items else state.libraryItems
+    val gridItems = resolveBrowseGridItems(
+        requiresActiveBrowseFilter = requiresActiveBrowseFilter,
+        libraryItems = state.libraryItems,
+        browseItemsFromState = state.items,
+        sortOrder = state.sortOrder,
+        routeAlbumFolderKey = routeAlbumFolderKey,
+        routePlaceMatchKey = routePlaceMatchKey,
+        routePlaceTitle = routePlaceTitle,
+    )
     val gridPinch = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
         galleryPreferences.galleryGridZoom = scale
     }
@@ -132,6 +140,9 @@ fun GalleryScreen(
 
     val title = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+        routePlaceTitle != null -> routePlaceTitle
+        routeAlbumFolderKey != null ->
+            SyncPaths.albumListDisplayName(routeAlbumFolderKey)
         state.locationFilter != null -> state.locationFilter ?: "Local"
         state.albumFilter != null ->
             SyncPaths.albumListDisplayName(state.albumFilter ?: "Álbum")

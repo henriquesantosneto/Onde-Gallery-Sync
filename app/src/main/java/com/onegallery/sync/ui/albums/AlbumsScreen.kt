@@ -71,6 +71,7 @@ import com.onegallery.sync.ui.gallery.AlbumListSort
 import com.onegallery.sync.ui.gallery.GalleryFastScrollRailReservedWidth
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
+import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.ui.gallery.buildAlbumGridFastScrollMarkers
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.ui.gallery.albumMediaCountBadgeCorner
@@ -539,6 +540,16 @@ private fun AlbumGridTile(
                 .fillMaxWidth()
                 .padding(top = if (compact) 6.dp else 10.dp),
         )
+        if (!isPlace && !album.isUserManaged && album.filterKey != album.title) {
+            Text(
+                text = album.filterKey,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (!compact) {
             Text(
                 text = formatAlbumMediaCount(album),
