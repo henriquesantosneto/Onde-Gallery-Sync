@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -256,19 +257,18 @@ fun SettingsScreen(
                         Slider(
                             value = idleReleaseDays,
                             onValueChange = { raw ->
-                                val stepped = ((raw + 7.5f) / 15f).toInt() * 15f
-                                idleReleaseDays = stepped.coerceIn(
-                                    SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS.toFloat(),
-                                    SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS.toFloat(),
-                                )
+                                idleReleaseDays = raw.roundToInt().coerceIn(
+                                    SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS,
+                                    SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS,
+                                ).toFloat()
                             },
                             onValueChangeFinished = {
                                 syncPreferences.localCopyIdleReleaseDays = idleReleaseDays.toInt()
                             },
                             valueRange = SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS.toFloat()..
                                 SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS.toFloat(),
-                            steps = (SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS -
-                                SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS) / 15 - 1,
+                            steps = SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS -
+                                SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS - 1,
                         )
                     }
                 }

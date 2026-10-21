@@ -70,7 +70,7 @@ class SyncPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_FREE_IDLE, false)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_FREE_IDLE, value).apply()
 
-    /** Dias sem abrir a foto no app antes da liberação por inatividade (15–180). */
+    /** Dias sem abrir a foto no app antes da liberação por inatividade (1–180). */
     var localCopyIdleReleaseDays: Int
         get() = prefs.getInt(KEY_LOCAL_IDLE_RELEASE_DAYS, DEFAULT_LOCAL_IDLE_RELEASE_DAYS)
             .coerceIn(MIN_LOCAL_IDLE_RELEASE_DAYS, MAX_LOCAL_IDLE_RELEASE_DAYS)
@@ -108,7 +108,7 @@ class SyncPreferences(context: Context) {
         private const val KEY_LOCAL_IDLE_RELEASE_DAYS = "local_idle_release_days"
         private const val KEY_AUTO_SYNC_PAUSED_UNTIL = "auto_sync_paused_until"
 
-        const val MIN_LOCAL_IDLE_RELEASE_DAYS = 15
+        const val MIN_LOCAL_IDLE_RELEASE_DAYS = 1
         const val MAX_LOCAL_IDLE_RELEASE_DAYS = 180
         const val DEFAULT_LOCAL_IDLE_RELEASE_DAYS = 90
 
