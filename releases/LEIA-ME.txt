@@ -1,9 +1,9 @@
-OneGallery Sync — APK 0.8.214 (versionCode 266)
+OneGallery Sync — APK 0.8.217 (versionCode 269)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.214-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.217-debug/OneGallerySync-debug.apk
 
 Hash Azure (Assinatura debug deste build): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
 
