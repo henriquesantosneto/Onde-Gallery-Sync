@@ -5,7 +5,6 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -27,7 +26,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.onegallery.sync.ui.theme.OneGalleryEdgeToEdgeEffect
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
@@ -62,9 +60,7 @@ import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
 import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
-import com.onegallery.sync.ui.sync.SyncActivityBanner
 import com.onegallery.sync.ui.sync.SyncStatusScreen
-import androidx.compose.material3.Surface
 import com.onegallery.sync.ui.welcome.WelcomeScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -328,7 +324,6 @@ fun OneGalleryApp(
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBottomBar = showsMainBottomBar(currentRoute)
-    val syncUiState by syncCoordinator.state.collectAsStateWithLifecycle()
 
     OneGalleryEdgeToEdgeEffect(currentRoute = currentRoute)
 
@@ -376,27 +371,13 @@ fun OneGalleryApp(
             }
         },
     ) { padding ->
-        Column(
+        NavHost(
+            navController = navController,
+            startDestination = MainTab.Gallery.route,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = padding.calculateBottomPadding()),
         ) {
-            if (syncUiState.isRunning && showBottomBar) {
-                Surface(
-                    tonalElevation = 2.dp,
-                    shadowElevation = 2.dp,
-                ) {
-                    SyncActivityBanner(
-                        state = syncUiState,
-                        runQueue = if (syncUiState.isRunning) syncUiState.runQueue else emptyList(),
-                    )
-                }
-            }
-            NavHost(
-                navController = navController,
-                startDestination = MainTab.Gallery.route,
-                modifier = Modifier.fillMaxSize(),
-            ) {
             composable(MainTab.Gallery.route) {
                 GalleryScreen(
                     viewModel = galleryViewModel,
@@ -489,7 +470,6 @@ fun OneGalleryApp(
                     },
                 )
             }
-        }
         }
     }
 

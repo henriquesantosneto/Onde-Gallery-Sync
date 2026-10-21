@@ -13,104 +13,94 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.sync.ActiveSyncItem
 import com.onegallery.sync.sync.SyncProgressPhase
-import com.onegallery.sync.sync.SyncQueueDisplayRow
 import com.onegallery.sync.sync.SyncUiState
 import com.onegallery.sync.sync.runningHeadlineFallback
 
-/** Painel reutilizável: título do sync + barras por transferência paralela. */
+private val phasesWithParallelTransfers = setOf(
+    SyncProgressPhase.RECONCILING_LOCAL,
+    SyncProgressPhase.REGISTERING_CLOUD_ONLY,
+    SyncProgressPhase.PREFETCH_THUMBNAILS,
+    SyncProgressPhase.BACKFILL_GPS,
+    SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+)
+
+/** Linhas com barra na aba Sync: transferências reais ou leva atual da fila de execução. */
+fun resolveTransferRowsForUi(state: SyncUiState): List<ActiveSyncItem> {
+    if (state.activeItems.isNotEmpty()) return state.activeItems
+    if (!state.isRunning || state.runQueue.isEmpty()) return emptyList()
+    if (state.progressPhase !in phasesWithParallelTransfers) return emptyList()
+    val phaseLabel = when (state.progressPhase) {
+        SyncProgressPhase.PREFETCH_THUMBNAILS -> "Baixando miniatura…"
+        SyncProgressPhase.BACKFILL_GPS -> "Indexando GPS…"
+        SyncProgressPhase.BACKFILL_CAPTURE_DATE -> "Indexando data…"
+        SyncProgressPhase.REGISTERING_CLOUD_ONLY -> "Registrando na nuvem…"
+        SyncProgressPhase.RECONCILING_LOCAL -> "Sincronizando…"
+        else -> "Processando…"
+    }
+    return state.runQueue.take(8).map { row ->
+        ActiveSyncItem(
+            canonicalPath = row.canonicalPath,
+            displayName = row.displayName,
+            operationLabel = phaseLabel,
+        )
+    }
+}
+
 @Composable
-fun SyncRunningProgressPanel(
+fun SyncRunningHeadlineBlock(
     state: SyncUiState,
-    runQueue: List<SyncQueueDisplayRow> = emptyList(),
     modifier: Modifier = Modifier,
-    compact: Boolean = false,
 ) {
     if (!state.isRunning) return
     val headline = state.activityHeadline.ifBlank { state.progressPhase.runningHeadlineFallback() }
     val detail = state.activityDetail.ifBlank {
         state.lastMessage.lineSequence().drop(1).joinToString("\n")
     }
-    val transferRows = resolveTransferRowsForUi(state, runQueue)
-
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             headline,
-            style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold,
         )
         if (detail.isNotBlank()) {
             Text(
                 detail,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        if (transferRows.isEmpty()) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        } else {
-            Text(
-                if (transferRows.size == 1) {
-                    "Transferência ativa"
-                } else {
-                    "Em paralelo (${transferRows.size})"
-                },
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            transferRows.forEach { item ->
-                SyncActiveTransferRow(item)
-            }
         }
     }
 }
 
 @Composable
-fun SyncActivityBanner(
+fun SyncParallelTransfersCard(
     state: SyncUiState,
-    runQueue: List<SyncQueueDisplayRow>,
     modifier: Modifier = Modifier,
 ) {
     if (!state.isRunning) return
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        SyncRunningProgressPanel(
-            state = state,
-            runQueue = runQueue,
-            compact = true,
+    val rows = resolveTransferRowsForUi(state)
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            if (rows.size <= 1) {
+                "Transferência ativa"
+            } else {
+                "Transferências em paralelo (${rows.size})"
+            },
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
         )
-    }
-}
-
-fun resolveTransferRowsForUi(
-    state: SyncUiState,
-    runQueue: List<SyncQueueDisplayRow>,
-): List<ActiveSyncItem> {
-    if (state.activeItems.isNotEmpty()) return state.activeItems
-    if (!state.isRunning || runQueue.isEmpty()) return emptyList()
-    val phaseLabel = when (state.progressPhase) {
-        SyncProgressPhase.PREFETCH_THUMBNAILS -> "Baixando miniatura…"
-        SyncProgressPhase.BACKFILL_GPS -> "Indexando GPS…"
-        SyncProgressPhase.BACKFILL_CAPTURE_DATE -> "Indexando data…"
-        else -> "Processando…"
-    }
-    if (state.progressPhase !in listOf(
-            SyncProgressPhase.PREFETCH_THUMBNAILS,
-            SyncProgressPhase.BACKFILL_GPS,
-            SyncProgressPhase.BACKFILL_CAPTURE_DATE,
-        )
-    ) {
-        return emptyList()
-    }
-    return runQueue.take(8).map { row ->
-        ActiveSyncItem(
-            canonicalPath = row.canonicalPath,
-            displayName = row.displayName,
-            operationLabel = phaseLabel,
-        )
+        if (rows.isEmpty()) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Text(
+                "Preparando fila ou aguardando rede…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            rows.forEach { item ->
+                SyncActiveTransferRow(item)
+            }
+        }
     }
 }
 

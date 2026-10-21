@@ -12,10 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -68,11 +66,23 @@ fun SyncStatusScreen(
     var clearingErrors by remember { mutableStateOf(false) }
     val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
         when {
-            coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
-                coordinatorState.runQueue
-            coordinatorState.isRunning -> emptyList()
+            coordinatorState.isRunning -> {
+                if (coordinatorState.runQueue.isNotEmpty()) {
+                    coordinatorState.runQueue
+                } else {
+                    syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
+                }
+            }
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
+    }
+    val parallelTransfers = remember(
+        coordinatorState.isRunning,
+        coordinatorState.activeItems,
+        coordinatorState.runQueue,
+        coordinatorState.progressPhase,
+    ) {
+        resolveTransferRowsForUi(coordinatorState)
     }
 
     Scaffold(
@@ -87,6 +97,22 @@ fun SyncStatusScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
+            if (coordinatorState.isRunning) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                        ),
+                    ) {
+                        SyncParallelTransfersCard(
+                            state = coordinatorState,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+            }
+
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -102,9 +128,8 @@ fun SyncStatusScreen(
                             fontWeight = FontWeight.Medium,
                         )
                         if (coordinatorState.isRunning) {
-                            SyncRunningProgressPanel(
+                            SyncRunningHeadlineBlock(
                                 state = coordinatorState,
-                                runQueue = queueForUi,
                                 modifier = Modifier.padding(top = 12.dp),
                             )
                         } else {
@@ -121,8 +146,7 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        val activeItems = resolveTransferRowsForUi(coordinatorState, queueForUi)
-                        val activePaths = activeItems.map { it.canonicalPath }.toSet()
+                        val activePaths = parallelTransfers.map { it.canonicalPath }.toSet()
                         val queueCap = if (coordinatorState.isRunning) 12 else 8
                         val queueWaiting = queueForUi.filter { it.canonicalPath !in activePaths }
                         val queueInStatus = queueWaiting.take(queueCap)
@@ -143,7 +167,7 @@ fun SyncStatusScreen(
                                 queueInStatus.forEach { row ->
                                     SyncQueueItemRow(
                                         row = row,
-                                        activeItems = activeItems,
+                                        activeItems = parallelTransfers,
                                         isRunning = coordinatorState.isRunning,
                                     )
                                 }

@@ -591,15 +591,16 @@ class SyncCoordinator(
     }
 
     private fun setRunQueueFromEntities(entities: List<SyncMetadataEntity>) {
-        _state.value = _state.value.copy(
-            runQueue = entities.map { SyncQueueDisplayRow.fromEntity(it) },
-        )
+        val rows = entities.map { SyncQueueDisplayRow.fromEntity(it) }
+        val apply = { _state.value = _state.value.copy(runQueue = rows) }
+        if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
     }
 
     private fun removeFromRunQueue(canonicalPath: String) {
         val next = _state.value.runQueue.filter { it.canonicalPath != canonicalPath }
         if (next.size != _state.value.runQueue.size) {
-            _state.value = _state.value.copy(runQueue = next)
+            val apply = { _state.value = _state.value.copy(runQueue = next) }
+            if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
         }
     }
 
