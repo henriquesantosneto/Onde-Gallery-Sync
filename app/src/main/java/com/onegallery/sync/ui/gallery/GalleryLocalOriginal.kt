@@ -5,6 +5,7 @@ import android.content.Context
 import android.provider.MediaStore
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.sync.CloudSyncState
 
 private val uriExistsRouter = MediaDeleteRequestRouter()
 
@@ -21,4 +22,30 @@ fun GalleryDisplayItem.hasViewableLocalOriginal(context: Context): Boolean {
     }
     val cached = cachedOriginal
     return cached?.isFile == true && cached.length() > 0L
+}
+
+/** Escolhe o item mais atual para badge de nuvem (override do detalhe vs. grade). */
+fun preferDisplayItemForCloudBadge(
+    primary: GalleryDisplayItem?,
+    secondary: GalleryDisplayItem?,
+    context: Context,
+): GalleryDisplayItem? {
+    if (primary == null) return secondary
+    if (secondary == null) return primary
+    val primaryViewable = primary.hasViewableLocalOriginal(context)
+    val secondaryViewable = secondary.hasViewableLocalOriginal(context)
+    when {
+        primaryViewable && !secondaryViewable -> return primary
+        secondaryViewable && !primaryViewable -> return secondary
+    }
+    when {
+        primary.cloudState == CloudSyncState.SYNCED && secondary.cloudState != CloudSyncState.SYNCED ->
+            return primary
+        secondary.cloudState == CloudSyncState.SYNCED && primary.cloudState != CloudSyncState.SYNCED ->
+            return secondary
+    }
+    if (primary.localReleasedForSpace != secondary.localReleasedForSpace) {
+        return if (!secondary.localReleasedForSpace) secondary else primary
+    }
+    return secondary
 }

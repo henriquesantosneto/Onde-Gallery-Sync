@@ -195,7 +195,11 @@ fun MediaDetailScreen(
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
     var detailItemOverrides by remember { mutableStateOf(mapOf<String, GalleryDisplayItem>()) }
     val currentItem = currentPath?.let { path ->
-        detailItemOverrides[path] ?: itemsByPath[path]
+        preferDisplayItemForCloudBadge(
+            detailItemOverrides[path],
+            itemsByPath[path],
+            context,
+        )
     }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
     val detailPaths = when {
@@ -806,6 +810,7 @@ private fun MediaDetailPage(
             if (result.isSuccess) {
                 val file = result.getOrNull()
                 item = loadDisplayItem(includeOriginalFile = file)
+                item?.let { onDisplayItemChanged(it) }
                 notifyGridIfNewlyCached(item)
             } else {
                 error = result.exceptionOrNull()?.message
@@ -823,7 +828,14 @@ private fun MediaDetailPage(
         }
     }
 
-    LaunchedEffect(canonicalPath, isActivePage, liveItem?.cachedPlaceholderThumb) {
+    LaunchedEffect(
+        canonicalPath,
+        isActivePage,
+        liveItem?.cachedPlaceholderThumb,
+        liveItem?.cloudState,
+        liveItem?.localReleasedForSpace,
+        liveItem?.cachedOriginal?.absolutePath,
+    ) {
         if (!isActivePage) {
             if (liveItem != null && item == null) {
                 item = liveItem
@@ -833,16 +845,29 @@ private fun MediaDetailPage(
         }
         try {
             error = null
-            if (liveItem != null) {
-                item = liveItem
-                loading = false
+            val refreshed = loadDisplayItem() ?: liveItem
+            if (refreshed != null) {
+                val keepLocal = item?.hasViewableLocalOriginal(viewContext) == true
+                val refreshedViewable = refreshed.hasViewableLocalOriginal(viewContext)
+                item = when {
+                    refreshedViewable || !keepLocal -> refreshed
+                    else -> item
+                }
+                if (refreshedViewable) {
+                    onDisplayItemChanged(item ?: refreshed)
+                }
             }
-            item = loadDisplayItem() ?: liveItem ?: item
             if (item != null) loading = false
             withContext(Dispatchers.IO) {
                 syncCoordinator.ensureThumbnailCached(canonicalPath)
             }
-            item = loadDisplayItem() ?: item
+            val afterThumb = loadDisplayItem() ?: item
+            if (afterThumb != null) {
+                item = afterThumb
+                if (afterThumb.hasViewableLocalOriginal(viewContext)) {
+                    onDisplayItemChanged(afterThumb)
+                }
+            }
             notifyGridIfNewlyCached(item)
             loading = false
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -877,6 +902,16 @@ private fun MediaDetailPage(
             }
             if (needsRecall) {
                 loadFullOriginalForViewing()
+            } else {
+                val previewItem = item ?: liveItem
+                if (previewItem?.hasViewableLocalOriginal(viewContext) != true) {
+                    val refreshed = loadDisplayItem()
+                    if (refreshed != null) {
+                        item = refreshed
+                        onDisplayItemChanged(refreshed)
+                        notifyGridIfNewlyCached(refreshed)
+                    }
+                }
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
