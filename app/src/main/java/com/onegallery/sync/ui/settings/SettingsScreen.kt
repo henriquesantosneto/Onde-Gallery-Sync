@@ -375,9 +375,9 @@ fun SettingsScreen(
                     summary = "Remove cópia local na hora",
                     info = SettingsInfoDialog(
                         title = "Após backup",
-                        body = "Assim que o item estiver no OneDrive, apaga a cópia na galeria do aparelho. " +
-                            "Se você abrir depois e o app fizer recall, volta o original até você liberar " +
-                            "de novo ou até valer a opção por inatividade.",
+                        body = "Só para itens **enviados neste sync** para o OneDrive — apaga a cópia na galeria " +
+                            "depois do upload. Não remove fotos que já estavam sincronizadas antes. " +
+                            "Abrir de novo faz recall da nuvem.",
                     ),
                     checked = autoFreeLocalAfterSync,
                     onInfoClick = { settingsInfo = it },
@@ -403,9 +403,9 @@ fun SettingsScreen(
                     summary = "Remove se não abrir no prazo",
                     info = SettingsInfoDialog(
                         title = "Por inatividade",
-                        body = "Para fotos que ainda têm cópia no aparelho ou que você baixou de novo da " +
-                            "nuvem (recall ao abrir). Se passar o prazo sem abrir de novo, o app remove " +
-                            "essa cópia ou cache — não apaga o arquivo no OneDrive.",
+                        body = "Conta só depois que você **abriu a foto no app** (não usa a data da foto). " +
+                            "Se passar o prazo sem abrir de novo, remove a cópia local — o OneDrive " +
+                            "permanece. Reindexar não zera para “liberar na hora”.",
                     ),
                     checked = autoFreeLocalWhenIdle,
                     onInfoClick = { settingsInfo = it },

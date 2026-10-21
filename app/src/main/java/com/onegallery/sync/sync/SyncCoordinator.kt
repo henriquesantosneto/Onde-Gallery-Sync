@@ -176,6 +176,8 @@ class SyncCoordinator(
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
     private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
+    /** Caminhos enviados à nuvem nesta execução — só estes entram em “liberar após sync”. */
+    private val pathsUploadedThisSync = mutableSetOf<String>()
 
     init {
         mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
@@ -356,6 +358,7 @@ class SyncCoordinator(
             SyncPreferences.MEDIA_LIBRARY_SUPPRESS_DURING_SYNC_MS,
         )
         thumbPrefetchAttemptsThisSession.clear()
+        pathsUploadedThisSync.clear()
     }
 
     /** Sync automático (WorkManager / rede / MediaStore) sem pendências urgentes. */
@@ -1234,7 +1237,10 @@ class SyncCoordinator(
                     var freedLocal = 0
                     val allowDialog = appForegroundState.isInForeground()
                     if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-                        freedLocal += autoReleaseSyncedLocalCopies(allowSystemDialog = allowDialog)
+                        freedLocal += autoReleaseSyncedLocalCopies(
+                            allowSystemDialog = allowDialog,
+                            onlyCanonicalPaths = pathsUploadedThisSync.toSet(),
+                        )
                     }
                     if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
                         freedLocal += autoReleaseIdleLocalCopies(allowSystemDialog = allowDialog)
@@ -2002,7 +2008,10 @@ class SyncCoordinator(
         val allowDialog = appForegroundState.isInForeground() &&
             allowSystemDeleteDialogForLocalRemoval()
         if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-            autoReleaseSyncedLocalCopies(allowSystemDialog = allowDialog)
+            autoReleaseSyncedLocalCopies(
+                allowSystemDialog = allowDialog,
+                onlyCanonicalPaths = emptySet(),
+            )
         }
         if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
             autoReleaseIdleLocalCopies(allowSystemDialog = allowDialog)
@@ -2018,11 +2027,16 @@ class SyncCoordinator(
         syncMetadataDao.upsert(row.copy(localLastAccessedAtMs = now))
     }
 
-    private suspend fun autoReleaseSyncedLocalCopies(allowSystemDialog: Boolean): Int {
+    private suspend fun autoReleaseSyncedLocalCopies(
+        allowSystemDialog: Boolean,
+        onlyCanonicalPaths: Set<String>,
+    ): Int {
         ensureSyncMayContinue()
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
+        if (onlyCanonicalPaths.isEmpty()) return 0
         val rows = syncMetadataDao.getAll().filter { row ->
-            row.localMediaId != null &&
+            row.canonicalPath in onlyCanonicalPaths &&
+                row.localMediaId != null &&
                 row.oneDriveItemId != null &&
                 row.cloudState == CloudSyncState.SYNCED &&
                 row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
@@ -2054,16 +2068,8 @@ class SyncCoordinator(
             !row.cachedFilePath.isNullOrBlank()
     }
 
-    private fun effectiveLocalAccessMs(row: SyncMetadataEntity): Long? {
-        row.localLastAccessedAtMs?.let { return it }
-        row.capturedAtSeconds?.takeIf { it > 0L }?.let { return it * 1000L }
-        row.localModifiedAt?.let { return it }
-        row.remoteModifiedAt?.let { return it }
-        return null
-    }
-
     private fun isLocalCopyIdleBeyondPolicy(row: SyncMetadataEntity, idleDays: Int): Boolean {
-        val lastAccess = effectiveLocalAccessMs(row) ?: return false
+        val lastAccess = row.localLastAccessedAtMs ?: return false
         val idleMs = idleDays.toLong() * 24L * 60L * 60L * 1000L
         return System.currentTimeMillis() - lastAccess >= idleMs
     }
@@ -2335,6 +2341,7 @@ class SyncCoordinator(
                 lastError = null,
             )
             syncMetadataDao.upsert(synced)
+            pathsUploadedThisSync.add(row.canonicalPath)
             if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
                 releaseLocalSpaceForRows(
                     listOf(synced),
@@ -2676,6 +2683,19 @@ class SyncCoordinator(
             if (index % 32 == 0) ensureNotCancelled()
             if (row.localMediaId == null) return@forEachIndexed
             if (row.canonicalPath in seenPaths) return@forEachIndexed
+            row.localMediaId?.let { mediaId ->
+                localMediaRepository.findById(mediaId)?.let { stillOnDevice ->
+                    val canonical = SyncPaths.canonicalFromLocal(stillOnDevice)
+                    syncMetadataDao.upsert(
+                        mergeLocalIntoEntity(
+                            item = stillOnDevice,
+                            canonical = canonical,
+                            existing = row,
+                        ),
+                    )
+                    return@forEachIndexed
+                }
+            }
             if (row.localReleasedForSpace) {
                 finalizeLocalSpaceReleased(row)
                 return@forEachIndexed
@@ -2841,7 +2861,8 @@ class SyncCoordinator(
             localGalleryRelativePath = item.relativePath?.takeIf { it.isNotBlank() }
                 ?: existing?.localGalleryRelativePath,
             localReleasedForSpace = false,
-            localLastAccessedAtMs = existing?.localLastAccessedAtMs,
+            localLastAccessedAtMs = existing?.localLastAccessedAtMs
+                ?: System.currentTimeMillis(),
             oneDriveItemId = existing?.oneDriveItemId,
             localModifiedAt = item.dateModifiedSeconds,
             localSizeBytes = item.sizeBytes,
