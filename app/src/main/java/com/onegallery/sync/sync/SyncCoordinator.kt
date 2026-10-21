@@ -1285,20 +1285,27 @@ class SyncCoordinator(
                 val result = runCatching {
                     ensureNotCancelled()
                     indexLocalLibrary(manageRunningState = false, userInitiated = userInitiated).getOrThrow()
-                    backfillMissingGpsLocations()
+                    backfillMissingGpsLocations(
+                        maxRounds = GPS_BACKFILL_MANUAL_ROUNDS,
+                        resetCursor = true,
+                    )
                     backfillMissingCaptureTimes()
                     indexPassLocalItemsById = emptyMap()
                     syncMetadataDao.getAll().count { it.latitude != null && it.longitude != null }
                 }
                 result.onSuccess { withGps ->
+                    val stillMissing = countIndexedMissingGps()
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItems = emptyList(),
-                        lastMessage = if (withGps > 0) {
-                            "Mapa: $withGps foto(s) com GPS no índice."
-                        } else {
-                            "Nenhuma foto com GPS encontrada. Conceda “Localização das mídias” " +
-                                "e confira se a câmera grava localização."
+                        lastMessage = when {
+                            withGps == 0 ->
+                                "Nenhuma foto com GPS encontrada. Conceda “Localização das mídias” " +
+                                    "e confira se a câmera grava localização."
+                            stillMissing > 0 ->
+                                "Mapa: $withGps com GPS · $stillMissing ainda sem coordenadas " +
+                                    "(sem EXIF, só na nuvem ou sync interrompido — sincronize de novo)."
+                            else -> "Mapa: $withGps mídia(s) com GPS no índice."
                         },
                     )
                 }.onFailure { error ->
@@ -3070,10 +3077,16 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun backfillMissingGpsLocations() {
+    private suspend fun backfillMissingGpsLocations(
+        maxRounds: Int = GPS_BACKFILL_ROUNDS,
+        resetCursor: Boolean = false,
+    ) {
+        if (resetCursor) {
+            syncPreferences.gpsBackfillCursor = 0
+        }
         var totalIndexed = 0
         var hitLimit = false
-        repeat(GPS_BACKFILL_ROUNDS) {
+        repeat(maxRounds) {
             if (countIndexedMissingGps() == 0) return@repeat
             val outcome = backfillMissingGpsLocationsOnce(
                 maxLocalProbesPerRun = GPS_LOCAL_BATCH,
@@ -3106,6 +3119,51 @@ class SyncCoordinator(
         val probesAttempted: Int,
     )
 
+    private data class GpsBackfillWorkItem(
+        val row: SyncMetadataEntity,
+        val probeKind: GpsBackfillProbeKind,
+    )
+
+    /** Avança o cursor só pelos itens visitados; enche as cotas local/nuvem sem pular faixas. */
+    private fun planGpsBackfillWork(
+        sorted: List<SyncMetadataEntity>,
+        startCursor: Int,
+        maxLocalProbesPerRun: Int,
+        maxCloudProbesPerRun: Int,
+    ): Pair<List<GpsBackfillWorkItem>, Int> {
+        if (sorted.isEmpty()) return emptyList<GpsBackfillWorkItem>() to 0
+        var cursor = startCursor % sorted.size
+        var steps = 0
+        var localSlots = 0
+        var cloudSlots = 0
+        val work = ArrayList<GpsBackfillWorkItem>(
+            (maxLocalProbesPerRun + maxCloudProbesPerRun).coerceAtMost(sorted.size),
+        )
+        while (
+            steps < sorted.size &&
+            (localSlots < maxLocalProbesPerRun || cloudSlots < maxCloudProbesPerRun)
+        ) {
+            val row = sorted[cursor]
+            cursor = (cursor + 1) % sorted.size
+            steps++
+            val hasLocal = row.localMediaId != null ||
+                !row.localContentUri.isNullOrBlank() ||
+                !row.cachedFilePath.isNullOrBlank()
+            when {
+                hasLocal && localSlots < maxLocalProbesPerRun -> {
+                    localSlots++
+                    work.add(GpsBackfillWorkItem(row, GpsBackfillProbeKind.LOCAL))
+                }
+                row.oneDriveItemId != null && cloudSlots < maxCloudProbesPerRun -> {
+                    cloudSlots++
+                    work.add(GpsBackfillWorkItem(row, GpsBackfillProbeKind.CLOUD))
+                }
+            }
+            if (localSlots >= maxLocalProbesPerRun && cloudSlots >= maxCloudProbesPerRun) break
+        }
+        return work to cursor
+    }
+
     private suspend fun backfillMissingGpsLocationsOnce(
         maxLocalProbesPerRun: Int,
         maxCloudProbesPerRun: Int,
@@ -3119,66 +3177,55 @@ class SyncCoordinator(
         }
         if (rows.isEmpty()) return GpsBackfillBatchOutcome(0, false, 0)
         val sorted = rows.sortedWith(gpsBackfillComparator)
-        val cursor = syncPreferences.gpsBackfillCursor % sorted.size
-        val rotated = sorted.drop(cursor) + sorted.take(cursor)
-        val maxCandidatesThisRound = (maxLocalProbesPerRun + maxCloudProbesPerRun)
-            .coerceAtMost(rotated.size)
-        val batch = rotated.take(maxCandidatesThisRound)
-        syncPreferences.gpsBackfillCursor = (cursor + batch.size) % sorted.size
-        val candidates = batch.size
+        val startCursor = syncPreferences.gpsBackfillCursor % sorted.size
+        val (work, nextCursor) = planGpsBackfillWork(
+            sorted = sorted,
+            startCursor = startCursor,
+            maxLocalProbesPerRun = maxLocalProbesPerRun,
+            maxCloudProbesPerRun = maxCloudProbesPerRun,
+        )
+        syncPreferences.gpsBackfillCursor = nextCursor
+        if (work.isEmpty()) return GpsBackfillBatchOutcome(0, false, 0)
+        val candidates = work.size
         val semaphore = Semaphore(PARALLEL_GPS_BACKFILL)
-        val localProbeCount = AtomicInteger(0)
-        val cloudProbeCount = AtomicInteger(0)
         val indexedCount = AtomicInteger(0)
         val analyzedCount = AtomicInteger(0)
-        val probesAttemptedCount = AtomicInteger(0)
-        val probeMutex = Mutex()
+        var localProbes = 0
+        var cloudProbes = 0
+        work.forEach { item ->
+            when (item.probeKind) {
+                GpsBackfillProbeKind.LOCAL -> localProbes++
+                GpsBackfillProbeKind.CLOUD -> cloudProbes++
+            }
+        }
         supervisorScope {
-            batch.map { row ->
+            work.map { item ->
                 async {
                     semaphore.withPermit {
                         try {
                             ensureNotCancelled()
                             coroutineContext.ensureActive()
-                            val hasLocal = row.localMediaId != null ||
-                                row.localContentUri != null ||
-                                row.cachedFilePath != null
-                            val probeKind = probeMutex.withLock {
-                                when {
-                                    hasLocal && localProbeCount.get() < maxLocalProbesPerRun -> {
-                                        localProbeCount.incrementAndGet()
-                                        GpsBackfillProbeKind.LOCAL
-                                    }
-                                    row.oneDriveItemId != null &&
-                                        cloudProbeCount.get() < maxCloudProbesPerRun -> {
-                                        cloudProbeCount.incrementAndGet()
-                                        GpsBackfillProbeKind.CLOUD
-                                    }
-                                    else -> null
-                                }
-                            } ?: return@withPermit
-                            probesAttemptedCount.incrementAndGet()
                             val index = analyzedCount.incrementAndGet()
                             if (index % 16 == 0 && _state.value.isRunning) {
                                 setSyncProgress(
                                     SyncProgressPhase.BACKFILL_GPS,
                                     "Indexando localização (GPS)…",
                                     "Analisados $index/$candidates · ${indexedCount.get()} com GPS · " +
-                                        "local ${localProbeCount.get()}/$maxLocalProbesPerRun · " +
-                                        "nuvem ${cloudProbeCount.get()}/$maxCloudProbesPerRun · " +
+                                        "local $localProbes/$maxLocalProbesPerRun · " +
+                                        "nuvem $cloudProbes/$maxCloudProbesPerRun · " +
                                         "até $PARALLEL_GPS_BACKFILL em paralelo.",
                                     alsoUpdateLastMessage = false,
                                 )
                             }
-                            val resolved = when (probeKind) {
-                                GpsBackfillProbeKind.LOCAL -> resolveLocationForBackfill(row)
+                            val resolved = when (item.probeKind) {
+                                GpsBackfillProbeKind.LOCAL -> resolveLocationForBackfill(item.row)
                                 GpsBackfillProbeKind.CLOUD -> probeCloudExifLocation(
-                                    row.oneDriveItemId!!,
-                                    row.displayName,
+                                    item.row.oneDriveItemId!!,
+                                    item.row.displayName,
                                 )
                             } ?: return@withPermit
                             syncMetadataDao.upsert(
-                                row.copy(
+                                item.row.copy(
                                     locationLabel = resolved.label,
                                     latitude = resolved.latitude,
                                     longitude = resolved.longitude,
@@ -3193,10 +3240,8 @@ class SyncCoordinator(
                 }
             }.awaitAll()
         }
-        val localProbes = localProbeCount.get()
-        val cloudProbes = cloudProbeCount.get()
         val indexed = indexedCount.get()
-        val probesAttempted = probesAttemptedCount.get()
+        val probesAttempted = work.size
         val hitLimit = localProbes >= maxLocalProbesPerRun || cloudProbes >= maxCloudProbesPerRun
         return GpsBackfillBatchOutcome(indexed, hitLimit, probesAttempted)
     }
@@ -3565,6 +3610,8 @@ class SyncCoordinator(
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
         const val GPS_BACKFILL_ROUNDS = 8
+        /** Indexação manual (mapa): varre a biblioteca inteira em várias levas. */
+        const val GPS_BACKFILL_MANUAL_ROUNDS = 48
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 3
