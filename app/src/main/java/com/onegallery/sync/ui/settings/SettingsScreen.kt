@@ -375,7 +375,7 @@ fun SettingsScreen(
                     summary = "Remove cópia local na hora",
                     info = SettingsInfoDialog(
                         title = "Após backup",
-                        body = "Só para itens **enviados neste sync** para o OneDrive — apaga a cópia na galeria " +
+                        body = "Só para itens enviados neste sync para o OneDrive — apaga a cópia na galeria " +
                             "depois do upload. Não remove fotos que já estavam sincronizadas antes. " +
                             "Abrir de novo faz recall da nuvem.",
                     ),
