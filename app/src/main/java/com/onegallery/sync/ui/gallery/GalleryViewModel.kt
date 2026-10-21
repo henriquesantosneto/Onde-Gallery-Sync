@@ -122,14 +122,15 @@ class GalleryViewModel(
     private val librarySnapshot = combine(
         syncCoordinator.galleryMetadata,
         syncCoordinator.userAlbums,
-    ) { metadata, userAlbums ->
+        syncCoordinator.galleryDisplayRefreshEpoch,
+    ) { metadata, userAlbums, _ ->
         metadata to userAlbums
     }.conflate()
         .map { (metadata, userAlbums) ->
         LibrarySnapshot(
             allItems = dedupeGalleryDisplayItems(
                 metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
-            ),
+            ).filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
             userAlbums = userAlbums,
         )
     }.flowOn(Dispatchers.Default)

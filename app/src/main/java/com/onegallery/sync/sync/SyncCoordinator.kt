@@ -164,6 +164,7 @@ class SyncCoordinator(
 
     init {
         mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
+            notifyGalleryDisplayRefresh()
             scheduleAlbumCoverRevisionForPath(canonicalPath)
         }
     }
