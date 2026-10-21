@@ -33,7 +33,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
 
 /** Foco inicial ao abrir o mapa de locais a partir dos detalhes de uma foto. */
 data class PlacesMapFocus(
@@ -133,10 +139,13 @@ class GalleryViewModel(
     @Volatile
     private var pendingPlacesMapFocus: PlacesMapFocus? = null
 
+    private var gridThumbnailPrefetchJob: Job? = null
+    private val gridThumbnailPrefetchQueued = ConcurrentHashMap.newKeySet<String>()
+
     private data class LibrarySnapshot(
         /** Índice completo (contagens, capas, locais). */
         val catalogItems: List<GalleryDisplayItem>,
-        /** Grade Fotos / browse: exige miniatura ou mídia local. */
+        /** Grade Fotos / browse: local, nuvem indexada ou miniatura em cache. */
         val visibleItems: List<GalleryDisplayItem>,
         val userAlbums: List<UserAlbumEntity>,
     )
@@ -422,12 +431,55 @@ class GalleryViewModel(
             .filter { itemNeedsGeneratedThumbnail(it) }
             .take(48)
             .forEach { paths.add(it.canonicalPath) }
-        paths.forEach { path ->
-            syncCoordinator.ensureThumbnailCached(path)
-        }
+        prefetchThumbnailPathsParallel(paths.toList())
         if (paths.isNotEmpty()) {
             syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(setOf(coverBucketId))
         }
+    }
+
+    /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
+    fun prefetchGridThumbnails(canonicalPaths: List<String>) {
+        val paths = canonicalPaths
+            .asSequence()
+            .filter { it.isNotBlank() }
+            .filter { path -> mediaCacheRepository.thumbnailIfCached(path) == null }
+            .filter { path -> gridThumbnailPrefetchQueued.add(path) }
+            .take(GRID_THUMB_PREFETCH_BATCH)
+            .toList()
+        if (paths.isEmpty()) return
+        gridThumbnailPrefetchJob?.cancel()
+        gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                prefetchThumbnailPathsParallel(paths)
+            } finally {
+                paths.forEach { gridThumbnailPrefetchQueued.remove(it) }
+            }
+        }
+    }
+
+    private suspend fun prefetchThumbnailPathsParallel(paths: List<String>) {
+        if (paths.isEmpty()) return
+        var cachedAny = false
+        supervisorScope {
+            val semaphore = Semaphore(GRID_THUMB_PREFETCH_PARALLEL)
+            paths.map { path ->
+                async {
+                    semaphore.withPermit {
+                        syncCoordinator.ensureThumbnailCached(path).getOrNull()
+                        val hit = mediaCacheRepository.thumbnailIfCached(path) != null
+                        if (hit) cachedAny = true
+                    }
+                }
+            }.awaitAll()
+        }
+        if (cachedAny) {
+            syncCoordinator.notifyGalleryDisplayRefresh()
+        }
+    }
+
+    private companion object {
+        const val GRID_THUMB_PREFETCH_PARALLEL = 8
+        const val GRID_THUMB_PREFETCH_BATCH = 72
     }
 
     private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {

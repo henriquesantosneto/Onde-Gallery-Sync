@@ -43,7 +43,7 @@ fun GalleryThumbnailImage(
 ) {
     val context = LocalContext.current
     var displayData by remember(item.canonicalPath, sizePx) {
-        mutableStateOf<Any?>(item.localUri ?: item.thumbnailModel)
+        mutableStateOf<Any?>(item.thumbnailModel ?: item.localUri)
     }
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
@@ -67,7 +67,7 @@ fun GalleryThumbnailImage(
             ImageRequest.Builder(context)
                 .data(displayData)
                 .size(sizePx)
-                .crossfade(true)
+                .crossfade(style == GalleryThumbnailStyle.Detail)
                 .allowHardware(style == GalleryThumbnailStyle.Grid)
                 .memoryCacheKey("${item.canonicalPath}:$sizePx:${style.name}")
                 .diskCacheKey("${item.canonicalPath}:$sizePx")

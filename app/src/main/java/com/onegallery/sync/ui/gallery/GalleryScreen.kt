@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
@@ -62,6 +63,7 @@ import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncPaths
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -293,6 +295,31 @@ fun GalleryScreen(
                     enabled = dateTimeline,
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
+                LaunchedEffect(gridItems) {
+                    viewModel.prefetchGridThumbnails(
+                        gridItems.take(48).map { it.canonicalPath },
+                    )
+                }
+                LaunchedEffect(gridState, gridEntries) {
+                    snapshotFlow {
+                        val layout = gridState.layoutInfo
+                        val visible = layout.visibleItemsInfo
+                        if (visible.isEmpty()) return@snapshotFlow emptyList<String>()
+                        val first = visible.first().index
+                        val last = visible.last().index
+                        val end = (last + 36).coerceAtMost(gridEntries.lastIndex)
+                        (first..end).mapNotNull { index ->
+                            when (val entry = gridEntries.getOrNull(index)) {
+                                is GalleryGridEntry.Photo -> entry.item.canonicalPath
+                                else -> null
+                            }
+                        }
+                    }
+                        .distinctUntilChanged()
+                        .collect { paths ->
+                            viewModel.prefetchGridThumbnails(paths)
+                        }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
