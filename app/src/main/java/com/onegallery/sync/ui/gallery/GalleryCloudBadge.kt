@@ -100,31 +100,27 @@ fun GalleryCloudBadge(
     )
 }
 
+/** Ícone de sync na barra do detalhe (fixo abaixo do ⋮), não sobre a mídia. */
 @Composable
-fun MediaDetailCloudOverlay(
+fun MediaDetailTopBarCloudStatus(
     item: GalleryDisplayItem,
     recalling: Boolean,
-    contentAspectRatio: Float?,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val state = detailCloudBadgeState(item, recalling, context) ?: return
-    MediaContentFitOverlayHost(
-        contentAspectRatio = contentAspectRatio,
-        modifier = modifier,
+    Row(
+        modifier = modifier.padding(end = 12.dp, top = 2.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            if (recalling) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            GalleryCloudBadge(state = state, iconSize = 24.dp)
+        if (recalling) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = OneDriveBlue,
+            )
         }
+        GalleryCloudBadge(state = state, iconSize = 22.dp)
     }
 }

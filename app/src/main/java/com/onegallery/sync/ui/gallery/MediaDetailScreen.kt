@@ -96,6 +96,7 @@ fun MediaDetailScreen(
     var pendingReleaseOnDone by remember { mutableStateOf<(() -> Unit)?>(null) }
     val context = LocalContext.current
     var activePageError by remember { mutableStateOf<String?>(null) }
+    var activePageRecalling by remember { mutableStateOf(false) }
     /** Evita recall automático na mesma sessão após “Liberar espaço” (reabrir a foto para baixar). */
     val suppressAutoRecallPaths = remember { mutableSetOf<String>() }
     var suppressAutoRecallRevision by remember { mutableIntStateOf(0) }
@@ -244,6 +245,7 @@ fun MediaDetailScreen(
     }
     LaunchedEffect(pagerState.currentPage) {
         detailsContentLevel = MediaDetailContentLevel.Simple
+        activePageRecalling = false
     }
 
     val chromeVisible = !immersive
@@ -368,6 +370,11 @@ fun MediaDetailScreen(
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
                     onRegisterZoomTransform = { activeZoomTransform = it },
+                    onRecallingChanged = { recalling ->
+                        if (page == pagerState.currentPage) {
+                            activePageRecalling = recalling
+                        }
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -396,6 +403,14 @@ fun MediaDetailScreen(
                     modifier = Modifier.align(Alignment.TopCenter),
                     title = barTitle,
                     subtitle = barSubtitle,
+                    belowActionsEnd = currentItem?.let { statusItem ->
+                        {
+                            MediaDetailTopBarCloudStatus(
+                                item = statusItem,
+                                recalling = activePageRecalling,
+                            )
+                        }
+                    },
                     navigationIcon = {
                         IconButton(
                             onClick = {
@@ -735,6 +750,7 @@ private fun MediaDetailPage(
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
     onRegisterZoomTransform: (ZoomTransformHolder) -> Unit = {},
+    onRecallingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
@@ -748,6 +764,9 @@ private fun MediaDetailPage(
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
     var contentAspectRatio by remember(canonicalPath) { mutableStateOf<Float?>(null) }
     val viewContext = LocalContext.current
+    if (isActivePage) {
+        SideEffect { onRecallingChanged(loadingFull) }
+    }
 
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
         withContext(Dispatchers.Default) {
@@ -869,7 +888,6 @@ private fun MediaDetailPage(
     }
 
     val display = item
-    val statusItem = liveItem ?: display
     LaunchedEffect(isActivePage, canonicalPath) {
         if (!isActivePage) {
             zoomTransform.scale = 1f
@@ -891,13 +909,9 @@ private fun MediaDetailPage(
                 ) {
                     val mediaModifier = Modifier.fillMaxSize()
                     val playback = display.playbackUri()
-                    val overlayItem = statusItem ?: display
                     when {
                         display.kind == MediaKind.VIDEO && playback != null -> {
                             MediaDetailMediaShell(
-                                item = overlayItem,
-                                recalling = loadingFull,
-                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 VideoPlayerWithZoom(
@@ -911,9 +925,6 @@ private fun MediaDetailPage(
                         }
                         display.kind == MediaKind.VIDEO -> {
                             MediaDetailMediaShell(
-                                item = overlayItem,
-                                recalling = loadingFull,
-                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 ZoomableMediaContainer(
@@ -936,9 +947,6 @@ private fun MediaDetailPage(
                         }
                         display.detailPreviewModel() != null -> {
                             MediaDetailMediaShell(
-                                item = overlayItem,
-                                recalling = loadingFull,
-                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 ZoomableImageContent(
@@ -955,9 +963,6 @@ private fun MediaDetailPage(
                         }
                         else -> {
                             MediaDetailMediaShell(
-                                item = overlayItem,
-                                recalling = loadingFull,
-                                contentAspectRatio = contentAspectRatio,
                                 modifier = mediaModifier,
                             ) {
                                 ZoomableMediaContainer(
@@ -987,18 +992,10 @@ private fun MediaDetailPage(
 
 @Composable
 private fun MediaDetailMediaShell(
-    item: GalleryDisplayItem,
-    recalling: Boolean,
-    contentAspectRatio: Float?,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Box(modifier = modifier) {
         content()
-        MediaDetailCloudOverlay(
-            item = item,
-            recalling = recalling,
-            contentAspectRatio = contentAspectRatio,
-        )
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,6 +27,7 @@ fun MediaDetailTransparentTopBar(
     navigationIcon: @Composable () -> Unit,
     actions: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
+    belowActionsEnd: (@Composable () -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -40,7 +42,8 @@ fun MediaDetailTransparentTopBar(
                 ),
             ),
     ) {
-        TopAppBar(
+        Column(modifier = Modifier.fillMaxWidth()) {
+            TopAppBar(
             windowInsets = WindowInsets.statusBars,
             title = {
                 Column {
@@ -64,6 +67,15 @@ fun MediaDetailTransparentTopBar(
                 titleContentColor = Color.White,
                 actionIconContentColor = Color.White,
             ),
-        )
+            )
+            belowActionsEnd?.let { content ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.TopEnd,
+                ) {
+                    content()
+                }
+            }
+        }
     }
 }
