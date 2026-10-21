@@ -553,49 +553,58 @@ class SyncCoordinator(
     val syncQueue: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observePendingQueue()
 
     private val activeSyncItemsLock = Any()
-
-    private fun publishActiveItemsUpdate(next: List<ActiveSyncItem>) {
-        val apply = {
-            _state.value = _state.value.copy(activeItems = next)
+    private val activeSyncItemsBacking = ArrayList<ActiveSyncItem>()
+    private val publishActiveItemsRunnable = Runnable {
+        val snapshot = synchronized(activeSyncItemsLock) {
+            activeSyncItemsBacking.toList()
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
+        _state.value = _state.value.copy(activeItems = snapshot)
+    }
+
+    private fun scheduleActiveItemsPublish() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            publishActiveItemsRunnable.run()
+        } else {
+            mainHandler.removeCallbacks(publishActiveItemsRunnable)
+            mainHandler.post(publishActiveItemsRunnable)
+        }
     }
 
     private fun upsertActiveSyncItem(item: ActiveSyncItem, force: Boolean = false) {
-        if (!force) {
-            val now = System.currentTimeMillis()
-            val last = lastActiveItemProgressPostMs[item.canonicalPath] ?: 0L
-            if (item.bytesCompleted > 0L && now - last < ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS) {
-                return
-            }
-            lastActiveItemProgressPostMs[item.canonicalPath] = now
-        }
         synchronized(activeSyncItemsLock) {
-            val next = _state.value.activeItems.toMutableList()
-            val index = next.indexOfFirst { it.canonicalPath == item.canonicalPath }
+            val index = activeSyncItemsBacking.indexOfFirst { it.canonicalPath == item.canonicalPath }
             if (index >= 0) {
-                next[index] = item
+                activeSyncItemsBacking[index] = item
             } else {
-                next.add(item)
+                activeSyncItemsBacking.add(item)
             }
-            publishActiveItemsUpdate(next)
+            if (!force) {
+                val now = System.currentTimeMillis()
+                val last = lastActiveItemProgressPostMs[item.canonicalPath] ?: 0L
+                if (item.bytesCompleted > 0L && now - last < ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS) {
+                    return
+                }
+                lastActiveItemProgressPostMs[item.canonicalPath] = now
+            }
+            scheduleActiveItemsPublish()
         }
     }
 
     private fun removeActiveSyncItem(canonicalPath: String) {
         lastActiveItemProgressPostMs.remove(canonicalPath)
         synchronized(activeSyncItemsLock) {
-            val next = _state.value.activeItems.filter { it.canonicalPath != canonicalPath }
-            if (next.size != _state.value.activeItems.size) {
-                publishActiveItemsUpdate(next)
+            val removed = activeSyncItemsBacking.removeAll { it.canonicalPath == canonicalPath }
+            if (removed) {
+                scheduleActiveItemsPublish()
             }
         }
     }
 
     private fun clearActiveSyncItems() {
         synchronized(activeSyncItemsLock) {
-            if (_state.value.activeItems.isNotEmpty()) {
-                publishActiveItemsUpdate(emptyList())
+            if (activeSyncItemsBacking.isNotEmpty()) {
+                activeSyncItemsBacking.clear()
+                scheduleActiveItemsPublish()
             }
         }
     }
@@ -2959,39 +2968,42 @@ class SyncCoordinator(
             rows.map { row ->
                 async {
                     semaphore.withPermit {
-                        if (honorSyncCancel) {
-                            coroutineContext.ensureActive()
-                            ensureNotCancelled()
-                        }
-                        upsertActiveSyncItem(
-                            ActiveSyncItem(
-                                canonicalPath = row.canonicalPath,
-                                displayName = row.displayName,
-                                operationLabel = thumbnailOperationLabel(row),
-                            ),
-                            force = true,
-                        )
-                        val hit = ensureThumbnailCached(
-                            row.canonicalPath,
-                            activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
-                        ).getOrNull() != null
-                        if (hit) cachedCount.incrementAndGet()
-                        val done = completed.incrementAndGet()
-                        if (_state.value.isRunning &&
-                            (done == rows.size || done % 16 == 0)
-                        ) {
-                            setSyncProgress(
-                                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                                "Gerando e baixando miniaturas…",
-                                "$done/${rows.size} nesta leva · " +
-                                    "${cachedCount.get()} salvas em cache · " +
-                                    "até $PARALLEL_THUMBNAILS em paralelo.",
-                                alsoUpdateLastMessage = false,
+                        try {
+                            if (honorSyncCancel) {
+                                coroutineContext.ensureActive()
+                                ensureNotCancelled()
+                            }
+                            upsertActiveSyncItem(
+                                ActiveSyncItem(
+                                    canonicalPath = row.canonicalPath,
+                                    displayName = row.displayName,
+                                    operationLabel = thumbnailOperationLabel(row),
+                                ),
+                                force = true,
                             )
+                            val hit = ensureThumbnailCached(
+                                row.canonicalPath,
+                                activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
+                            ).getOrNull() != null
+                            if (hit) cachedCount.incrementAndGet()
+                            val done = completed.incrementAndGet()
+                            if (_state.value.isRunning &&
+                                (done == rows.size || done % 16 == 0)
+                            ) {
+                                setSyncProgress(
+                                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                                    "Gerando e baixando miniaturas…",
+                                    "$done/${rows.size} nesta leva · " +
+                                        "${cachedCount.get()} salvas em cache · " +
+                                        "até $PARALLEL_THUMBNAILS em paralelo.",
+                                    alsoUpdateLastMessage = false,
+                                )
+                            }
+                            if (hit) 1 else 0
+                        } finally {
+                            removeActiveSyncItem(row.canonicalPath)
+                            removeFromRunQueue(row.canonicalPath)
                         }
-                        removeActiveSyncItem(row.canonicalPath)
-                        removeFromRunQueue(row.canonicalPath)
-                        if (hit) 1 else 0
                     }
                 }
             }.awaitAll().sum()
