@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Delete
@@ -21,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
@@ -66,6 +69,7 @@ fun SettingsScreen(
     syncPreferences: SyncPreferences,
     onOpenCloudFolderPicker: () -> Unit,
     onMicrosoftSignIn: () -> Unit,
+    onOpenSyncStatus: () -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OneGalleryApplication
@@ -230,6 +234,30 @@ fun SettingsScreen(
 
             item {
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Sync") },
+                    supportingContent = {
+                        if (syncState.isRunning) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                            )
+                        } else {
+                            Text(
+                                syncState.lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
+                                    .ifBlank { "Ver fila, transferências e estatísticas" },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    },
+                    leadingContent = {
+                        Icon(Icons.Outlined.CloudSync, contentDescription = null)
+                    },
+                    modifier = Modifier.clickable(onClick = onOpenSyncStatus),
+                )
             }
             item {
                 ListItem(

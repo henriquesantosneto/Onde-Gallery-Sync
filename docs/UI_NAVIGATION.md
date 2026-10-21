@@ -21,7 +21,7 @@ Controlado por `SyncPreferences.hasCompletedSetup` e passos de nuvem:
 | Escolher pasta Graph | `OneDriveCloudBrowserScreen` |
 | Alternativa SAF | `OneDriveSafBrowserScreen` |
 
-Após setup: **quatro abas** (`MainTab`).
+Após setup: **três abas** (`MainTab`: Galeria, Álbuns, Ajustes).
 
 ## Abas principais
 
@@ -29,13 +29,13 @@ Após setup: **quatro abas** (`MainTab`).
 |-----|------|--------|
 | Galeria | `gallery` | `GalleryScreen` |
 | Álbuns | `albums` | `AlbumsScreen` |
-| Sync | `sync` | `SyncStatusScreen` |
 | Ajustes | `settings` | `SettingsScreen` |
 
 ## Rotas aninhadas
 
 | Rota | Destino |
 |------|---------|
+| `settings/sync` | `SyncStatusScreen` (entrada em Ajustes → item **Sync**; barra de progresso no item enquanto roda) |
 | `albums/browse` | `GalleryScreen` filtrada por álbum (tab Álbuns permanece selecionada) |
 | `places_map` | `PlacesMapScreen` |
 | `media/{encodedPath}` | `MediaDetailScreen` (path URL-encoded) |
@@ -44,6 +44,7 @@ Helpers em `OneGalleryApp.kt`: `openGalleryTab`, `openAlbumsTab`, `openMainTab`,
 
 ## SyncStatusScreen
 
+- Aberta a partir de **Ajustes → Sync** (rota `settings/sync`).
 - Card de status (conexão, fase, headline/detail).
 - **Transferências em paralelo:** lista `activeItems` com `SyncActiveTransferRow` + barra de progresso.
 - Fila: `runQueue` durante sync ou `syncQueue` do Room quando idle.

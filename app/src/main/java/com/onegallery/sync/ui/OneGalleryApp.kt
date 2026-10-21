@@ -8,7 +8,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.Settings
@@ -74,6 +73,8 @@ import kotlinx.coroutines.launch
 private const val PLACES_MAP_ROUTE = "places_map"
 /** Conteúdo filtrado de um álbum/local; mantém a aba Álbuns selecionada na barra inferior. */
 private const val ALBUMS_BROWSE_ROUTE = "albums/browse"
+/** Detalhe de sync (antes era aba própria). */
+private const val SYNC_STATUS_ROUTE = "settings/sync"
 
 private fun albumsTabSelected(route: String?): Boolean =
     route == MainTab.Albums.route || route == ALBUMS_BROWSE_ROUTE
@@ -128,7 +129,7 @@ private fun NavHostController.openMainTab(tab: MainTab, clearBrowseFilters: () -
     when (tab) {
         MainTab.Gallery -> openGalleryTab(clearBrowseFilters)
         MainTab.Albums -> openAlbumsTab(clearBrowseFilters)
-        MainTab.Sync, MainTab.Settings -> {
+        MainTab.Settings -> {
             clearBrowseFilters()
             navigate(tab.route) {
                 popUpTo(graph.findStartDestination().id) {
@@ -144,7 +145,6 @@ private fun NavHostController.openMainTab(tab: MainTab, clearBrowseFilters: () -
 private enum class MainTab(val route: String) {
     Gallery("gallery"),
     Albums("albums"),
-    Sync("sync"),
     Settings("settings"),
 }
 
@@ -371,7 +371,6 @@ fun OneGalleryApp(
                                     when (tab) {
                                         MainTab.Gallery -> Icons.Outlined.Photo
                                         MainTab.Albums -> Icons.Outlined.PhotoAlbum
-                                        MainTab.Sync -> Icons.Outlined.CloudSync
                                         MainTab.Settings -> Icons.Outlined.Settings
                                     },
                                     contentDescription = null,
@@ -382,7 +381,6 @@ fun OneGalleryApp(
                                     when (tab) {
                                         MainTab.Gallery -> stringResource(R.string.tab_gallery)
                                         MainTab.Albums -> stringResource(R.string.tab_albums)
-                                        MainTab.Sync -> stringResource(R.string.tab_sync)
                                         MainTab.Settings -> stringResource(R.string.tab_settings)
                                     },
                                 )
@@ -460,18 +458,24 @@ fun OneGalleryApp(
                     },
                 )
             }
-            composable(MainTab.Sync.route) {
-                SyncStatusScreen(
-                    syncCoordinator = syncCoordinator,
-                    syncPreferences = syncPreferences,
-                )
-            }
             composable(MainTab.Settings.route) {
                 SettingsScreen(
                     authManager = authManager,
                     syncPreferences = syncPreferences,
                     onOpenCloudFolderPicker = { openCloudFolderPicker() },
                     onMicrosoftSignIn = { openMicrosoftSignIn() },
+                    onOpenSyncStatus = {
+                        navController.navigate(SYNC_STATUS_ROUTE) {
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
+            composable(SYNC_STATUS_ROUTE) {
+                SyncStatusScreen(
+                    syncCoordinator = syncCoordinator,
+                    syncPreferences = syncPreferences,
+                    onNavigateBack = { navController.popBackStack() },
                 )
             }
             composable(
