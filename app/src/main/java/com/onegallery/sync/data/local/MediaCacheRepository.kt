@@ -157,6 +157,18 @@ class MediaCacheRepository(context: Context) {
         }.getOrDefault(false)
     }
 
+    /** Miniaturas commitadas no disco (exclui `.new` / staging). */
+    fun countThumbFilesOnDisk(): Int {
+        val files = thumbsDir.listFiles() ?: return 0
+        var count = 0
+        for (file in files) {
+            if (!file.isFile || file.name.endsWith(".new")) continue
+            if (file.length() <= 0L) continue
+            if (isReadableThumbnailFile(file)) count++
+        }
+        return count
+    }
+
     /** Após recriar o índice (ex.: troca de pasta na nuvem). */
     fun clearAll() {
         originalsDir.listFiles()?.forEach { it.delete() }

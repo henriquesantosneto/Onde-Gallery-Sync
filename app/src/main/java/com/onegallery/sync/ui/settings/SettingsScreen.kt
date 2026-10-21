@@ -98,9 +98,10 @@ fun SettingsScreen(
     var pendingAutoReleaseAfterSync by remember { mutableStateOf(false) }
     var pendingAutoReleaseWhenIdle by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, context) {
+    DisposableEffect(lifecycleOwner, context, syncCoordinator) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                syncCoordinator.scheduleThumbnailStatsRefresh(debounceMs = 0L)
                 allFilesAccess = MediaStorageAccess.hasAllFilesAccess(context)
                 if (allFilesAccess) {
                     if (pendingAutoReleaseAfterSync) {
@@ -299,18 +300,43 @@ fun SettingsScreen(
                 ListItem(
                     headlineContent = { Text("Sync") },
                     supportingContent = {
-                        if (syncState.isRunning) {
-                            LinearProgressIndicator(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                            )
-                        } else {
-                            Text(
-                                syncState.lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
-                                    .ifBlank { "Ver fila, transferências e estatísticas" },
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                        Column {
+                            if (syncState.isRunning) {
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp, bottom = 6.dp),
+                                )
+                                if (syncState.activityHeadline.isNotBlank()) {
+                                    Text(
+                                        syncState.activityHeadline,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                    )
+                                }
+                                if (syncState.activityDetail.isNotBlank()) {
+                                    Text(
+                                        syncState.activityDetail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            val thumbLine = syncState.thumbnailStats?.summaryLine()
+                            if (thumbLine != null) {
+                                Text(
+                                    thumbLine,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = if (syncState.isRunning) 4.dp else 0.dp),
+                                )
+                            } else if (!syncState.isRunning) {
+                                Text(
+                                    syncState.lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
+                                        .ifBlank { "Ver fila, transferências e estatísticas" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                     },
                     leadingContent = {

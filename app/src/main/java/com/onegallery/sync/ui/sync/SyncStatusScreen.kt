@@ -25,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +71,9 @@ fun SyncStatusScreen(
 
     val stats = indexStats?.toSyncStats() ?: SyncStats(0, 0, 0, 0, 0, 0, 0, 0, 0)
     val problemCount = indexStats?.attention ?: problemItems.size
+    LaunchedEffect(Unit) {
+        syncCoordinator.refreshThumbnailCacheStats(force = true)
+    }
     var clearingErrors by remember { mutableStateOf(false) }
     val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
         when {
@@ -249,7 +253,11 @@ fun SyncStatusScreen(
                 SectionTitle("Resumo da biblioteca")
             }
             item {
-                StatsCard(stats, pendingOps)
+                StatsCard(
+                    stats = stats,
+                    pendingFromDb = pendingOps,
+                    thumbnailStats = coordinatorState.thumbnailStats,
+                )
             }
 
             if (problemCount > 0) {
@@ -320,10 +328,21 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun StatsCard(stats: SyncStats, pendingFromDb: Int) {
+private fun StatsCard(
+    stats: SyncStats,
+    pendingFromDb: Int,
+    thumbnailStats: com.onegallery.sync.sync.ThumbnailCacheStats?,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             StatRow("Itens no índice", stats.total.toString())
+            thumbnailStats?.let { thumbs ->
+                StatRow("Miniaturas no índice", "${thumbs.indexedWithThumbnail} / ${thumbs.indexedEligible}")
+                if (thumbs.indexedPending > 0) {
+                    StatRow("Miniaturas pendentes", thumbs.indexedPending.toString(), emphasized = true)
+                }
+                StatRow("Arquivos em cache (thumbs)", thumbs.savedOnDisk.toString())
+            }
             StatRow("Com cópia local", stats.withLocal.toString())
             StatRow("Sincronizados", stats.synced.toString())
             StatRow("Aguardando envio", stats.pendingUpload.toString())

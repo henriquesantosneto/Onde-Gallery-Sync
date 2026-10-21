@@ -91,6 +91,8 @@ data class SyncUiState(
     val activeItems: List<ActiveSyncItem> = emptyList(),
     /** Fila prevista/em andamento nesta execução (uploads reais, não só PENDING_* no Room). */
     val runQueue: List<SyncQueueDisplayRow> = emptyList(),
+    /** Contagem de miniaturas (atualizada após sync / prefetch e ao abrir Sync). */
+    val thumbnailStats: ThumbnailCacheStats? = null,
 )
 
 class SyncCoordinator(
@@ -178,6 +180,9 @@ class SyncCoordinator(
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
     /** Caminhos enviados à nuvem nesta execução — só estes entram em “liberar após sync”. */
     private val pathsUploadedThisSync = mutableSetOf<String>()
+    private val thumbnailStatsRefreshMutex = Mutex()
+    private var lastThumbnailStatsRefreshMs = 0L
+    private var thumbnailStatsRefreshScheduled = false
 
     init {
         mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
@@ -187,7 +192,49 @@ class SyncCoordinator(
                 scheduleGalleryDisplayRefreshCoalesced()
             }
             scheduleAlbumCoverRevisionForPath(canonicalPath)
+            scheduleThumbnailStatsRefresh(debounceMs = 4_000L)
         }
+    }
+
+    fun scheduleThumbnailStatsRefresh(debounceMs: Long = 0L) {
+        val scope = backgroundScope ?: return
+        if (thumbnailStatsRefreshScheduled) return
+        thumbnailStatsRefreshScheduled = true
+        scope.launch(Dispatchers.Default) {
+            if (debounceMs > 0L) delay(debounceMs)
+            thumbnailStatsRefreshScheduled = false
+            refreshThumbnailCacheStats(force = false)
+        }
+    }
+
+    suspend fun refreshThumbnailCacheStats(force: Boolean = true) {
+        thumbnailStatsRefreshMutex.withLock {
+            val now = System.currentTimeMillis()
+            if (!force && now - lastThumbnailStatsRefreshMs < THUMBNAIL_STATS_MIN_REFRESH_MS) return
+            lastThumbnailStatsRefreshMs = now
+            val stats = computeThumbnailCacheStats()
+            _state.update { it.copy(thumbnailStats = stats) }
+        }
+    }
+
+    private suspend fun computeThumbnailCacheStats(): ThumbnailCacheStats = withContext(Dispatchers.Default) {
+        val rows = syncMetadataDao.getAll()
+        var eligible = 0
+        var withThumb = 0
+        for (row in rows) {
+            if (!rowCanBuildThumbnail(row)) continue
+            eligible++
+            if (mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) != null) {
+                withThumb++
+            }
+        }
+        ThumbnailCacheStats(
+            indexTotal = rows.size,
+            indexedEligible = eligible,
+            indexedWithThumbnail = withThumb,
+            indexedPending = (eligible - withThumb).coerceAtLeast(0),
+            savedOnDisk = mediaCacheRepository.countThumbFilesOnDisk(),
+        )
     }
 
     /** Durante prefetch em massa: atualiza grade/álbuns em lote (sem ANR). */
@@ -3167,6 +3214,7 @@ class SyncCoordinator(
                     activityDetail = "",
                     lastMessage = finalMessage,
                 )
+                scheduleThumbnailStatsRefresh(debounceMs = 0L)
                 if (countIndexedMissingThumbnails() > 0) {
                     scheduleBackgroundThumbnailPrefetchIfNeeded()
                 }
@@ -3399,6 +3447,7 @@ class SyncCoordinator(
                 notifyGalleryDisplayRefresh()
             }
             forcePlaceholderForStubbornMissingThumbnails()
+            refreshThumbnailCacheStats(force = true)
         } finally {
             bulkThumbnailPrefetchDepth.decrementAndGet()
         }
@@ -4126,6 +4175,7 @@ class SyncCoordinator(
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
+        const val THUMBNAIL_STATS_MIN_REFRESH_MS = 8_000L
         const val GPS_BACKFILL_ROUNDS = 8
         /** Indexação manual (mapa): varre a biblioteca inteira em várias levas. */
         const val GPS_BACKFILL_MANUAL_ROUNDS = 48
