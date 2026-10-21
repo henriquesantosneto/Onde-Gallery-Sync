@@ -224,12 +224,61 @@ object SyncPaths {
         bucketDisplayName: String = "",
     ): String {
         val rel = relativePath?.trim('/')?.replace('\\', '/').orEmpty()
-        if (rel.isNotEmpty()) {
-            return shortenWhatsAppPath(rel)
+        val raw = when {
+            rel.isNotEmpty() -> albumFolderFromDeviceRelativePath(rel)
+            else -> {
+                val fromCanonical = normalizeFolderAlbumKey(albumFromCanonical(canonicalPath))
+                if (fromCanonical != "Raiz") fromCanonical
+                else bucketDisplayName.ifBlank { "Raiz" }
+            }
         }
-        val fromCanonical = albumFromCanonical(canonicalPath)
-        if (fromCanonical != "Raiz") return fromCanonical
-        return bucketDisplayName.ifBlank { "Raiz" }
+        return normalizeFolderAlbumKey(raw)
+    }
+
+    /**
+     * Pasta do aparelho (RELATIVE_PATH): só o diretório do álbum, com WhatsApp encurtado/canônico.
+     */
+    private fun albumFolderFromDeviceRelativePath(relativePath: String): String {
+        var folder = relativePath.trim('/').replace('\\', '/')
+        val lastSegment = folder.substringAfterLast('/')
+        if (lastSegment.contains('.') && !lastSegment.equals("Sent", ignoreCase = true)) {
+            folder = folder.substringBeforeLast('/').trim('/')
+        }
+        if (folder.isBlank()) return "Raiz"
+        val shortened = shortenWhatsAppPath(folder)
+        val segments = shortened.split('/').filter { it.isNotBlank() }
+        if (segments.isEmpty()) return shortened
+        if (segments.size >= 2 && segments.last().contains('.')) {
+            return segments.dropLast(1).joinToString("/")
+        }
+        if (segments.size == 2 && segments[0].equals(segments[1], ignoreCase = true)) {
+            return segments[0]
+        }
+        return shortened
+    }
+
+    /**
+     * Uma chave de álbum por pasta lógica: mesma grafia para WhatsApp (ex.: `whatsapp video` → `WhatsApp Video`).
+     */
+    fun normalizeFolderAlbumKey(folderAlbum: String): String {
+        val normalized = folderAlbum.trim('/').replace('\\', '/')
+        if (normalized.isBlank() || normalized.equals("Raiz", ignoreCase = true)) {
+            return normalized.ifBlank { "Raiz" }
+        }
+        var segments = normalized.split('/').filter { it.isNotBlank() }
+        if (segments.isNotEmpty() && segments.last().contains('.')) {
+            segments = segments.dropLast(1)
+        }
+        if (segments.isEmpty()) return "Raiz"
+        val canonicalSegments = segments.map { segment ->
+            whatsAppMediaLeafFolders.firstOrNull { it.equals(segment, ignoreCase = true) } ?: segment
+        }
+        val collapsed = mutableListOf<String>()
+        for (segment in canonicalSegments) {
+            if (collapsed.lastOrNull()?.equals(segment, ignoreCase = true) == true) continue
+            collapsed.add(segment)
+        }
+        return collapsed.joinToString("/")
     }
 
     /** Título na grade de álbuns — omite o prefixo DCIM/; caminho completo fica nos detalhes. */
