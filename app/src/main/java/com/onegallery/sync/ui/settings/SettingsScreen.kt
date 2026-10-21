@@ -93,6 +93,7 @@ fun SettingsScreen(
         mutableStateOf(syncPreferences.localCopyIdleReleaseDays.toFloat())
     }
     var settingsInfo by remember { mutableStateOf<SettingsInfoDialog?>(null) }
+    var showResetIndexConfirm by remember { mutableStateOf(false) }
     var showAutoReleasePermissionDialog by remember { mutableStateOf(false) }
     var pendingAutoReleaseAfterSync by remember { mutableStateOf(false) }
     var pendingAutoReleaseWhenIdle by remember { mutableStateOf(false) }
@@ -535,14 +536,42 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                         enabled = !syncState.isRunning,
                     ) {
-                        Text("Limpar índice")
+                        Text("Limpar órfãos")
                     }
                     IconButton(
                         onClick = {
                             settingsInfo = SettingsInfoDialog(
-                                title = "Limpar índice",
-                                body = "Remove entradas órfãs do índice. Trocar a pasta na nuvem recria o " +
-                                    "índice no próximo sync; cada sync também faz uma verificação rápida.",
+                                title = "Limpar órfãos",
+                                body = "Remove entradas do índice que não existem mais no aparelho nem na pasta " +
+                                    "de sync na nuvem. Não apaga arquivos.",
+                            )
+                        },
+                    ) {
+                        Icon(Icons.Outlined.Info, contentDescription = "Mais informações")
+                    }
+                }
+            }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = { showResetIndexConfirm = true },
+                        modifier = Modifier.weight(1f),
+                        enabled = !syncState.isRunning,
+                    ) {
+                        Text("Zerar índice e recomeçar")
+                    }
+                    IconButton(
+                        onClick = {
+                            settingsInfo = SettingsInfoDialog(
+                                title = "Zerar índice e recomeçar",
+                                body = "Apaga só a base de dados do app (índice + miniaturas em cache). " +
+                                    "Suas fotos na galeria e no OneDrive permanecem. Em seguida roda um sync " +
+                                    "completo para montar tudo de novo.",
                             )
                         },
                     ) {
@@ -566,6 +595,35 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showResetIndexConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetIndexConfirm = false },
+            title = { Text("Zerar índice e recomeçar?") },
+            text = {
+                Text(
+                    "O app esquece o índice atual (pastas, estados de sync, miniaturas em cache) e " +
+                        "sincroniza de novo com a galeria do aparelho e a pasta escolhida no OneDrive.\n\n" +
+                        "Não apaga fotos ou vídeos na Samsung/Galeria nem arquivos na nuvem.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showResetIndexConfirm = false
+                        syncTasks.resetSyncIndexAndResync(userInitiated = true)
+                    },
+                ) {
+                    Text("Zerar e sincronizar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetIndexConfirm = false }) {
+                    Text("Cancelar")
+                }
+            },
+        )
     }
 }
 

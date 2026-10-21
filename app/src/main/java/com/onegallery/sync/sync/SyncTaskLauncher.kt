@@ -42,6 +42,16 @@ class SyncTaskLauncher(
         launchManaged { coordinator.runIndexSanitation(userInitiated = userInitiated) }
     }
 
+    /** Zera o índice local e inicia sync completo (não apaga mídia na galeria nem na nuvem). */
+    fun resetSyncIndexAndResync(userInitiated: Boolean = true) {
+        launchManaged {
+            coordinator.resetSyncIndexForFreshStart(userInitiated = userInitiated).getOrElse {
+                return@launchManaged
+            }
+            coordinator.runBidirectionalSync(userInitiated = userInitiated)
+        }
+    }
+
     fun clearStoredItemErrors(onDone: (Int) -> Unit = {}) {
         scope.launch {
             val count = coordinator.clearStoredItemErrors()

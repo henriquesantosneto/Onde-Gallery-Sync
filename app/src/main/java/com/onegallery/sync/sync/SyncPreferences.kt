@@ -145,6 +145,15 @@ class SyncPreferences(context: Context) {
         }
     }
 
+    /** Cursores e contadores ligados ao índice antigo — após zerar e reindexar. */
+    fun resetIndexMaintenanceState() {
+        prefs.edit()
+            .putInt(KEY_GPS_BACKFILL_CURSOR, 0)
+            .putInt(KEY_THUMB_PREFETCH_CURSOR, 0)
+            .remove(KEY_THUMB_FAIL_COUNTS)
+            .apply()
+    }
+
     private fun thumbnailFailKey(canonicalPath: String): String = "$canonicalPath::"
 
     var mediaLibraryWatchSuppressedUntilMs: Long

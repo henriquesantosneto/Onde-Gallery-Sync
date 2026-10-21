@@ -447,6 +447,44 @@ class SyncCoordinator(
         }
     }
 
+    /**
+     * Apaga só o índice local (SQLite + cache de miniaturas/originais do app).
+     * Não remove fotos/vídeos da galeria Samsung nem arquivos no OneDrive.
+     * O próximo sync reconstrói a partir do aparelho e da pasta na nuvem.
+     */
+    suspend fun resetSyncIndexForFreshStart(userInitiated: Boolean = true): Result<Unit> {
+        if (_state.value.isRunning) {
+            return Result.failure(IllegalStateException("Aguarde o sync atual terminar."))
+        }
+        ensureAutoSyncAllowed(userInitiated)?.let { denied ->
+            return Result.failure(denied.exceptionOrNull() ?: IllegalStateException("Sync pausado"))
+        }
+        return longTaskMutex.withLock {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    pendingIndexRebuild.set(false)
+                    rebuildSyncMetadataIndex(syncMetadataDao, mediaCacheRepository)
+                    syncPreferences.resetIndexMaintenanceState()
+                    if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                        oneDriveRepository.resetRemoteListingState()
+                    }
+                    indexPassLocalItemsById = emptyMap()
+                    notifyGalleryDisplayRefresh()
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        runQueue = emptyList(),
+                        activeItems = emptyList(),
+                        lastMessage = "Índice zerado. Sincronize para reconstruir a partir do aparelho e da nuvem.",
+                    )
+                }.onFailure { error ->
+                    _state.value = _state.value.copy(
+                        lastMessage = error.message ?: "Não foi possível zerar o índice.",
+                    )
+                }
+            }
+        }
+    }
+
     /** Remove mensagens de erro gravadas por item (lista Atenção). Não apaga fotos nem fila de sync. */
     suspend fun clearStoredItemErrors(): Int {
         var cleared = 0
