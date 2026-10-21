@@ -164,8 +164,12 @@ fun MediaDetailSamsungSheet(
                                 locationLabel = info.locationLabel,
                                 contentOnDark = contentOnDark,
                                 onOpenPlacesMap = onOpenPlacesMap?.let { open ->
-                                    {
-                                        open(info.mapLatitude!!, info.mapLongitude!!)
+                                    val lat = info.mapLatitude
+                                    val lng = info.mapLongitude
+                                    if (lat != null && lng != null) {
+                                        { open(lat, lng) }
+                                    } else {
+                                        null
                                     }
                                 },
                                 modifier = Modifier.padding(top = 16.dp),

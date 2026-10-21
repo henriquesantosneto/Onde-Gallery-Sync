@@ -33,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +90,14 @@ fun MediaDetailScreen(
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var activePageError by remember { mutableStateOf<String?>(null) }
+    /** Evita recall automático na mesma sessão após “Liberar espaço” (reabrir a foto para baixar). */
+    val suppressAutoRecallPaths = remember { mutableSetOf<String>() }
+    var suppressAutoRecallRevision by remember { mutableIntStateOf(0) }
+    fun markSuppressAutoRecall(paths: Collection<String>) {
+        if (paths.isEmpty()) return
+        suppressAutoRecallPaths.addAll(paths)
+        suppressAutoRecallRevision++
+    }
 
     val pagerScope = rememberCoroutineScope()
 
@@ -349,6 +358,8 @@ fun MediaDetailScreen(
                     canonicalPath = path,
                     liveItem = live,
                     isActivePage = page == pagerState.currentPage,
+                    suppressAutoRecall = path in suppressAutoRecallPaths,
+                    suppressAutoRecallRevision = suppressAutoRecallRevision,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onToggleImmersive = { immersive = !immersive },
@@ -419,7 +430,10 @@ fun MediaDetailScreen(
                                     onExpandedChange = { showOverflowMenu = it },
                                     showDetails = detailPaths.isNotEmpty(),
                                     onDetails = { openDetailsToSimple() },
-                                    onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
+                                    onFreeSpace = {
+                                        markSuppressAutoRecall(state.selectedPaths)
+                                        viewModel.releaseLocalSpaceSelected()
+                                    },
                                     onDelete = { showDeleteConfirm = true },
                                     deleteLabel = "Excluir tudo",
                                 )
@@ -452,7 +466,10 @@ fun MediaDetailScreen(
                                 onExpandedChange = { showOverflowMenu = it },
                                 showDetails = detailPaths.isNotEmpty(),
                                 onDetails = { openDetailsToSimple() },
-                                onFreeSpace = { viewModel.releaseSingle(currentPath) },
+                                onFreeSpace = {
+                                    markSuppressAutoRecall(listOf(currentPath))
+                                    viewModel.releaseSingle(currentPath)
+                                },
                                 onDelete = { showDeleteConfirm = true },
                             )
                         }
@@ -600,6 +617,8 @@ private fun MediaDetailPage(
     canonicalPath: String,
     liveItem: GalleryDisplayItem?,
     isActivePage: Boolean,
+    suppressAutoRecall: Boolean,
+    suppressAutoRecallRevision: Int,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     onToggleImmersive: () -> Unit,
@@ -643,6 +662,7 @@ private fun MediaDetailPage(
     }
 
     suspend fun loadFullOriginalForViewing() {
+        if (suppressAutoRecall) return
         val preview = item ?: liveItem
         if (preview?.hasViewableLocalOriginal(viewContext) == true) return
         if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
@@ -659,6 +679,14 @@ private fun MediaDetailPage(
             }
         } finally {
             loadingFull = false
+        }
+    }
+
+    LaunchedEffect(canonicalPath, isActivePage) {
+        if (isActivePage) {
+            withContext(Dispatchers.IO) {
+                syncCoordinator.recordLocalMediaAccess(canonicalPath)
+            }
         }
     }
 
@@ -693,8 +721,19 @@ private fun MediaDetailPage(
         }
     }
 
-    LaunchedEffect(canonicalPath, isActivePage, item, liveItem) {
+    LaunchedEffect(
+        canonicalPath,
+        isActivePage,
+        item,
+        liveItem,
+        suppressAutoRecall,
+        suppressAutoRecallRevision,
+    ) {
         if (!isActivePage) return@LaunchedEffect
+        if (suppressAutoRecall) {
+            loadingFull = false
+            return@LaunchedEffect
+        }
         try {
             val previewItem = item ?: liveItem
             if (previewItem?.hasViewableLocalOriginal(viewContext) == true) {

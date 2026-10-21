@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,6 +65,9 @@ fun SettingsScreen(
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
+    var idleReleaseDays by remember {
+        mutableStateOf(syncPreferences.localCopyIdleReleaseDays.toFloat())
+    }
 
     val cloudFolderLabel = when (syncPreferences.syncMode) {
         SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Pasta na nuvem não escolhida"
@@ -176,8 +180,8 @@ fun SettingsScreen(
                     headlineContent = { Text("Liberação automática de espaço") },
                     supportingContent = {
                         Text(
-                            "Após backup no OneDrive, remove só a cópia local e mantém miniatura " +
-                                "no app; o arquivo na nuvem não é apagado.",
+                            "Com backup no OneDrive, remove a cópia local e o original em cache " +
+                                "após o período sem abrir a foto no app; mantém miniatura e arquivo na nuvem.",
                         )
                     },
                     trailingContent = {
@@ -190,6 +194,42 @@ fun SettingsScreen(
                         )
                     },
                 )
+            }
+            if (autoFreeLocal) {
+                item {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "Remover local após ${idleReleaseDays.toInt()} dias sem abrir",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            "Conta desde a última vez que você abriu a foto no app. " +
+                                "Se nunca abriu, usa a data da captura (EXIF). " +
+                                "Intervalo: ${SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS}–" +
+                                "${SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS} dias.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        )
+                        Slider(
+                            value = idleReleaseDays,
+                            onValueChange = { raw ->
+                                val stepped = ((raw + 7.5f) / 15f).toInt() * 15f
+                                idleReleaseDays = stepped.coerceIn(
+                                    SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS.toFloat(),
+                                    SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS.toFloat(),
+                                )
+                            },
+                            onValueChangeFinished = {
+                                syncPreferences.localCopyIdleReleaseDays = idleReleaseDays.toInt()
+                            },
+                            valueRange = SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS.toFloat()..
+                                SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS.toFloat(),
+                            steps = (SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS -
+                                SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS) / 15 - 1,
+                        )
+                    }
+                }
             }
             item {
                 ListItem(

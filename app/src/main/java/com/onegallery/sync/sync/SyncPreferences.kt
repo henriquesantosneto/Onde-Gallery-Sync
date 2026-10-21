@@ -65,6 +65,20 @@ class SyncPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_FREE_LOCAL, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_FREE_LOCAL, value).apply()
 
+    /**
+     * Com liberação automática ativa: remove cópia local / cache do original após este many dias
+     * sem abrir a foto no app (15–180).
+     */
+    var localCopyIdleReleaseDays: Int
+        get() = prefs.getInt(KEY_LOCAL_IDLE_RELEASE_DAYS, DEFAULT_LOCAL_IDLE_RELEASE_DAYS)
+            .coerceIn(MIN_LOCAL_IDLE_RELEASE_DAYS, MAX_LOCAL_IDLE_RELEASE_DAYS)
+        set(value) = prefs.edit()
+            .putInt(
+                KEY_LOCAL_IDLE_RELEASE_DAYS,
+                value.coerceIn(MIN_LOCAL_IDLE_RELEASE_DAYS, MAX_LOCAL_IDLE_RELEASE_DAYS),
+            )
+            .apply()
+
     /** Pausa sync/index automáticos após o usuário cancelar (epoch ms). */
     var autoSyncPausedUntilMs: Long
         get() = prefs.getLong(KEY_AUTO_SYNC_PAUSED_UNTIL, 0L)
@@ -88,7 +102,12 @@ class SyncPreferences(context: Context) {
         private const val KEY_LAST_VERSION = "last_version_code"
         private const val KEY_AUTO_DELETE_REMOTE = "auto_delete_remote"
         private const val KEY_AUTO_FREE_LOCAL = "auto_free_local"
+        private const val KEY_LOCAL_IDLE_RELEASE_DAYS = "local_idle_release_days"
         private const val KEY_AUTO_SYNC_PAUSED_UNTIL = "auto_sync_paused_until"
+
+        const val MIN_LOCAL_IDLE_RELEASE_DAYS = 15
+        const val MAX_LOCAL_IDLE_RELEASE_DAYS = 180
+        const val DEFAULT_LOCAL_IDLE_RELEASE_DAYS = 90
 
         /** Tempo de respiro após cancelar antes de sync/index automáticos. */
         const val CANCEL_COOLDOWN_MS = 10 * 60 * 1000L

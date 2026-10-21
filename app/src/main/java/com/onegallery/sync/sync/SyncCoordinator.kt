@@ -1066,7 +1066,7 @@ class SyncCoordinator(
                     val pendingCount = syncMetadataDao.countPendingOperations()
                     var freedLocal = 0
                     if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-                        freedLocal = autoReleaseSyncedLocalCopies(
+                        freedLocal = autoReleaseIdleLocalCopies(
                             allowSystemDialog = appForegroundState.isInForeground(),
                         )
                     }
@@ -1626,20 +1626,52 @@ class SyncCoordinator(
     suspend fun runAutoReleaseIfNeeded() {
         if (!syncPreferences.autoFreeLocalSpaceWhenSynced) return
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return
-        autoReleaseSyncedLocalCopies(allowSystemDialog = appForegroundState.isInForeground())
+        autoReleaseIdleLocalCopies(allowSystemDialog = appForegroundState.isInForeground())
     }
 
-    private suspend fun autoReleaseSyncedLocalCopies(allowSystemDialog: Boolean): Int {
+    /** Registra abertura da foto/vídeo no detalhe (base para dias sem acesso). */
+    suspend fun recordLocalMediaAccess(canonicalPath: String) {
+        val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return
+        val now = System.currentTimeMillis()
+        val previous = row.localLastAccessedAtMs
+        if (previous != null && now - previous < LOCAL_ACCESS_WRITE_THROTTLE_MS) return
+        syncMetadataDao.upsert(row.copy(localLastAccessedAtMs = now))
+    }
+
+    private suspend fun autoReleaseIdleLocalCopies(allowSystemDialog: Boolean): Int {
         ensureSyncMayContinue()
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
+        val idleDays = syncPreferences.localCopyIdleReleaseDays
         val rows = syncMetadataDao.getAll().filter { row ->
-            row.localMediaId != null &&
-                row.oneDriveItemId != null &&
-                row.cloudState == CloudSyncState.SYNCED &&
-                row.pendingDeleteTarget == PendingDeleteTarget.NONE
+            row.oneDriveItemId != null &&
+                row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
+                !row.localReleasedForSpace &&
+                rowHasReleasableLocalCopy(row) &&
+                row.cloudState != CloudSyncState.PENDING_UPLOAD &&
+                isLocalCopyIdleBeyondPolicy(row, idleDays)
         }
         if (rows.isEmpty()) return 0
         return releaseLocalSpaceForRows(rows, allowSystemDialog = allowSystemDialog)
+    }
+
+    private fun rowHasReleasableLocalCopy(row: SyncMetadataEntity): Boolean {
+        return row.localMediaId != null ||
+            row.localContentUri != null ||
+            !row.cachedFilePath.isNullOrBlank()
+    }
+
+    private fun effectiveLocalAccessMs(row: SyncMetadataEntity): Long? {
+        row.localLastAccessedAtMs?.let { return it }
+        row.capturedAtSeconds?.takeIf { it > 0L }?.let { return it * 1000L }
+        row.localModifiedAt?.let { return it }
+        row.remoteModifiedAt?.let { return it }
+        return null
+    }
+
+    private fun isLocalCopyIdleBeyondPolicy(row: SyncMetadataEntity, idleDays: Int): Boolean {
+        val lastAccess = effectiveLocalAccessMs(row) ?: return false
+        val idleMs = idleDays.toLong() * 24L * 60L * 60L * 1000L
+        return System.currentTimeMillis() - lastAccess >= idleMs
     }
 
     private suspend fun releaseLocalSpaceForRows(
@@ -2218,6 +2250,7 @@ class SyncCoordinator(
             localMediaId = item.id,
             localContentUri = item.uri.toString(),
             localReleasedForSpace = false,
+            localLastAccessedAtMs = existing?.localLastAccessedAtMs,
             oneDriveItemId = existing?.oneDriveItemId,
             localModifiedAt = item.dateModifiedSeconds,
             localSizeBytes = item.sizeBytes,
@@ -3085,6 +3118,7 @@ class SyncCoordinator(
         const val PARALLEL_UPLOADS = 3
         const val PARALLEL_THUMBNAILS = 3
         const val ROOM_UPSERT_CHUNK = 64
+        const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L
     }
 }
 
