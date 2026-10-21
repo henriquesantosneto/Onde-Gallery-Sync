@@ -3482,7 +3482,7 @@ class SyncCoordinator(
         const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 2_500
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
-        const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 650L
+        const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
         const val GPS_BACKFILL_ROUNDS = 8
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 500
