@@ -22,10 +22,7 @@ object AlbumCoverBucketKeys {
     }
 
     fun albumGroupKey(entity: SyncMetadataEntity): String {
-        entity.userAlbumName?.takeIf { it.isNotBlank() }?.let { return it }
-        val fromCanonical = SyncPaths.albumFromCanonical(entity.canonicalPath)
-        if (fromCanonical != "Raiz") return fromCanonical
-        return entity.albumName.ifBlank { "Raiz" }
+        return com.onegallery.sync.sync.AlbumGroupKeys.fromEntity(entity)
     }
 
     private fun appendPlaceKeys(keys: MutableSet<String>, locationLabel: String?) {

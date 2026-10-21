@@ -51,6 +51,7 @@ data class GalleryUiState(
     val userAlbums: List<UserAlbumEntity> = emptyList(),
     val albumFilter: String? = null,
     val locationFilter: String? = null,
+    val placeBrowseMatchKey: String? = null,
     val sortOrder: GallerySortOrder = GallerySortOrder.DATE_NEWEST,
     val albumListSort: AlbumListSort = AlbumListSort.NAME_A_Z,
     val selectionMode: Boolean = false,
@@ -214,7 +215,9 @@ class GalleryViewModel(
         }
 
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
-        val locationFilter = (controls.browseFilter as? GalleryBrowseFilter.Place)?.displayName
+        val placeBrowse = controls.browseFilter as? GalleryBrowseFilter.Place
+        val locationFilter = placeBrowse?.displayName
+        val placeBrowseMatchKey = placeBrowse?.matchKey
 
         GalleryUiState(
             isLoading = controls.isLoading,
@@ -228,6 +231,7 @@ class GalleryViewModel(
             userAlbums = userAlbums,
             albumFilter = albumFilter,
             locationFilter = locationFilter,
+            placeBrowseMatchKey = placeBrowseMatchKey,
             sortOrder = controls.order,
             albumListSort = controls.albumSort,
             selectionMode = controls.selecting,

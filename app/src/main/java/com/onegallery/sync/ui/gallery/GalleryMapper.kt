@@ -79,11 +79,7 @@ object GalleryMapper {
         )
     }
 
-    /** Álbum virtual do usuário; senão pasta no caminho canônico (DCIM/Camera, não só "Camera"). */
     private fun resolveDisplayAlbumName(entity: SyncMetadataEntity): String {
-        entity.userAlbumName?.takeIf { it.isNotBlank() }?.let { return it }
-        val fromCanonical = SyncPaths.albumFromCanonical(entity.canonicalPath)
-        if (fromCanonical != "Raiz") return fromCanonical
-        return entity.albumName.ifBlank { "Raiz" }
+        return GalleryAlbumKeys.forEntity(entity)
     }
 }

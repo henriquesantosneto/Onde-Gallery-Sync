@@ -33,5 +33,5 @@ fun resolveBrowseGridItems(
             }
             .sortedBy(sortOrder)
     }
-    return browseItemsFromState
+    return emptyList()
 }

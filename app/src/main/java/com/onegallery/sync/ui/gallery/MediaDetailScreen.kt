@@ -76,7 +76,7 @@ fun MediaDetailScreen(
         viewModel.notifyLocalDisplayChanged()
         onBack()
     }
-    val liveItems = state.items
+    val liveItems = state.libraryItems
     var showMoveDialog by remember { mutableStateOf(false) }
     var detailsSettleFraction by remember { mutableFloatStateOf(0f) }
     var detailsDragFraction by remember { mutableFloatStateOf(0f) }
@@ -126,7 +126,7 @@ fun MediaDetailScreen(
         }
         LaunchedEffect(initialCanonicalPath) {
             delay(600)
-            if (viewModel.state.value.items.isEmpty()) {
+            if (viewModel.state.value.libraryItems.isEmpty()) {
                 leaveDetail()
             }
         }
@@ -141,6 +141,7 @@ fun MediaDetailScreen(
         liveItems,
         state.albumFilter,
         state.locationFilter,
+        state.placeBrowseMatchKey,
         state.geoItems,
         initialCanonicalPath,
         state.sortOrder,
@@ -150,6 +151,7 @@ fun MediaDetailScreen(
             allItems = liveItems,
             albumFilter = state.albumFilter,
             locationFilter = state.locationFilter,
+            placeMatchKey = state.placeBrowseMatchKey,
             anchorPath = initialCanonicalPath,
             geoItems = state.geoItems,
             sortOrder = state.sortOrder,

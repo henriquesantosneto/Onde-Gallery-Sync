@@ -1193,7 +1193,7 @@ class SyncCoordinator(
                                 SyncMetadataEntity(
                                     canonicalPath = path,
                                     displayName = remote.name,
-                                    albumName = SyncPaths.albumFromCanonical(path),
+                                    albumName = AlbumGroupKeys.fromPaths(canonicalPath = path),
                                     localMediaId = null,
                                     localContentUri = null,
                                     oneDriveItemId = remote.itemId,

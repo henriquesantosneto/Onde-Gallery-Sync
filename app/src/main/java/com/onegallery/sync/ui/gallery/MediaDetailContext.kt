@@ -1,17 +1,35 @@
 package com.onegallery.sync.ui.gallery
 
+import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.matchesPlace
+
 /** Conjunto de mídias para pager + faixa (seção da timeline, álbum, local ou pasta da foto). */
 fun detailContextItems(
     allItems: List<GalleryDisplayItem>,
     albumFilter: String?,
     locationFilter: String?,
+    placeMatchKey: String?,
     anchorPath: String?,
     geoItems: List<GalleryDisplayItem> = emptyList(),
     sortOrder: GallerySortOrder = GallerySortOrder.DATE_NEWEST,
     timelineGrouping: TimelineGrouping = TimelineGrouping.RELAXED,
 ): List<GalleryDisplayItem> {
-    if (albumFilter != null || locationFilter != null) {
+    albumFilter?.let { album ->
         return allItems
+            .filter { it.albumName == album }
+            .sortedBy(sortOrder)
+    }
+    if (placeMatchKey != null || locationFilter != null) {
+        val key = placeMatchKey?.let { PlaceMatchKey.decode(it) }
+        return allItems
+            .filter { item ->
+                when {
+                    key != null -> item.matchesPlace(key)
+                    !locationFilter.isNullOrBlank() -> item.locationLabel == locationFilter
+                    else -> false
+                }
+            }
+            .sortedBy(sortOrder)
     }
     val geoPaths = geoItems.map { it.canonicalPath }.toSet()
     if (anchorPath != null && anchorPath in geoPaths && geoItems.size > 1) {
@@ -30,5 +48,7 @@ fun detailContextItems(
         }
     }
 
-    return allItems.filter { it.albumName == anchor.albumName }
+    return allItems
+        .filter { it.albumName == anchor.albumName }
+        .sortedBy(sortOrder)
 }
