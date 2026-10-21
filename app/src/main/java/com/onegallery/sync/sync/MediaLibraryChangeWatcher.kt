@@ -31,6 +31,8 @@ class MediaLibraryChangeWatcher(
 
     private fun scheduleDebouncedSync() {
         if (!syncPreferences.backgroundSyncAlwaysEnabled) return
+        if (syncPreferences.isMediaLibraryWatchSuppressed()) return
+        if (syncPreferences.shouldDeferBackgroundSyncByTime()) return
         handler.removeCallbacks(debounceRunnable)
         handler.postDelayed(debounceRunnable, DEBOUNCE_MS)
     }

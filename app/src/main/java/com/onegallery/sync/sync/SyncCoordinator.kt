@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.FlowPreview::class)
+
 package com.onegallery.sync.sync
 
 import android.content.Context
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import java.io.File
 import java.util.Locale
@@ -315,6 +318,19 @@ class SyncCoordinator(
         } else {
             ensureNotCancelled()
         }
+        syncPreferences.extendMediaLibraryWatchSuppression(
+            SyncPreferences.MEDIA_LIBRARY_SUPPRESS_DURING_SYNC_MS,
+        )
+    }
+
+    /** Sync automático (WorkManager / rede / MediaStore) sem pendências urgentes. */
+    suspend fun shouldDeferAutomaticBidirectionalSync(): Boolean {
+        if (syncPreferences.isAutoSyncPaused()) return true
+        if (syncPreferences.isMediaLibraryWatchSuppressed()) return true
+        if (syncMetadataDao.countPendingOperations() > 0) return false
+        val last = syncPreferences.lastBidirectionalSyncCompletedAtMs
+        if (last <= 0L) return false
+        return System.currentTimeMillis() - last < SyncPreferences.AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS
     }
 
     private fun isUserCancellation(): Boolean =
@@ -463,7 +479,8 @@ class SyncCoordinator(
         }
     }
 
-    val galleryMetadata: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAll()
+    val galleryMetadata: Flow<List<SyncMetadataEntity>> =
+        syncMetadataDao.observeAll().debounce(GALLERY_METADATA_DEBOUNCE_MS)
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
 
     private val _galleryDisplayRefreshEpoch = MutableStateFlow(0L)
@@ -791,6 +808,9 @@ class SyncCoordinator(
 
     suspend fun runBidirectionalSync(userInitiated: Boolean = false): Result<SyncSummary> {
         ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
+        if (!userInitiated && shouldDeferAutomaticBidirectionalSync()) {
+            return Result.success(SyncSummary(0, 0, 0))
+        }
         if (!SyncCapability.bidirectionalSyncEnabled) {
             return Result.failure(UnsupportedOperationException(SyncCapability.NOT_ENABLED_MESSAGE))
         }
@@ -959,7 +979,7 @@ class SyncCoordinator(
                     for (row in rowsProcessingOrder) {
                         ensureSyncMayContinue()
                         localPassIndex++
-                        if (localPassIndex == 1 || localPassIndex % 24 == 0 || localPassIndex == localPassTotal) {
+                        if (localPassIndex == 1 || localPassIndex % 96 == 0 || localPassIndex == localPassTotal) {
                             setSyncProgress(
                                 SyncProgressPhase.RECONCILING_LOCAL,
                                 "Comparando itens locais com a nuvem…",
@@ -1153,6 +1173,12 @@ class SyncCoordinator(
                         lastMessage = coreSyncMessage,
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
+                    syncPreferences.lastBidirectionalSyncCompletedAtMs = System.currentTimeMillis()
+                    if (freedLocal > 0) {
+                        syncPreferences.extendMediaLibraryWatchSuppression(
+                            SyncPreferences.MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS,
+                        )
+                    }
                     schedulePostSyncEnrichment(coreSyncMessagePrefix = coreSyncMessage.substringBefore("\n"))
                     SyncSummary(uploaded, pendingDownloadPlaceholders, cloudOnly)
                 }.onFailure { error ->
@@ -3321,6 +3347,7 @@ class SyncCoordinator(
     }
 
     private companion object {
+        const val GALLERY_METADATA_DEBOUNCE_MS = 450L
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280

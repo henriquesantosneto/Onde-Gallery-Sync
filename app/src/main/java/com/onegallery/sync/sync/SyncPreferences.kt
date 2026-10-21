@@ -96,6 +96,33 @@ class SyncPreferences(context: Context) {
 
     fun isAutoSyncPaused(): Boolean = autoSyncPausedRemainingMs() > 0
 
+    var lastBidirectionalSyncCompletedAtMs: Long
+        get() = prefs.getLong(KEY_LAST_BIDIR_SYNC_DONE_MS, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_BIDIR_SYNC_DONE_MS, value).apply()
+
+    var mediaLibraryWatchSuppressedUntilMs: Long
+        get() = prefs.getLong(KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS, 0L)
+        private set(value) = prefs.edit().putLong(KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS, value).apply()
+
+    fun extendMediaLibraryWatchSuppression(additionalMs: Long) {
+        val until = System.currentTimeMillis() + additionalMs
+        if (until > mediaLibraryWatchSuppressedUntilMs) {
+            mediaLibraryWatchSuppressedUntilMs = until
+        }
+    }
+
+    fun isMediaLibraryWatchSuppressed(): Boolean =
+        System.currentTimeMillis() < mediaLibraryWatchSuppressedUntilMs
+
+    /** Evita rajadas de sync automático (WorkManager, rede, MediaStore). */
+    fun shouldDeferBackgroundSyncByTime(): Boolean {
+        if (isAutoSyncPaused()) return true
+        if (isMediaLibraryWatchSuppressed()) return true
+        val last = lastBidirectionalSyncCompletedAtMs
+        if (last <= 0L) return false
+        return System.currentTimeMillis() - last < AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS
+    }
+
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_BACKGROUND_SYNC_ALWAYS = "background_sync_always"
@@ -114,5 +141,17 @@ class SyncPreferences(context: Context) {
 
         /** Tempo de respiro após cancelar antes de sync/index automáticos. */
         const val CANCEL_COOLDOWN_MS = 10 * 60 * 1000L
+
+        /** Intervalo mínimo entre syncs bidirecionais automáticos (sem pendências). */
+        const val AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS = 12 * 60 * 1000L
+
+        /** Não reagir ao MediaStore durante sync longo. */
+        const val MEDIA_LIBRARY_SUPPRESS_DURING_SYNC_MS = 15 * 60 * 1000L
+
+        /** Após liberar espaço local, o MediaStore dispara muitos eventos — ignorar por um tempo. */
+        const val MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS = 10 * 60 * 1000L
+
+        private const val KEY_LAST_BIDIR_SYNC_DONE_MS = "last_bidir_sync_done_ms"
+        private const val KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS = "media_watch_suppress_until_ms"
     }
 }

@@ -224,11 +224,13 @@ class GalleryViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { syncCoordinator.compactDuplicateIndexRows() }
         }
-        viewModelScope.launch(Dispatchers.Default) {
-            syncCoordinator.galleryMetadata.first()
-            syncCoordinator.notifyGalleryDisplayRefresh()
+        viewModelScope.launch {
+            try {
+                syncCoordinator.galleryMetadata.first()
+            } finally {
+                loading.value = false
+            }
         }
-        refresh()
     }
 
     fun clearBrowseFilters() {

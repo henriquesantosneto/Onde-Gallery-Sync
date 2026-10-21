@@ -174,8 +174,20 @@ fun OneGalleryApp(
     val scope = rememberCoroutineScope()
     val app = LocalContext.current.applicationContext as OneGalleryApplication
     val syncTasks = remember { SyncTaskLauncher.from(app) }
-
+    var initialAutoSyncTriggered by rememberSaveable { mutableStateOf(false) }
     val authState by authManager.state.collectAsStateWithLifecycle()
+
+    fun triggerInitialAutoSyncIfReady() {
+        if (initialAutoSyncTriggered || !setupDone) return
+        when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_FOLDER -> if (oneDriveFolderPreferences.treeUri == null) return
+            SyncMode.ONEDRIVE_GRAPH -> if (!authState.isSignedIn) return
+            SyncMode.LOCAL_ONLY -> return
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> Unit
+        }
+        initialAutoSyncTriggered = true
+        syncTasks.runBidirectionalSync(userInitiated = false)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -188,7 +200,7 @@ fun OneGalleryApp(
         val locationOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             results[Manifest.permission.ACCESS_MEDIA_LOCATION] == true
         if (mediaOk && locationOk) {
-            syncTasks.runBidirectionalSync(userInitiated = false)
+            triggerInitialAutoSyncIfReady()
         }
     }
 
@@ -219,16 +231,7 @@ fun OneGalleryApp(
 
     LaunchedEffect(setupDone, syncPreferences.syncMode, authState.isSignedIn) {
         if (!setupDone) return@LaunchedEffect
-        when (syncPreferences.syncMode) {
-            SyncMode.ONEDRIVE_FOLDER -> if (oneDriveFolderPreferences.treeUri != null) {
-                syncTasks.runBidirectionalSync()
-            }
-            SyncMode.ONEDRIVE_LOCAL_MIRROR -> syncTasks.runBidirectionalSync()
-            SyncMode.ONEDRIVE_GRAPH -> if (authState.isSignedIn) {
-                syncTasks.runBidirectionalSync()
-            }
-            SyncMode.LOCAL_ONLY -> Unit
-        }
+        triggerInitialAutoSyncIfReady()
     }
 
     LaunchedEffect(authState.isSignedIn, cloudSetupStep, setupDone) {

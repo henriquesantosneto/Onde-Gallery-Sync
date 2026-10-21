@@ -66,6 +66,7 @@ object BackgroundSyncScheduler {
     ) {
         if (!prefs.backgroundSyncAlwaysEnabled || !prefs.hasCompletedSetup) return
         if (prefs.isAutoSyncPaused()) return
+        if (prefs.shouldDeferBackgroundSyncByTime()) return
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(syncConstraints(prefs))
             .setInitialDelay(delaySeconds, TimeUnit.SECONDS)

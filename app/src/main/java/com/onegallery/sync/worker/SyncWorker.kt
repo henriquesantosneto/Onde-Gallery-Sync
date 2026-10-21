@@ -22,6 +22,9 @@ class SyncWorker(
         if (prefs.isAutoSyncPaused()) {
             return Result.success()
         }
+        if (app.syncCoordinator.shouldDeferAutomaticBidirectionalSync()) {
+            return Result.success()
+        }
         return app.syncCoordinator.runBidirectionalSync(userInitiated = false)
             .fold(
                 onSuccess = { Result.success() },

@@ -250,7 +250,7 @@ class OneDriveRepository(
     private fun shouldRunRecursiveRemoteComplement(unresolvedDeltaSkips: Int): Boolean {
         if (unresolvedDeltaSkips > 0) return true
         val last = graphFolderPreferences.lastFullRemoteListingAtMs
-        if (last <= 0L) return true
+        if (last <= 0L) return false
         return System.currentTimeMillis() - last >= FULL_REMOTE_LISTING_INTERVAL_MS
     }
 

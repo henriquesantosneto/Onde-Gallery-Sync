@@ -135,6 +135,7 @@ class OneGalleryApplication : Application() {
         connectivityManager.registerDefaultNetworkCallback(
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
+                    if (syncPreferences.shouldDeferBackgroundSyncByTime()) return
                     BackgroundSyncScheduler.enqueueSyncSoon(
                         context = this@OneGalleryApplication,
                         prefs = syncPreferences,
@@ -145,7 +146,8 @@ class OneGalleryApplication : Application() {
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                     enforceWifiOnlyDuringSync()
                     if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+                        !syncPreferences.shouldDeferBackgroundSyncByTime()
                     ) {
                         BackgroundSyncScheduler.enqueueSyncSoon(
                             context = this@OneGalleryApplication,
