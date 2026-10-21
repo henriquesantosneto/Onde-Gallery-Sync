@@ -164,10 +164,14 @@ class SyncCoordinator(
     private var albumCoverRevisionJob: Job? = null
     private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
+    private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
 
     init {
         mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
-            notifyGalleryDisplayRefresh()
+            if (bulkThumbnailPrefetchDepth.get() == 0) {
+                notifyGalleryDisplayRefresh()
+            }
             scheduleAlbumCoverRevisionForPath(canonicalPath)
         }
     }
@@ -557,7 +561,15 @@ class SyncCoordinator(
         if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
     }
 
-    private fun upsertActiveSyncItem(item: ActiveSyncItem) {
+    private fun upsertActiveSyncItem(item: ActiveSyncItem, force: Boolean = false) {
+        if (!force) {
+            val now = System.currentTimeMillis()
+            val last = lastActiveItemProgressPostMs[item.canonicalPath] ?: 0L
+            if (item.bytesCompleted > 0L && now - last < ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS) {
+                return
+            }
+            lastActiveItemProgressPostMs[item.canonicalPath] = now
+        }
         synchronized(activeSyncItemsLock) {
             val next = _state.value.activeItems.toMutableList()
             val index = next.indexOfFirst { it.canonicalPath == item.canonicalPath }
@@ -571,6 +583,7 @@ class SyncCoordinator(
     }
 
     private fun removeActiveSyncItem(canonicalPath: String) {
+        lastActiveItemProgressPostMs.remove(canonicalPath)
         synchronized(activeSyncItemsLock) {
             val next = _state.value.activeItems.filter { it.canonicalPath != canonicalPath }
             if (next.size != _state.value.activeItems.size) {
@@ -1299,6 +1312,7 @@ class SyncCoordinator(
                     bytesCompleted = done,
                     totalBytes = total,
                 ),
+                force = done == 0L || (total != null && done >= total),
             )
         }
     }
@@ -2864,50 +2878,73 @@ class SyncCoordinator(
         runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
     }
 
-    /** Todas as miniaturas faltantes (local + nuvem), em levas até esgotar o índice. */
+    /** Miniaturas faltantes em levas; limite por sync para não travar GPS/resto do app. */
     private suspend fun prefetchMissingThumbnails(batchSize: Int = THUMB_PREFETCH_BATCH) {
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
+        bulkThumbnailPrefetchDepth.incrementAndGet()
         var totalCached = 0
         var round = 0
         var consecutiveEmptyBatches = 0
-        val maxRounds = ((pendingAtStart + batchSize - 1) / batchSize) + THUMB_PREFETCH_EXTRA_ROUNDS
-        while (round < maxRounds) {
-            ensureNotCancelled()
-            val remainingNow = countIndexedMissingThumbnails()
-            if (remainingNow == 0) break
-            val rows = buildMissingThumbnailEntities(batchSize)
-            if (rows.isEmpty()) break
-            setRunQueueFromEntities(rows)
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas na galeria…",
-                "${totalCached.coerceAtLeast(0)} de ~$pendingAtStart · " +
-                    "$remainingNow pendente(s) · leva ${round + 1}.",
-                alsoUpdateLastMessage = false,
-            )
-            val batchCached = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
-            totalCached += batchCached
-            round++
-            if (batchCached == 0) {
-                consecutiveEmptyBatches++
-                if (consecutiveEmptyBatches >= 5) break
-            } else {
-                consecutiveEmptyBatches = 0
+        var remainingEstimate = pendingAtStart
+        val maxRounds = minOf(
+            THUMB_PREFETCH_MAX_ROUNDS,
+            ((pendingAtStart + batchSize - 1) / batchSize) + THUMB_PREFETCH_EXTRA_ROUNDS,
+        )
+        var stoppedByCap = false
+        try {
+            while (round < maxRounds) {
+                ensureNotCancelled()
+                if (totalCached >= THUMB_PREFETCH_MAX_TOTAL_PER_SYNC) {
+                    stoppedByCap = true
+                    break
+                }
+                if (round == 0 || round % 4 == 0) {
+                    remainingEstimate = countIndexedMissingThumbnails()
+                }
+                if (remainingEstimate == 0) break
+                val rows = buildMissingThumbnailEntities(batchSize)
+                if (rows.isEmpty()) break
+                setRunQueueFromEntities(rows)
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Miniaturas na galeria…",
+                    "${totalCached.coerceAtLeast(0)} de ~$pendingAtStart · " +
+                        "~$remainingEstimate pendente(s) · leva ${round + 1}/$maxRounds.",
+                    alsoUpdateLastMessage = false,
+                )
+                val batchCached = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
+                totalCached += batchCached
+                remainingEstimate = (remainingEstimate - batchCached).coerceAtLeast(0)
+                round++
+                if (batchCached == 0) {
+                    consecutiveEmptyBatches++
+                    if (consecutiveEmptyBatches >= 5) break
+                } else {
+                    consecutiveEmptyBatches = 0
+                }
             }
+            val remaining = countIndexedMissingThumbnails()
+            if (totalCached > 0 || remaining > 0 || stoppedByCap) {
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Miniaturas",
+                    when {
+                        remaining == 0 -> "$totalCached gerada(s)/baixada(s); índice completo."
+                        stoppedByCap ->
+                            "$totalCached nesta sync · ~$remaining ainda pendentes " +
+                                "(limite por passagem — sincronize de novo para continuar)."
+                        else -> "$totalCached nesta sync · $remaining ainda sem miniatura (falha ou cancelamento)."
+                    },
+                )
+            }
+            flushPendingAlbumCoverRevisions()
+            if (totalCached > 0) {
+                notifyGalleryDisplayRefresh()
+            }
+        } finally {
+            bulkThumbnailPrefetchDepth.decrementAndGet()
         }
-        val remaining = countIndexedMissingThumbnails()
-        if (totalCached > 0 || remaining > 0) {
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas",
-                when {
-                    remaining == 0 -> "$totalCached gerada(s)/baixada(s); índice completo."
-                    else -> "$totalCached nesta sync · $remaining ainda sem miniatura (falha ou cancelamento)."
-                },
-            )
-        }
-        flushPendingAlbumCoverRevisions()
     }
 
     private suspend fun runMissingThumbnailPrefetch(
@@ -2932,6 +2969,7 @@ class SyncCoordinator(
                                 displayName = row.displayName,
                                 operationLabel = thumbnailOperationLabel(row),
                             ),
+                            force = true,
                         )
                         val hit = ensureThumbnailCached(
                             row.canonicalPath,
@@ -3408,7 +3446,10 @@ class SyncCoordinator(
         const val THUMB_CACHE_JPEG_QUALITY = 88
         /** Itens por leva no pós-sync (miniaturas locais + download na nuvem). */
         const val THUMB_PREFETCH_BATCH = 512
-        const val THUMB_PREFETCH_EXTRA_ROUNDS = 64
+        const val THUMB_PREFETCH_EXTRA_ROUNDS = 8
+        const val THUMB_PREFETCH_MAX_ROUNDS = 36
+        const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 2_500
+        const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GPS_BACKFILL_ROUNDS = 8
         const val GPS_LOCAL_BATCH = 500
