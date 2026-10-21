@@ -386,7 +386,6 @@ fun GalleryScreen(
             },
             onContinueWithSystemPrompt = {
                 showAllFilesForRelease = false
-                viewModel.releaseLocalSpaceSelected()
             },
         )
     }

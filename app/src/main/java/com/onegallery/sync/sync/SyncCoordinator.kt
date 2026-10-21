@@ -1881,6 +1881,9 @@ class SyncCoordinator(
     suspend fun releaseLocalSpace(canonicalPaths: List<String>): Result<Int> {
         if (canonicalPaths.isEmpty()) return Result.success(0)
         return runCatching {
+            if (!canRemoveLocalCopiesWithoutPrompt()) {
+                error(localSpaceReleaseFailureMessage())
+            }
             val rows = canonicalPaths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
             val withoutCloud = rows.filter { it.oneDriveItemId == null }
             if (withoutCloud.isNotEmpty()) {
@@ -1889,7 +1892,10 @@ class SyncCoordinator(
                         "Sincronize antes ou escolha outro item.",
                 )
             }
-            val freed = releaseLocalSpaceForRows(rows, allowSystemDialog = true)
+            val freed = releaseLocalSpaceForRows(
+                rows,
+                allowSystemDialog = allowSystemDeleteDialogForLocalRemoval(),
+            )
             if (rows.isNotEmpty() && freed == 0) {
                 error(localSpaceReleaseFailureMessage())
             }
@@ -1904,7 +1910,8 @@ class SyncCoordinator(
         ) {
             return
         }
-        val allowDialog = appForegroundState.isInForeground()
+        val allowDialog = appForegroundState.isInForeground() &&
+            allowSystemDeleteDialogForLocalRemoval()
         if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
             autoReleaseSyncedLocalCopies(allowSystemDialog = allowDialog)
         }
@@ -1972,15 +1979,23 @@ class SyncCoordinator(
         return System.currentTimeMillis() - lastAccess >= idleMs
     }
 
+    private fun canRemoveLocalCopiesWithoutPrompt(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+            MediaStorageAccess.hasAllFilesAccess(appContext)
+    }
+
+    /** Liberar espaço não usa diálogo do Android — só acesso amplo ou remoção silenciosa. */
+    private fun allowSystemDeleteDialogForLocalRemoval(): Boolean {
+        return canRemoveLocalCopiesWithoutPrompt()
+    }
+
     private fun localSpaceReleaseFailureMessage(): String {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            !MediaStorageAccess.hasAllFilesAccess(appContext)
-        ) {
-            "Para liberar espaço no aparelho, em Ajustes → Espaço local toque Conceder em " +
-                "“Remover cópias no aparelho” e ative o acesso a todos os arquivos."
+        return if (!canRemoveLocalCopiesWithoutPrompt()) {
+            "Para liberar espaço: Ajustes → Remover cópias no aparelho → Conceder " +
+                "(acesso a todos os arquivos)."
         } else {
-            "Não foi possível remover a cópia local. Tente de novo com o app aberto ou confirme " +
-                "no diálogo do Android, se aparecer."
+            "Não foi possível remover a cópia local. Tente de novo ou verifique se o arquivo " +
+                "ainda está na galeria do aparelho."
         }
     }
 

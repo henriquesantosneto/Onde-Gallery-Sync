@@ -659,18 +659,8 @@ fun MediaDetailScreen(
             },
             onContinueWithSystemPrompt = {
                 showAllFilesForRelease = false
-                val paths = pendingReleasePaths
-                val onDone = pendingReleaseOnDone
                 pendingReleasePaths = emptyList()
                 pendingReleaseOnDone = null
-                markSuppressAutoRecall(paths)
-                if (paths.size == 1 && onDone != null) {
-                    viewModel.releaseSingle(paths.single(), onDone)
-                } else if (paths.size == 1) {
-                    viewModel.releaseSingle(paths.single())
-                } else {
-                    viewModel.releaseLocalSpaceSelected()
-                }
             },
         )
     }

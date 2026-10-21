@@ -144,8 +144,8 @@ fun SettingsScreen(
             text = {
                 Text(
                     "As opções “Após backup” e “Por inatividade” removem cópias na galeria do " +
-                        "Android. No Android 11+, isso só funciona de forma confiável com " +
-                        "“Acesso a todos os arquivos”. Toque Conceder e ative para este app.",
+                        "aparelho. No Android 11+, ative “Acesso a todos os arquivos” uma vez " +
+                        "(Remover cópias no aparelho → Conceder).",
                 )
             },
             confirmButton = {

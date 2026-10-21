@@ -105,7 +105,6 @@ enum class LocalMediaRemovalPrompt {
     RELEASE_SPACE,
 }
 
-/** Android 11+: sem “acesso a todos os arquivos”, o SO abre diálogo a cada lote. */
 @Composable
 fun AllFilesAccessForLocalRemovalDialog(
     count: Int,
@@ -114,22 +113,35 @@ fun AllFilesAccessForLocalRemovalDialog(
     onOpenSettings: () -> Unit,
     onContinueWithSystemPrompt: () -> Unit,
 ) {
+    val releaseSpace = purpose == LocalMediaRemovalPrompt.RELEASE_SPACE
     val actionLabel = when (purpose) {
         LocalMediaRemovalPrompt.DELETE -> "exclusão"
         LocalMediaRemovalPrompt.RELEASE_SPACE -> "liberação de espaço"
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Permissão para remover cópias no aparelho") },
+        title = {
+            Text(
+                if (releaseSpace) {
+                    "Conceda acesso para liberar espaço"
+                } else {
+                    "Permissão para excluir no aparelho"
+                },
+            )
+        },
         text = {
             Column {
                 Text(
-                    "No Android 11+, liberar espaço e excluir fotos no aparelho exigem " +
-                        "“Acesso a todos os arquivos” uma única vez. Sem isso, o Android pode " +
-                        "não mostrar nenhum diálogo e a operação falha.",
+                    if (releaseSpace) {
+                        "No Android 11+, liberar espaço só funciona depois de conceder " +
+                            "“Acesso a todos os arquivos” uma vez para o One Gallery Sync."
+                    } else {
+                        "No Android 11+, excluir fotos no aparelho exige “Acesso a todos os arquivos” " +
+                            "uma vez, ou o diálogo de confirmação do Android a cada lote."
+                    },
                 )
                 Text(
-                    "Toque Conceder acesso, ative para o One Gallery Sync e volte ao app — " +
+                    "Toque Conceder acesso, ative para este app e volte — " +
                         "a $actionLabel de $count item(ns) continua automaticamente.",
                     modifier = Modifier.padding(top = 12.dp),
                     style = MaterialTheme.typography.bodySmall,
@@ -141,7 +153,11 @@ fun AllFilesAccessForLocalRemovalDialog(
             TextButton(onClick = onOpenSettings) { Text("Conceder acesso") }
         },
         dismissButton = {
-            TextButton(onClick = onContinueWithSystemPrompt) { Text("Tentar diálogo do Android") }
+            TextButton(
+                onClick = if (releaseSpace) onDismiss else onContinueWithSystemPrompt,
+            ) {
+                Text(if (releaseSpace) "Cancelar" else "Usar diálogo do Android")
+            }
         },
     )
 }
