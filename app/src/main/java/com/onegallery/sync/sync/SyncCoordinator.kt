@@ -3456,7 +3456,7 @@ class SyncCoordinator(
         const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 3
         /** Downloads Graph / decode local em paralelo por leva. */
-        const val PARALLEL_THUMBNAILS = 8
+        const val PARALLEL_THUMBNAILS = 3
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L
     }
