@@ -70,6 +70,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- WorkManager [setForeground] no SyncWorker (targetSdk 34+ exige o tipo). -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
         <receiver
             android:name=".sync.BootCompletedReceiver"
             android:exported="false">

@@ -22,14 +22,18 @@ class SyncWorker(
             return Result.success()
         }
         val userInitiated = inputData.getBoolean(KEY_USER_INITIATED, false)
-        setForeground(
-            SyncForegroundNotifications.foregroundInfo(
-                applicationContext,
-                applicationContext.getString(R.string.sync_notification_message),
-            ),
-        )
         app.syncCoordinator.setWorkerForegroundSession(true)
         return try {
+            runCatching {
+                setForeground(
+                    SyncForegroundNotifications.foregroundInfo(
+                        applicationContext,
+                        applicationContext.getString(R.string.sync_notification_message),
+                    ),
+                )
+            }.onFailure { error ->
+                android.util.Log.e("SyncWorker", "setForeground failed; sync may stop if minimized", error)
+            }
             withContext(NonCancellable) {
                 doWorkBody(app, userInitiated)
             }

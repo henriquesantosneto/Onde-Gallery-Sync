@@ -5,6 +5,7 @@ import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import android.os.Build
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -99,7 +100,7 @@ object BackgroundSyncScheduler {
         val builder = OneTimeWorkRequestBuilder<SyncWorker>()
             .setInputData(SyncWorker.input(userInitiated))
             .setConstraints(syncConstraints(prefs))
-        if (userInitiated) {
+        if (userInitiated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         }
         if (delaySeconds > 0L) {
