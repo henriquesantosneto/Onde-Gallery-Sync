@@ -1,6 +1,7 @@
 package com.onegallery.sync.sync
 
 import android.content.Context
+import com.onegallery.sync.data.cloud.CloudProvider
 
 class SyncPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("onegallery_sync", Context.MODE_PRIVATE)
@@ -51,6 +52,13 @@ class SyncPreferences(context: Context) {
     var syncMode: SyncMode
         get() = SyncMode.valueOf(prefs.getString(KEY_SYNC_MODE, SyncMode.LOCAL_ONLY.name)!!)
         set(value) = prefs.edit().putString(KEY_SYNC_MODE, value.name).apply()
+
+    /** Provedor API (Graph): OneDrive ou Dropbox futuro. Modos SAF/espelho ignoram. */
+    var cloudProvider: CloudProvider
+        get() = CloudProvider.valueOf(
+            prefs.getString(KEY_CLOUD_PROVIDER, CloudProvider.ONEDRIVE.name)!!,
+        )
+        set(value) = prefs.edit().putString(KEY_CLOUD_PROVIDER, value.name).apply()
 
     /** Se a mídia sumir do aparelho, apaga também no OneDrive (sem pedir confirmação). */
     var autoDeleteRemoteWhenLocalRemoved: Boolean
@@ -128,6 +136,7 @@ class SyncPreferences(context: Context) {
         private const val KEY_BACKGROUND_SYNC_ALWAYS = "background_sync_always"
         private const val KEY_SETUP_DONE = "setup_done"
         private const val KEY_SYNC_MODE = "sync_mode"
+        private const val KEY_CLOUD_PROVIDER = "cloud_provider"
         private const val KEY_LAST_VERSION = "last_version_code"
         private const val KEY_AUTO_DELETE_REMOTE = "auto_delete_remote"
         private const val KEY_AUTO_FREE_LOCAL = "auto_free_local"

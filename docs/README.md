@@ -21,6 +21,7 @@
 | [SYNC_PIPELINE.md](SYNC_PIPELINE.md) | Fases do sync bidirecional, reconciliação, fila, pós-sync |
 | [BACKGROUND_AND_TRIGGERS.md](BACKGROUND_AND_TRIGGERS.md) | WorkManager, boot, MediaStore, rede, foreground service |
 | [ONEDRIVE_INTEGRATION.md](ONEDRIVE_INTEGRATION.md) | Modos `SyncMode`, Graph, SAF, espelho local, listagem delta |
+| [MULTICLOUD.md](MULTICLOUD.md) | Plano multicloud (OneDrive **ou** Dropbox), Fase 1 `CloudSyncBackend` |
 | [DATA_AND_INDEX.md](DATA_AND_INDEX.md) | Room, `sync_metadata`, caminhos canônicos, estados na nuvem |
 | [GALLERY_AND_ALBUMS.md](GALLERY_AND_ALBUMS.md) | UI da galeria, visibilidade, álbuns, lugares, mapa |
 | [THUMBNAILS_CACHE_AND_DOWNLOADS.md](THUMBNAILS_CACHE_AND_DOWNLOADS.md) | Miniaturas, cache, originais sob demanda, limites |

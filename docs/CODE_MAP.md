@@ -55,6 +55,18 @@ Caminhos relativos à raiz do repo: `app/src/main/java/com/onegallery/sync/`.
 | Permissões | `data/local/MediaAccessPermissions.kt` |
 | Lugares | `data/local/PlaceComponents.kt`, `PlaceMatchKey.kt` |
 
+## Multicloud (Fase 1)
+
+| Responsabilidade | Arquivo |
+|------------------|---------|
+| Contrato API nuvem | `data/cloud/CloudSyncBackend.kt` |
+| Ficheiro remoto neutro | `data/cloud/RemoteCloudFile.kt` |
+| Adapter OneDrive Graph | `data/cloud/OneDriveGraphCloudBackend.kt` |
+| Registry (provedor ativo) | `data/cloud/CloudSyncBackendRegistry.kt` |
+| Stub Dropbox | `data/cloud/DropboxCloudBackendStub.kt` |
+
+Ver [MULTICLOUD.md](../docs/MULTICLOUD.md).
+
 ## OneDrive / Graph
 
 | Responsabilidade | Arquivo |

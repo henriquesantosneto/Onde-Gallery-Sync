@@ -19,6 +19,9 @@ import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
 import org.maplibre.android.MapLibre
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
+import com.onegallery.sync.data.cloud.CloudSyncBackendRegistry
+import com.onegallery.sync.data.cloud.DropboxCloudBackendStub
+import com.onegallery.sync.data.cloud.OneDriveGraphCloudBackend
 import com.onegallery.sync.data.onedrive.GraphFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveFolderPreferences
 import com.onegallery.sync.data.onedrive.OneDriveRepository
@@ -120,6 +123,11 @@ class OneGalleryApplication : Application() {
         mediaCacheRepository = MediaCacheRepository(this)
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
+        val cloudSyncBackendRegistry = CloudSyncBackendRegistry(
+            oneDriveGraph = OneDriveGraphCloudBackend(oneDriveRepository),
+            dropboxStub = DropboxCloudBackendStub(),
+            syncPreferences = syncPreferences,
+        )
         syncCoordinator = SyncCoordinator(
             appContext = applicationContext,
             localMediaRepository = localMediaRepository,
@@ -133,6 +141,7 @@ class OneGalleryApplication : Application() {
             mediaCaptureTimeResolver = mediaCaptureTimeResolver,
             networkMonitor = NetworkMonitor(this),
             syncPreferences = syncPreferences,
+            cloudSyncBackendRegistry = cloudSyncBackendRegistry,
             mediaDeleteRequestRouter = mediaDeleteRequestRouter,
             appForegroundState = appForegroundState,
             backgroundScope = applicationScope,

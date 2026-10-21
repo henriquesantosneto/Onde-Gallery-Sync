@@ -19,6 +19,9 @@ import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.ui.gallery.AlbumCoverBucketKeys
 import com.onegallery.sync.ui.gallery.AlbumCoverThumbnailPlanner
 import com.onegallery.sync.ui.gallery.GalleryMapper
+import com.onegallery.sync.data.cloud.CloudSyncBackendRegistry
+import com.onegallery.sync.data.cloud.toRemoteCloudFile
+import com.onegallery.sync.data.cloud.toRemoteDriveFile
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.MediaDeleteResult
 import com.onegallery.sync.data.local.MediaStorageAccess
@@ -103,6 +106,7 @@ class SyncCoordinator(
     private val mediaCaptureTimeResolver: MediaCaptureTimeResolver,
     private val networkMonitor: NetworkMonitor,
     private val syncPreferences: SyncPreferences,
+    private val cloudSyncBackendRegistry: CloudSyncBackendRegistry,
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
     private val appForegroundState: AppForegroundState,
     private val backgroundScope: CoroutineScope? = null,
@@ -3427,10 +3431,13 @@ class SyncCoordinator(
                 RemoteListingSnapshot(files = files, incremental = false, changedCount = files.size)
             }
             SyncMode.ONEDRIVE_GRAPH -> {
+                val backend = cloudSyncBackendRegistry.activeApiBackend()
+                    ?: return Result.failure(IllegalStateException("Backend de nuvem indisponível"))
                 val baseline = remoteBaselineFromIndex(syncMetadataDao.getAll())
-                oneDriveRepository.listMirrorFiles(baseline).map { listing ->
+                    .map { it.toRemoteCloudFile() }
+                backend.listRemoteFiles(baseline).map { listing ->
                     RemoteListingSnapshot(
-                        files = listing.files,
+                        files = listing.files.map { it.toRemoteDriveFile() },
                         incremental = listing.incremental,
                         changedCount = listing.deltaChangeCount,
                         unresolvedDeltaSkips = listing.unresolvedDeltaSkips,
@@ -3475,13 +3482,10 @@ class SyncCoordinator(
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.uploadLocalFile(canonicalPath, sourceFile, mimeType)
-            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.uploadLocalFile(
-                canonicalPath,
-                sourceFile,
-                mimeType,
-                onProgress,
-            ).map { item ->
-                item.id ?: error("Upload concluído sem id do OneDrive")
+            SyncMode.ONEDRIVE_GRAPH -> {
+                val backend = cloudSyncBackendRegistry.activeApiBackend()
+                    ?: return Result.failure(IllegalStateException("Backend de nuvem indisponível"))
+                backend.uploadLocalFile(canonicalPath, sourceFile, mimeType, onProgress)
             }
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
         }
@@ -3521,10 +3525,14 @@ class SyncCoordinator(
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.downloadToFile(remoteId, target)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.downloadToFile(remoteId, target)
-            SyncMode.ONEDRIVE_GRAPH -> if (useSimpleStreamDownload) {
-                oneDriveRepository.downloadItemContentToFile(remoteId, target)
-            } else {
-                oneDriveRepository.downloadToFile(remoteId, target, onProgress)
+            SyncMode.ONEDRIVE_GRAPH -> {
+                val backend = cloudSyncBackendRegistry.activeApiBackend()
+                    ?: return Result.failure(IllegalStateException("Backend de nuvem indisponível"))
+                if (useSimpleStreamDownload) {
+                    backend.downloadItemContentToFile(remoteId, target)
+                } else {
+                    backend.downloadToFile(remoteId, target, onProgress)
+                }
             }
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
         }
@@ -3534,7 +3542,11 @@ class SyncCoordinator(
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.deleteRemote(remoteId)
             SyncMode.ONEDRIVE_FOLDER -> saOneDriveRepository.deleteRemote(remoteId)
-            SyncMode.ONEDRIVE_GRAPH -> oneDriveRepository.deleteRemoteItem(remoteId)
+            SyncMode.ONEDRIVE_GRAPH -> {
+                val backend = cloudSyncBackendRegistry.activeApiBackend()
+                    ?: return Result.failure(IllegalStateException("Backend de nuvem indisponível"))
+                backend.deleteRemoteItem(remoteId)
+            }
             SyncMode.LOCAL_ONLY -> Result.success(Unit)
         }
     }
