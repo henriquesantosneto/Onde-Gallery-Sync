@@ -1746,6 +1746,7 @@ class SyncCoordinator(
                 kind = kind,
                 sourceFile = sourceFile,
                 takenAtEpochSeconds = captureSeconds,
+                storedGalleryFolder = row.localGalleryRelativePath,
             ).getOrElse { error ->
                 return Result.failure(
                     error.takeUnless { it is CancellationException }
@@ -1756,6 +1757,7 @@ class SyncCoordinator(
             updated = updated.copy(
                 localMediaId = imported.id,
                 localContentUri = imported.uri.toString(),
+                localGalleryRelativePath = imported.relativePath ?: row.localGalleryRelativePath,
                 localModifiedAt = stableModified,
                 capturedAtSeconds = captureSeconds ?: row.capturedAtSeconds,
                 localReleasedForSpace = false,
@@ -2791,6 +2793,8 @@ class SyncCoordinator(
             userAlbumName = existing?.userAlbumName,
             localMediaId = item.id,
             localContentUri = item.uri.toString(),
+            localGalleryRelativePath = item.relativePath?.takeIf { it.isNotBlank() }
+                ?: existing?.localGalleryRelativePath,
             localReleasedForSpace = false,
             localLastAccessedAtMs = existing?.localLastAccessedAtMs,
             oneDriveItemId = existing?.oneDriveItemId,

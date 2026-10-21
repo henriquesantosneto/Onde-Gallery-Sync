@@ -6,6 +6,10 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 object SyncPaths {
+    /** Raiz MediaStore usada pelo WhatsApp (Android 10+). */
+    private const val WHATSAPP_MEDIA_STORE_ROOT =
+        "Android/media/com.whatsapp/WhatsApp/Media"
+
     /** Pastas conhecidas do WhatsApp (Android/media/.../Media/…). Ficam na raiz do espelho OneGallerySync. */
     private val whatsAppMediaLeafFolders = listOf(
         "WhatsApp Images",
@@ -91,16 +95,74 @@ object SyncPaths {
     }
 
     /**
+     * Pasta de destino na galeria do Android ao importar/recall.
+     * Prioriza [storedGalleryFolder] (caminho real visto no MediaStore) para coexistir com álbuns nativos.
+     */
+    fun mediaStoreRelativePathForImport(
+        canonicalPath: String,
+        kind: MediaKind,
+        storedGalleryFolder: String? = null,
+    ): String {
+        storedGalleryFolder?.trim()?.takeIf { it.isNotBlank() }?.let { stored ->
+            return normalizeMediaStoreFolder(stored, kind)
+        }
+        canonicalDefaultGalleryFolder(canonicalPath)?.let { return it }
+        return mediaStoreFolderFromAlbumName(albumFromCanonical(canonicalPath), kind)
+    }
+
+    /** Heurística quando só temos o caminho canônico (ex.: item só na nuvem, WhatsApp encurtado). */
+    internal fun canonicalDefaultGalleryFolder(canonicalPath: String): String? {
+        val album = albumFromCanonical(canonicalPath).trim('/').replace('\\', '/')
+        if (album.isBlank() || album.equals("Raiz", ignoreCase = true)) {
+            return null
+        }
+
+        whatsAppMediaLeafFolders.firstOrNull { leaf ->
+            album.equals(leaf, ignoreCase = true) ||
+                album.startsWith("$leaf/", ignoreCase = true)
+        }?.let { leaf ->
+            val suffix = album.removePrefix(leaf).trim('/')
+            val base = "$WHATSAPP_MEDIA_STORE_ROOT/$leaf"
+            return if (suffix.isBlank()) "$base/" else "$base/$suffix/"
+        }
+
+        if (album.startsWith("WhatsApp/", ignoreCase = true)) {
+            val tail = album.removePrefix("WhatsApp/").trim('/')
+            return when {
+                tail.isBlank() -> "Pictures/WhatsApp/"
+                else -> "Pictures/WhatsApp/$tail/"
+            }
+        }
+
+        return null
+    }
+
+    internal fun normalizeMediaStoreFolder(raw: String, kind: MediaKind): String {
+        var folder = raw.trim().replace('\\', '/').trim('/')
+        if (folder.isBlank()) {
+            return defaultOneGallerySyncFolder(kind)
+        }
+        val lastSegment = folder.substringAfterLast('/')
+        if (lastSegment.contains('.') && !lastSegment.equals("Sent", ignoreCase = true)) {
+            folder = folder.substringBeforeLast('/').trim('/')
+        }
+        if (folder.isBlank()) {
+            return defaultOneGallerySyncFolder(kind)
+        }
+        if (folder.startsWith("Android/media/", ignoreCase = true)) {
+            return "$folder/"
+        }
+        return mediaStoreFolderFromAlbumName(folder, kind)
+    }
+
+    /**
      * Caminho válido para [MediaStore.MediaColumns.RELATIVE_PATH] (Android 10+).
      * Pastas como "Imagens" (PT) não são raiz permitida — só DCIM/Pictures (fotos) ou DCIM/Movies/Pictures (vídeos).
      */
-    fun mediaStoreRelativePathForImport(canonicalPath: String, kind: MediaKind): String {
-        val folder = albumFromCanonical(canonicalPath).trim('/').replace('\\', '/')
+    private fun mediaStoreFolderFromAlbumName(albumFolder: String, kind: MediaKind): String {
+        val folder = albumFolder.trim('/').replace('\\', '/')
         if (folder.isBlank() || folder.equals("Raiz", ignoreCase = true)) {
-            return when (kind) {
-                MediaKind.VIDEO -> "Movies/OneGallerySync/"
-                MediaKind.IMAGE -> "Pictures/OneGallerySync/"
-            }
+            return defaultOneGallerySyncFolder(kind)
         }
         val allowedImagePrimaries = setOf("DCIM", "Pictures")
         val allowedVideoPrimaries = setOf("DCIM", "Movies", "Pictures")
@@ -110,10 +172,7 @@ object SyncPaths {
         }
         val segments = folder.split('/').filter { it.isNotBlank() }
         if (segments.isEmpty()) {
-            return when (kind) {
-                MediaKind.VIDEO -> "Movies/OneGallerySync/"
-                MediaKind.IMAGE -> "Pictures/OneGallerySync/"
-            }
+            return defaultOneGallerySyncFolder(kind)
         }
         val primary = segments.first()
         val tail = segments.drop(1)
@@ -132,6 +191,13 @@ object SyncPaths {
                 MediaKind.IMAGE -> "Pictures"
             }
             (listOf(root) + segments).joinToString("/") + "/"
+        }
+    }
+
+    private fun defaultOneGallerySyncFolder(kind: MediaKind): String {
+        return when (kind) {
+            MediaKind.VIDEO -> "Movies/OneGallerySync/"
+            MediaKind.IMAGE -> "Pictures/OneGallerySync/"
         }
     }
 

@@ -42,6 +42,12 @@ data class SyncMetadataEntity(
     val longitude: Double? = null,
     /** Duração do vídeo (MediaStore), em milissegundos. */
     val videoDurationMs: Long? = null,
+    /**
+     * Pasta original na galeria do Android ([MediaStore.MediaColumns.RELATIVE_PATH]), ex.:
+     * `DCIM/Camera/`, `Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/`.
+     * Preservada após “liberar espaço” para recall na mesma pasta da galeria nativa.
+     */
+    val localGalleryRelativePath: String? = null,
     /** Liberar espaço: cópia local removida de propósito; não espelhar como exclusão na nuvem. */
     val localReleasedForSpace: Boolean = false,
     /** Última visualização no app (epoch ms) — liberação automática por dias sem acesso. */

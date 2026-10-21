@@ -112,13 +112,19 @@ class LocalMediaRepository(private val context: Context) {
         kind: MediaKind,
         sourceFile: java.io.File,
         takenAtEpochSeconds: Long? = null,
+        /** Pasta real da galeria (MediaStore), se conhecida — ex. após liberar espaço. */
+        storedGalleryFolder: String? = null,
     ): Result<LocalMediaItem> = withContext(Dispatchers.IO) {
         if (!sourceFile.isFile || sourceFile.length() <= 0L) {
             return@withContext Result.failure(IllegalArgumentException("Arquivo inválido para importar."))
         }
         val collection = mediaCollectionUri(kind)
         val folder = SyncPaths.albumFromCanonical(canonicalPath)
-        val relativePath = SyncPaths.mediaStoreRelativePathForImport(canonicalPath, kind)
+        val relativePath = SyncPaths.mediaStoreRelativePathForImport(
+            canonicalPath,
+            kind,
+            storedGalleryFolder,
+        )
         val mime = guessMimeType(displayName, kind)
         val takenSec = takenAtEpochSeconds?.takeIf { it > 0L }
         val values = ContentValues().apply {
