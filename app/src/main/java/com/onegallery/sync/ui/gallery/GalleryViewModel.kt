@@ -369,7 +369,7 @@ class GalleryViewModel(
         ordered
             .asSequence()
             .filter { itemNeedsGeneratedThumbnail(it) }
-            .take(28)
+            .take(48)
             .forEach { paths.add(it.canonicalPath) }
         paths.forEach { path ->
             syncCoordinator.ensureThumbnailCached(path)

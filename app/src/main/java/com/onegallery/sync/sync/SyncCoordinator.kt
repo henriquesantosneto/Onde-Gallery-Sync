@@ -2776,7 +2776,7 @@ class SyncCoordinator(
             if (!longTaskMutex.tryLock()) return@launch
             try {
                 if (syncCancelRequested.get()) return@launch
-                val rows = buildMissingThumbnailEntities(maxPerRun = 96)
+                val rows = buildMissingThumbnailEntities(maxPerRun = THUMB_PREFETCH_BATCH)
                 val cached = runMissingThumbnailPrefetch(rows, honorSyncCancel = false)
                 if (cached > 0) {
                     val prefix = _state.value.lastMessage.substringBefore("\n")
@@ -2818,7 +2818,7 @@ class SyncCoordinator(
         var totalCached = 0
         var round = 0
         var consecutiveEmptyBatches = 0
-        val maxRounds = ((pendingAtStart + batchSize - 1) / batchSize) + 32
+        val maxRounds = ((pendingAtStart + batchSize - 1) / batchSize) + THUMB_PREFETCH_EXTRA_ROUNDS
         while (round < maxRounds) {
             ensureNotCancelled()
             val remainingNow = countIndexedMissingThumbnails()
@@ -2884,7 +2884,7 @@ class SyncCoordinator(
                         if (hit) cachedCount.incrementAndGet()
                         val done = completed.incrementAndGet()
                         if (_state.value.isRunning &&
-                            (done == rows.size || done % 8 == 0)
+                            (done == rows.size || done % 16 == 0)
                         ) {
                             setSyncProgress(
                                 SyncProgressPhase.PREFETCH_THUMBNAILS,
@@ -3350,13 +3350,16 @@ class SyncCoordinator(
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
         const val THUMB_CACHE_MAX_SIDE_PX = 1280
         const val THUMB_CACHE_JPEG_QUALITY = 88
-        const val THUMB_PREFETCH_BATCH = 280
+        /** Itens por leva no pós-sync (miniaturas locais + download na nuvem). */
+        const val THUMB_PREFETCH_BATCH = 512
+        const val THUMB_PREFETCH_EXTRA_ROUNDS = 64
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GPS_BACKFILL_ROUNDS = 8
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 3
-        const val PARALLEL_THUMBNAILS = 3
+        /** Downloads Graph / decode local em paralelo por leva. */
+        const val PARALLEL_THUMBNAILS = 8
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L
     }
