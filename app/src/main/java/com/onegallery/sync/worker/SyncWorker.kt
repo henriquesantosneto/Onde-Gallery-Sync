@@ -18,6 +18,10 @@ class SyncWorker(
             return Result.success()
         }
         val userInitiated = inputData.getBoolean(KEY_USER_INITIATED, false)
+        if (!userInitiated && app.syncCoordinator.state.value.isRunning) {
+            runAutoReleaseOnly(app)
+            return Result.success()
+        }
         if (!userInitiated && !prefs.backgroundSyncAlwaysEnabled) {
             runAutoReleaseOnly(app)
             return Result.success()

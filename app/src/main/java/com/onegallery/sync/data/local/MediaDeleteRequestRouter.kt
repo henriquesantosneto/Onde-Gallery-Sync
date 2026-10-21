@@ -57,6 +57,14 @@ class MediaDeleteRequestRouter {
         return uris.filter { uri -> isRemovedOrAbsent(context, uri) }.toSet()
     }
 
+    /** Segundo plano com MANAGE_EXTERNAL_STORAGE — sem diálogo do MediaStore. */
+    fun deleteWithAllFilesAccessIfGranted(context: Context, uris: List<Uri>): Set<Uri> {
+        if (!MediaStorageAccess.hasAllFilesAccess(context)) return emptySet()
+        if (uris.isEmpty()) return emptySet()
+        deleteWithAllFilesAccess(context, uris.distinct())
+        return uris.filter { !uriExists(context, it) }.toSet()
+    }
+
     suspend fun requestDelete(context: Context, uris: List<Uri>): MediaDeleteResult {
         return deleteMutex.withLock {
             requestDeleteLocked(context, uris.distinct())

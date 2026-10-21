@@ -415,10 +415,17 @@ class SyncCoordinator(
     suspend fun shouldDeferAutomaticBidirectionalSync(): Boolean {
         if (syncPreferences.isAutoSyncPaused()) return true
         if (syncPreferences.isMediaLibraryWatchSuppressed()) return true
-        if (syncMetadataDao.countPendingOperations() > 0) return false
+        if (_state.value.isRunning) return true
         val last = syncPreferences.lastBidirectionalSyncCompletedAtMs
         if (last <= 0L) return false
-        return System.currentTimeMillis() - last < SyncPreferences.AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS
+        val elapsed = System.currentTimeMillis() - last
+        if (elapsed >= SyncPreferences.AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS) return false
+        if (elapsed >= SyncPreferences.AUTO_BIDIRECTIONAL_UPLOAD_RETRY_MS &&
+            syncMetadataDao.countPendingUploadOperations() > 0
+        ) {
+            return false
+        }
+        return true
     }
 
     private fun isUserCancellation(): Boolean =
@@ -1343,7 +1350,6 @@ class SyncCoordinator(
                         lastMessage = coreSyncMessage,
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
-                    syncPreferences.lastBidirectionalSyncCompletedAtMs = System.currentTimeMillis()
                     if (freedLocal > 0) {
                         syncPreferences.extendMediaLibraryWatchSuppression(
                             SyncPreferences.MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS,
@@ -2070,24 +2076,31 @@ class SyncCoordinator(
     }
 
     /** Chamado pelo [com.onegallery.sync.worker.SyncWorker] — não pelo ciclo de vida da UI. */
-    suspend fun runAutoReleaseIfNeeded() {
-        if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return
+    suspend fun runAutoReleaseIfNeeded(): Int {
+        if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
         if (!syncPreferences.autoFreeLocalSpaceWhenSynced &&
             !syncPreferences.autoFreeLocalSpaceWhenIdle
         ) {
-            return
+            return 0
         }
         val allowDialog = appForegroundState.isInForeground() &&
             allowSystemDeleteDialogForLocalRemoval()
+        var freed = 0
         if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-            autoReleaseSyncedLocalCopies(
+            freed += autoReleaseSyncedLocalCopies(
                 allowSystemDialog = allowDialog,
                 scope = AutoReleaseSyncedScope.ALL_ELIGIBLE,
             )
         }
         if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
-            autoReleaseIdleLocalCopies(allowSystemDialog = allowDialog)
+            freed += autoReleaseIdleLocalCopies(allowSystemDialog = allowDialog)
         }
+        if (freed > 0) {
+            syncPreferences.extendMediaLibraryWatchSuppression(
+                SyncPreferences.MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS,
+            )
+        }
+        return freed
     }
 
     /** Registra abertura da foto/vídeo no detalhe (base para dias sem acesso). */
@@ -2124,13 +2137,27 @@ class SyncCoordinator(
         val rows = syncMetadataDao.getAll().filter { row ->
             (sessionPaths == null || row.canonicalPath in sessionPaths) &&
                 rowHasReleasableLocalCopy(row) &&
-                row.oneDriveItemId != null &&
-                row.cloudState == CloudSyncState.SYNCED &&
+                isEligibleForSyncedAutoRelease(row) &&
                 row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
                 !row.localReleasedForSpace
         }
         if (rows.isEmpty()) return 0
         return releaseLocalSpaceForRows(rows, allowSystemDialog = allowSystemDialog)
+    }
+
+    private fun isEligibleForSyncedAutoRelease(row: SyncMetadataEntity): Boolean {
+        if (row.oneDriveItemId.isNullOrBlank()) return false
+        return when (row.cloudState) {
+            CloudSyncState.SYNCED,
+            CloudSyncState.CLOUD_ONLY,
+            -> true
+            CloudSyncState.PENDING_UPLOAD,
+            CloudSyncState.PENDING_DOWNLOAD,
+            CloudSyncState.ERROR,
+            CloudSyncState.CONFLICT,
+            CloudSyncState.LOCAL_ONLY,
+            -> false
+        }
     }
 
     private suspend fun autoReleaseIdleLocalCopies(allowSystemDialog: Boolean): Int {
@@ -2215,6 +2242,13 @@ class SyncCoordinator(
 
         var deleted = mediaDeleteRequestRouter.deleteSilent(appContext, uris)
         var pending = uris.filter { it !in deleted }
+        if (pending.isNotEmpty()) {
+            deleted = deleted + mediaDeleteRequestRouter.deleteWithAllFilesAccessIfGranted(
+                appContext,
+                pending,
+            )
+            pending = uris.filter { it !in deleted }
+        }
         if (pending.isNotEmpty() && allowSystemDialog) {
             when (val outcome = mediaDeleteRequestRouter.requestDelete(appContext, pending)) {
                 is MediaDeleteResult.Success, MediaDeleteResult.NothingToDelete -> {
@@ -3226,6 +3260,7 @@ class SyncCoordinator(
                 }
                 finalMessage to syncMetadataDao.countPendingOperations()
             }.onSuccess { (finalMessage, pendingCount) ->
+                syncPreferences.lastBidirectionalSyncCompletedAtMs = System.currentTimeMillis()
                 _state.value = _state.value.copy(
                     isRunning = false,
                     activeItems = emptyList(),
@@ -3241,6 +3276,7 @@ class SyncCoordinator(
                     scheduleBackgroundThumbnailPrefetchIfNeeded()
                 }
             }.onFailure { error ->
+                syncPreferences.lastBidirectionalSyncCompletedAtMs = System.currentTimeMillis()
                 if (error is CancellationException) {
                     _state.value = _state.value.copy(
                         isRunning = false,

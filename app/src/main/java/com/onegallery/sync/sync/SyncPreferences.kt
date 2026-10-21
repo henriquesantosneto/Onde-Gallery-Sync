@@ -202,6 +202,9 @@ class SyncPreferences(context: Context) {
         /** Intervalo mínimo entre syncs bidirecionais automáticos (sem pendências). */
         const val AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS = 12 * 60 * 1000L
 
+        /** Re-tenta sync automático cedo só se ainda houver envios locais pendentes. */
+        const val AUTO_BIDIRECTIONAL_UPLOAD_RETRY_MS = 3 * 60 * 1000L
+
         /** Não reagir ao MediaStore durante sync longo. */
         const val MEDIA_LIBRARY_SUPPRESS_DURING_SYNC_MS = 15 * 60 * 1000L
 
