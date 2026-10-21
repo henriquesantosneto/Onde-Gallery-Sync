@@ -162,6 +162,7 @@ class SyncCoordinator(
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
     private var albumCoverRevisionJob: Job? = null
+    private var bulkGalleryDisplayRefreshJob: Job? = null
     private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
@@ -171,8 +172,24 @@ class SyncCoordinator(
         mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
             if (bulkThumbnailPrefetchDepth.get() == 0) {
                 notifyGalleryDisplayRefresh()
+            } else {
+                scheduleGalleryDisplayRefreshCoalesced()
             }
             scheduleAlbumCoverRevisionForPath(canonicalPath)
+        }
+    }
+
+    /** Durante prefetch em massa: atualiza grade/álbuns em lote (sem ANR). */
+    private fun scheduleGalleryDisplayRefreshCoalesced() {
+        val scope = backgroundScope
+        if (scope == null) {
+            notifyGalleryDisplayRefresh()
+            return
+        }
+        bulkGalleryDisplayRefreshJob?.cancel()
+        bulkGalleryDisplayRefreshJob = scope.launch {
+            delay(GALLERY_DISPLAY_REFRESH_COALESCE_MS)
+            notifyGalleryDisplayRefresh()
         }
     }
 
@@ -2948,6 +2965,8 @@ class SyncCoordinator(
                 )
             }
             flushPendingAlbumCoverRevisions()
+            bulkGalleryDisplayRefreshJob?.cancel()
+            bulkGalleryDisplayRefreshJob = null
             if (totalCached > 0) {
                 notifyGalleryDisplayRefresh()
             }
@@ -3463,6 +3482,7 @@ class SyncCoordinator(
         const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 2_500
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
+        const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 650L
         const val GPS_BACKFILL_ROUNDS = 8
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 500
