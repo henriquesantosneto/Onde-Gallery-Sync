@@ -91,7 +91,8 @@ fun AlbumsScreen(
     viewModel: GalleryViewModel,
     galleryPreferences: GalleryPreferences,
     albumsBackStackEntry: NavBackStackEntry? = null,
-    onOpenAlbum: (String) -> Unit,
+    onOpenFolderAlbum: (filterKey: String) -> Unit,
+    onOpenPlaceAlbum: (title: String, matchKey: String) -> Unit,
     onOpenMap: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -310,11 +311,9 @@ fun AlbumsScreen(
                                             viewModel.toggleAlbumSelection(entry.album.filterKey)
                                         } else if (isPlace) {
                                             val matchKey = entry.album.bucketId.removePrefix("place:")
-                                            viewModel.setPlaceFilter(entry.album.title, matchKey)
-                                            onOpenAlbum(entry.album.title)
+                                            onOpenPlaceAlbum(entry.album.title, matchKey)
                                         } else {
-                                            viewModel.setAlbumFilter(entry.album.filterKey)
-                                            onOpenAlbum(entry.album.title)
+                                            onOpenFolderAlbum(entry.album.filterKey)
                                         }
                                     },
                                     onLongClick = {
@@ -449,11 +448,10 @@ fun AlbumsScreen(
             onOpenAlbum = {
                 if (isPlace) {
                     val matchKey = album.bucketId.removePrefix("place:")
-                    viewModel.setPlaceFilter(album.title, matchKey)
+                    onOpenPlaceAlbum(album.title, matchKey)
                 } else {
-                    viewModel.setAlbumFilter(album.filterKey)
+                    onOpenFolderAlbum(album.filterKey)
                 }
-                onOpenAlbum(album.title)
             },
         )
     }

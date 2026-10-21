@@ -74,8 +74,21 @@ fun GalleryScreen(
     onExitAlbumFilter: () -> Unit = {},
     /** Na rota albums/browse: sem filtro ativo, volta à lista de álbuns (evita “Fotos” com aba Álbuns). */
     requiresActiveBrowseFilter: Boolean = false,
+    /** Filtro vindo da rota (evita corrida com o ViewModel antes da 1ª frame). */
+    routeAlbumFolderKey: String? = null,
+    routePlaceMatchKey: String? = null,
+    routePlaceTitle: String? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(routeAlbumFolderKey) {
+        routeAlbumFolderKey?.let { viewModel.setAlbumFilter(it) }
+    }
+    LaunchedEffect(routePlaceMatchKey, routePlaceTitle) {
+        if (routePlaceMatchKey != null && routePlaceTitle != null) {
+            viewModel.setPlaceFilter(routePlaceTitle, routePlaceMatchKey)
+        }
+    }
+    val gridItems = if (requiresActiveBrowseFilter) state.items else state.libraryItems
     val gridPinch = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
         galleryPreferences.galleryGridZoom = scale
     }
@@ -95,14 +108,23 @@ fun GalleryScreen(
     var showAllFilesForRelease by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var browseFilterWasActive by remember(requiresActiveBrowseFilter) { mutableStateOf(false) }
-    LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
+    LaunchedEffect(
+        requiresActiveBrowseFilter,
+        state.albumFilter,
+        state.locationFilter,
+        routeAlbumFolderKey,
+        routePlaceMatchKey,
+    ) {
         if (!requiresActiveBrowseFilter) return@LaunchedEffect
+        if (routeAlbumFolderKey != null || routePlaceMatchKey != null) {
+            browseFilterWasActive = true
+            return@LaunchedEffect
+        }
         val hasFilter = state.albumFilter != null || state.locationFilter != null
         if (hasFilter) {
             browseFilterWasActive = true
             return@LaunchedEffect
         }
-        // Só volta se o filtro existiu e sumiu (evita fechar na 1ª frame antes do ViewModel atualizar).
         if (browseFilterWasActive) {
             onExitAlbumFilter()
         }
@@ -117,8 +139,8 @@ fun GalleryScreen(
     }
     val filteredBrowse = state.locationFilter != null || state.albumFilter != null
     val browseMediaCountLine = if (filteredBrowse && !state.selectionMode) {
-        val photos = state.items.count { it.kind == MediaKind.IMAGE }
-        val videos = state.items.count { it.kind == MediaKind.VIDEO }
+        val photos = gridItems.count { it.kind == MediaKind.IMAGE }
+        val videos = gridItems.count { it.kind == MediaKind.VIDEO }
         formatMediaCount(photos, videos)
     } else {
         null
@@ -216,30 +238,38 @@ fun GalleryScreen(
         },
     ) { padding ->
         when {
-            state.isLoading && state.items.isEmpty() -> {
+            state.isLoading && gridItems.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
             }
-            state.error != null && state.items.isEmpty() -> {
+            state.error != null && gridItems.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
                 ) { Text(state.error ?: "Erro") }
             }
-            state.items.isEmpty() -> {
+            gridItems.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
-                ) { Text("Nenhuma mídia indexada. Conceda permissão e sincronize.") }
+                ) {
+                    Text(
+                        if (requiresActiveBrowseFilter) {
+                            "Nenhuma mídia neste álbum ainda. Sincronize ou aguarde as miniaturas."
+                        } else {
+                            "Nenhuma mídia indexada. Conceda permissão e sincronize."
+                        },
+                    )
+                }
             }
             else -> {
                 val dateTimeline = isDateTimelineSort(state.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val gridState = rememberLazyGridState()
-                val gridEntries = remember(state.items, state.sortOrder, timelineGrouping) {
-                    buildGalleryGridEntries(state.items, state.sortOrder, timelineGrouping)
+                val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping) {
+                    buildGalleryGridEntries(gridItems, state.sortOrder, timelineGrouping)
                 }
                 val stickyBarHeightPx = remember(density) {
                     with(density) { GalleryStickyTimelineBarHeight.roundToPx() }
@@ -324,7 +354,7 @@ fun GalleryScreen(
     if (showMediaDetails && state.selectedPaths.isNotEmpty()) {
         MediaDetailsBottomSheet(
             canonicalPaths = state.selectedPaths.toList(),
-            displayItems = state.items,
+            displayItems = gridItems,
             syncCoordinator = syncCoordinator,
             mediaCacheRepository = mediaCacheRepository,
             onDismiss = { showMediaDetails = false },

@@ -42,6 +42,9 @@ data class PlacesMapFocus(
 
 data class GalleryUiState(
     val isLoading: Boolean = true,
+    /** Toda a biblioteca visível (aba Fotos). */
+    val libraryItems: List<GalleryDisplayItem> = emptyList(),
+    /** Subconjunto após filtro de álbum/local (rota albums/browse). */
     val items: List<GalleryDisplayItem> = emptyList(),
     val albums: List<MediaAlbum> = emptyList(),
     val placeAlbums: List<MediaAlbum> = emptyList(),
@@ -195,25 +198,27 @@ class GalleryViewModel(
             syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(coverKeysToRefresh)
         }
         val userAlbums = snapshot.userAlbums
-        val items = allItems
-            .filter { item ->
-                when (val filter = controls.browseFilter) {
-                    GalleryBrowseFilter.All -> true
-                    is GalleryBrowseFilter.AlbumFolder -> item.albumName == filter.name
-                    is GalleryBrowseFilter.Place -> {
-                        PlaceMatchKey.decode(filter.matchKey)?.let { key ->
-                            item.matchesPlace(key)
-                        } ?: (item.locationLabel == filter.displayName)
-                    }
+        val libraryItems = allItems.sortedBy(controls.order)
+        val items = when (val filter = controls.browseFilter) {
+            GalleryBrowseFilter.All -> libraryItems
+            is GalleryBrowseFilter.AlbumFolder -> allItems
+                .filter { it.albumName == filter.name }
+                .sortedBy(controls.order)
+            is GalleryBrowseFilter.Place -> allItems
+                .filter { item ->
+                    PlaceMatchKey.decode(filter.matchKey)?.let { key ->
+                        item.matchesPlace(key)
+                    } ?: (item.locationLabel == filter.displayName)
                 }
-            }
-            .sortedBy(controls.order)
+                .sortedBy(controls.order)
+        }
 
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
         val locationFilter = (controls.browseFilter as? GalleryBrowseFilter.Place)?.displayName
 
         GalleryUiState(
             isLoading = controls.isLoading,
+            libraryItems = libraryItems,
             items = items,
             albums = buildAlbums(allItems, userAlbums, controls.albumSort, albumCoverLocalIndex, mediaCacheRepository),
             placeAlbums = sortPlaceAlbums(

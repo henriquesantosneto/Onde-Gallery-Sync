@@ -67,24 +67,35 @@ import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
 import com.onegallery.sync.ui.welcome.WelcomeScreen
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.launch
 
 private const val PLACES_MAP_ROUTE = "places_map"
 /** Conteúdo filtrado de um álbum/local; mantém a aba Álbuns selecionada na barra inferior. */
-private const val ALBUMS_BROWSE_ROUTE = "albums/browse"
+private const val ALBUM_BROWSE_FOLDER_ROUTE = "albums/browse/folder/{folderKey}"
+private const val ALBUM_BROWSE_PLACE_ROUTE = "albums/browse/place/{placeKey}/{placeTitle}"
+
+private fun String.encodeNavArg(): String =
+    URLEncoder.encode(this, StandardCharsets.UTF_8.name())
+
+private fun String.decodeNavArg(): String =
+    URLDecoder.decode(this, StandardCharsets.UTF_8.name())
+
+private fun isAlbumBrowseRoute(route: String?): Boolean =
+    route?.startsWith("albums/browse/") == true
 /** Detalhe de sync (antes era aba própria). */
 private const val SYNC_STATUS_ROUTE = "settings/sync"
 
 private fun albumsTabSelected(route: String?): Boolean =
-    route == MainTab.Albums.route || route == ALBUMS_BROWSE_ROUTE
+    route == MainTab.Albums.route || isAlbumBrowseRoute(route)
 
 private fun showsMainBottomBar(route: String?): Boolean =
-    route in MainTab.entries.map { it.route } || route == ALBUMS_BROWSE_ROUTE
+    route in MainTab.entries.map { it.route } || isAlbumBrowseRoute(route)
 
 private fun NavHostController.openGalleryTab(clearBrowseFilters: () -> Unit) {
     clearBrowseFilters()
-    if (currentBackStackEntry?.destination?.route == ALBUMS_BROWSE_ROUTE) {
+    if (isAlbumBrowseRoute(currentBackStackEntry?.destination?.route)) {
         popBackStack()
     }
     navigate(MainTab.Gallery.route) {
@@ -421,8 +432,17 @@ fun OneGalleryApp(
                     viewModel = galleryViewModel,
                     galleryPreferences = galleryPreferences,
                     albumsBackStackEntry = entry,
-                    onOpenAlbum = {
-                        navController.navigate(ALBUMS_BROWSE_ROUTE) {
+                    onOpenFolderAlbum = { filterKey ->
+                        navController.navigate(
+                            "albums/browse/folder/${filterKey.encodeNavArg()}",
+                        ) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onOpenPlaceAlbum = { title, matchKey ->
+                        navController.navigate(
+                            "albums/browse/place/${matchKey.encodeNavArg()}/${title.encodeNavArg()}",
+                        ) {
                             launchSingleTop = true
                         }
                     },
@@ -442,13 +462,46 @@ fun OneGalleryApp(
                     },
                 )
             }
-            composable(ALBUMS_BROWSE_ROUTE) {
+            composable(
+                route = ALBUM_BROWSE_FOLDER_ROUTE,
+                arguments = listOf(
+                    navArgument("folderKey") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val folderKey = entry.arguments?.getString("folderKey")?.decodeNavArg().orEmpty()
                 GalleryScreen(
                     viewModel = galleryViewModel,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     galleryPreferences = galleryPreferences,
                     requiresActiveBrowseFilter = true,
+                    routeAlbumFolderKey = folderKey.takeIf { it.isNotBlank() },
+                    onOpenItem = { encoded ->
+                        navController.navigate("media/$encoded")
+                    },
+                    onExitAlbumFilter = {
+                        galleryViewModel.clearBrowseFilters()
+                        navController.popBackStack(MainTab.Albums.route, inclusive = false)
+                    },
+                )
+            }
+            composable(
+                route = ALBUM_BROWSE_PLACE_ROUTE,
+                arguments = listOf(
+                    navArgument("placeKey") { type = NavType.StringType },
+                    navArgument("placeTitle") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val placeKey = entry.arguments?.getString("placeKey")?.decodeNavArg().orEmpty()
+                val placeTitle = entry.arguments?.getString("placeTitle")?.decodeNavArg().orEmpty()
+                GalleryScreen(
+                    viewModel = galleryViewModel,
+                    syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    galleryPreferences = galleryPreferences,
+                    requiresActiveBrowseFilter = true,
+                    routePlaceMatchKey = placeKey.takeIf { it.isNotBlank() },
+                    routePlaceTitle = placeTitle.takeIf { it.isNotBlank() },
                     onOpenItem = { encoded ->
                         navController.navigate("media/$encoded")
                     },
