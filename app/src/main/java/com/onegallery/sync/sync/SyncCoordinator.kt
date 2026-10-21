@@ -1333,52 +1333,165 @@ class SyncCoordinator(
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
             ?: return Result.failure(IllegalArgumentException("Item não encontrado"))
 
-        resolveViewableOriginalFile(row)?.let { existing ->
-            if (hasLocalOriginalOnDevice(row)) {
-                return Result.success(existing)
-            }
-            persistCachedOriginalPath(row, existing)
-            return Result.success(existing)
+        if (hasLocalOriginalOnDevice(row)) {
+            resolveViewableOriginalFile(row)?.let { return Result.success(it) }
+            return Result.failure(IllegalStateException("Original já está no dispositivo"))
         }
 
-        if (hasLocalOriginalOnDevice(row)) {
-            return Result.failure(IllegalStateException("Original já está no dispositivo"))
+        if (!networkMonitor.isOnline()) {
+            val offlineRemote = remoteFingerprintFromIndexedRow(row)
+            val cached = resolveViewableOriginalFile(row)
+                ?: mediaCacheRepository.originalIfCached(canonicalPath)
+            if (offlineRemote != null && cached != null &&
+                localFileMatchesRemote(cached, row, offlineRemote)
+            ) {
+                return finalizeRecallReuse(row, cached, offlineRemote)
+            }
+            return Result.failure(IllegalStateException("Offline — conecte-se para baixar o original"))
+        }
+
+        val remoteFingerprint = fetchRemoteFingerprintForRecall(row)
+
+        resolveViewableOriginalFile(row)?.let { existing ->
+            if (remoteFingerprint != null && !localFileMatchesRemote(existing, row, remoteFingerprint)) {
+                dropStaleRecallCache(row)
+            } else {
+                return finalizeRecallReuse(row, existing, remoteFingerprint)
+            }
         }
 
         val itemId = row.oneDriveItemId
             ?: return Result.failure(IllegalStateException("Sem referência OneDrive"))
 
-        val sourceFile = run {
-            if (!networkMonitor.isOnline()) {
-                return Result.failure(IllegalStateException("Offline — conecte-se para baixar o original"))
+        val target = mediaCacheRepository.originalFile(canonicalPath)
+        if (target.isFile && target.length() > 0L) {
+            if (remoteFingerprint != null && localFileMatchesRemote(target, row, remoteFingerprint)) {
+                return finalizeRecallReuse(row, target, remoteFingerprint)
             }
-            val target = mediaCacheRepository.originalFile(canonicalPath)
-            downloadRemoteFile(
-                remoteId = itemId,
-                target = target,
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Recuperando da nuvem…",
-                honorSyncCancel = false,
-                updateSyncUi = false,
-                useSimpleStreamDownload = true,
-            ).getOrElse { error ->
-                return Result.failure(
-                    error.takeUnless { it is CancellationException }
-                        ?: IllegalStateException("Download cancelado."),
-                )
-            }
-            if (!target.isFile || target.length() <= 0L) {
-                return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
-            }
-            target
+            target.delete()
         }
 
-        persistCachedOriginalPath(row, sourceFile)
-        if (!hasLocalOriginalOnDevice(row.copy(cachedFilePath = sourceFile.absolutePath))) {
-            scheduleRecalledGalleryImport(canonicalPath, sourceFile)
+        downloadRemoteFile(
+            remoteId = itemId,
+            target = target,
+            canonicalPath = row.canonicalPath,
+            displayName = row.displayName,
+            operationLabel = "Recuperando da nuvem…",
+            honorSyncCancel = false,
+            updateSyncUi = false,
+            useSimpleStreamDownload = true,
+        ).getOrElse { error ->
+            return Result.failure(
+                error.takeUnless { it is CancellationException }
+                    ?: IllegalStateException("Download cancelado."),
+            )
         }
-        return Result.success(sourceFile)
+        if (!target.isFile || target.length() <= 0L) {
+            return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
+        }
+
+        val verifyRemote = fetchRemoteFingerprintForRecall(row) ?: remoteFingerprint
+        if (verifyRemote != null && !localFileMatchesRemote(target, row, verifyRemote)) {
+            target.delete()
+            return Result.failure(
+                IllegalStateException("Arquivo baixado não confere com a nuvem (hash/tamanho)."),
+            )
+        }
+        return finalizeRecallReuse(row, target, verifyRemote)
+    }
+
+    private suspend fun fetchRemoteFingerprintForRecall(row: SyncMetadataEntity): RemoteDriveFile? {
+        if (row.oneDriveItemId.isNullOrBlank()) return null
+        return when (syncPreferences.syncMode) {
+            SyncMode.ONEDRIVE_GRAPH -> {
+                oneDriveRepository.lookupRemoteFileAtCanonicalPath(row.canonicalPath).getOrNull()
+                    ?: oneDriveRepository.getRemoteDriveFileByItemId(
+                        row.oneDriveItemId!!,
+                        row.canonicalPath,
+                    ).getOrNull()
+            }
+            SyncMode.ONEDRIVE_FOLDER, SyncMode.ONEDRIVE_LOCAL_MIRROR ->
+                remoteFingerprintFromIndexedRow(row)
+            SyncMode.LOCAL_ONLY -> null
+        }
+    }
+
+    private fun remoteFingerprintFromIndexedRow(row: SyncMetadataEntity): RemoteDriveFile? {
+        val hash = row.remoteQuickXorHash?.takeIf { it.isNotBlank() } ?: return null
+        val size = row.remoteSizeBytes ?: return null
+        val itemId = row.oneDriveItemId ?: return null
+        return RemoteDriveFile(
+            itemId = itemId,
+            name = row.displayName,
+            canonicalPath = row.canonicalPath,
+            modifiedAtEpoch = row.remoteModifiedAt,
+            sizeBytes = size,
+            quickXorHash = hash,
+        )
+    }
+
+    private suspend fun localFileMatchesRemote(
+        file: File,
+        row: SyncMetadataEntity,
+        remote: RemoteDriveFile,
+    ): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        val size = file.length()
+        if (!ContentFingerprint.sizesEqual(size, remote.sizeBytes)) return false
+        val hash = if (
+            ContentFingerprint.hashesEqual(row.localQuickXorHash, remote.quickXorHash) &&
+            row.localSizeBytes == size
+        ) {
+            row.localQuickXorHash!!
+        } else {
+            withContext(Dispatchers.IO) {
+                ContentFingerprint.quickXorHashBase64(file)
+            }
+        }
+        return ContentFingerprint.matchesRemote(hash, size, remote)
+    }
+
+    private suspend fun dropStaleRecallCache(row: SyncMetadataEntity) {
+        mediaCacheRepository.deleteOriginalOnly(row.canonicalPath)
+        if (!row.cachedFilePath.isNullOrBlank()) {
+            syncMetadataDao.upsert(row.copy(cachedFilePath = null))
+        }
+    }
+
+    private suspend fun finalizeRecallReuse(
+        row: SyncMetadataEntity,
+        file: File,
+        remote: RemoteDriveFile?,
+    ): Result<File> {
+        val localHash = withContext(Dispatchers.IO) {
+            ContentFingerprint.quickXorHashBase64(file)
+        }
+        val localSize = file.length()
+        val nextCloudState = when {
+            row.oneDriveItemId != null &&
+                (
+                    row.cloudState == CloudSyncState.CLOUD_ONLY ||
+                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                    ) -> CloudSyncState.SYNCED
+            else -> row.cloudState
+        }
+        val synced = row.copy(
+            cachedFilePath = file.absolutePath,
+            localQuickXorHash = localHash,
+            localSizeBytes = localSize,
+            remoteQuickXorHash = remote?.quickXorHash ?: row.remoteQuickXorHash,
+            remoteSizeBytes = remote?.sizeBytes ?: row.remoteSizeBytes,
+            remoteModifiedAt = remote?.modifiedAtEpoch ?: row.remoteModifiedAt,
+            oneDriveItemId = remote?.itemId ?: row.oneDriveItemId,
+            cloudState = nextCloudState,
+            lastError = null,
+        )
+        syncMetadataDao.upsert(synced)
+        notifyGalleryDisplayRefresh()
+        if (!hasLocalOriginalOnDevice(synced)) {
+            scheduleRecalledGalleryImport(row.canonicalPath, file)
+        }
+        return Result.success(file)
     }
 
     private fun scheduleRecalledGalleryImport(canonicalPath: String, sourceFile: File) {

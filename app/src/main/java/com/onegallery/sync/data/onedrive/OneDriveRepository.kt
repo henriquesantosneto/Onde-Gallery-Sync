@@ -558,6 +558,19 @@ class OneDriveRepository(
         }
     }
 
+    /** Metadados atuais na nuvem (hash + tamanho) para decidir se o recall precisa baixar bytes. */
+    suspend fun getRemoteDriveFileByItemId(
+        itemId: String,
+        canonicalPathFallback: String,
+    ): Result<RemoteDriveFile?> {
+        return runWithToken { token ->
+            val item = graphApi.getDriveItem("Bearer $token", itemId)
+            if (item.file == null) return@runWithToken null
+            val canonical = canonicalPathForDriveItem(item) ?: canonicalPathFallback
+            remoteDriveFileFromItem(item, canonical)
+        }
+    }
+
     /** Confirma se já existe arquivo no caminho de sync (útil quando o delta não listou o item). */
     suspend fun lookupRemoteFileAtCanonicalPath(canonicalPath: String): Result<RemoteDriveFile?> {
         return runWithToken { token ->
