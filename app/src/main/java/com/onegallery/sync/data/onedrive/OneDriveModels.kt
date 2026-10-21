@@ -9,8 +9,9 @@ data class DriveItemCollection(
 )
 
 data class DriveItem(
-    val id: String,
-    val name: String,
+    /** Delta pode trazer itens só com [deleted] (sem nome). */
+    val id: String? = null,
+    val name: String? = null,
     val size: Long?,
     val file: DriveFileFacet?,
     val folder: DriveFolderFacet?,

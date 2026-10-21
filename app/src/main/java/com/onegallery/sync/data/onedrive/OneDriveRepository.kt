@@ -106,16 +106,19 @@ class OneDriveRepository(
     suspend fun getDriveRootId(): Result<String> {
         return runWithToken { token ->
             graphApi.getDriveRoot("Bearer $token").id
+                ?: error("Drive root sem id")
         }
     }
 
     suspend fun listBrowseChildren(folderId: String): Result<List<OneDriveBrowseEntry>> {
         return runWithToken { token ->
             val page = graphApi.listFolderChildren("Bearer $token", folderId)
-            page.value.map { item ->
+            page.value.mapNotNull { item ->
+                val id = item.id ?: return@mapNotNull null
+                val name = item.name ?: return@mapNotNull null
                 OneDriveBrowseEntry(
-                    id = item.id,
-                    name = item.name,
+                    id = id,
+                    name = name,
                     isFolder = item.folder != null,
                     childCount = item.folder?.childCount,
                 )
@@ -132,8 +135,8 @@ class OneDriveRepository(
                 body = CreateFolderRequest(name = name),
             )
             OneDriveBrowseEntry(
-                id = created.id,
-                name = created.name,
+                id = created.id ?: error("Pasta criada sem id"),
+                name = created.name ?: name,
                 isFolder = true,
                 childCount = 0,
             )
@@ -148,12 +151,13 @@ class OneDriveRepository(
             val rootPath = encodeDrivePath(SyncPolicy.ONEDRIVE_MIRROR_ROOT)
             try {
                 graphApi.getItemByDrivePath("Bearer $token", rootPath).id
+                    ?: error("Pasta na nuvem sem id")
             } catch (http: HttpException) {
                 if (http.code() != 404) throw http
                 graphApi.createFolderUnderDriveRoot(
                     authorization = "Bearer $token",
                     body = CreateFolderRequest(name = SyncPolicy.ONEDRIVE_MIRROR_ROOT),
-                ).id
+                ).id ?: error("Pasta criada sem id")
             }.also { id ->
                 graphFolderPreferences.setSyncRoot(
                     itemId = id,
@@ -245,12 +249,13 @@ class OneDriveRepository(
             started = true
             page.value.forEach { item ->
                 if (item.deleted != null) {
-                    acc.removedItemIds.add(item.id)
+                    item.id?.let { acc.removedItemIds.add(it) }
                     return@forEach
                 }
                 if (item.file == null) return@forEach
+                val fileName = item.name ?: return@forEach
                 val canonical = canonicalPathForDriveItem(item) ?: return@forEach
-                if (!SyncPolicy.shouldIncludeLocalItem(canonical, item.name)) return@forEach
+                if (!SyncPolicy.shouldIncludeLocalItem(canonical, fileName)) return@forEach
                 acc.changedFiles.add(remoteDriveFileFromItem(item, canonical))
             }
             nextLink = page.nextLink
@@ -302,7 +307,8 @@ class OneDriveRepository(
                 drivePath.substring(syncRoot.length + 1)
             else -> return null
         }
-        val raw = if (parentRel.isBlank()) item.name else "$parentRel/${item.name}"
+        val fileName = item.name ?: return null
+        val raw = if (parentRel.isBlank()) fileName else "$parentRel/$fileName"
         return SyncPaths.shortenWhatsAppPath(raw)
     }
 
@@ -536,9 +542,11 @@ class OneDriveRepository(
     }
 
     private fun remoteDriveFileFromItem(item: DriveItem, canonicalPath: String): RemoteDriveFile {
+        val itemId = item.id ?: error("DriveItem sem id")
+        val name = item.name ?: canonicalPath.substringAfterLast('/')
         return RemoteDriveFile(
-            itemId = item.id,
-            name = item.name,
+            itemId = itemId,
+            name = name,
             canonicalPath = canonicalPath,
             modifiedAtEpoch = parseGraphTime(item.lastModifiedDateTime),
             sizeBytes = item.size,
@@ -570,9 +578,11 @@ class OneDriveRepository(
                     graphApi.listDriveNext(nextLink, "Bearer $token")
                 }
                 page.value.forEach { item ->
-                    val childPrefix = if (prefix.isEmpty()) item.name else "$prefix/${item.name}"
+                    val itemId = item.id ?: return@forEach
+                    val itemName = item.name ?: return@forEach
+                    val childPrefix = if (prefix.isEmpty()) itemName else "$prefix/$itemName"
                     if (item.folder != null) {
-                        folders.add(item.id to childPrefix)
+                        folders.add(itemId to childPrefix)
                     } else if (item.file != null) {
                         files.add(
                             remoteDriveFileFromItem(

@@ -3076,7 +3076,9 @@ class SyncCoordinator(
                 sourceFile,
                 mimeType,
                 onProgress,
-            ).map { it.id }
+            ).map { item ->
+                item.id ?: error("Upload concluído sem id do OneDrive")
+            }
             SyncMode.LOCAL_ONLY -> Result.failure(IllegalStateException("Sem nuvem"))
         }
     }
