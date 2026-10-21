@@ -3575,6 +3575,9 @@ class SyncCoordinator(
     private suspend fun applyPendingIndexRebuildIfNeeded(): Boolean {
         if (!pendingIndexRebuild.compareAndSet(true, false)) return false
         rebuildSyncMetadataIndex(syncMetadataDao, mediaCacheRepository)
+        if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+            oneDriveRepository.resetRemoteListingState()
+        }
         _state.value = _state.value.copy(
             lastMessage = "Pasta na nuvem alterada — índice recriado. Reindexando…",
         )

@@ -106,6 +106,12 @@ class OneDriveRepository(
         graphFolderPreferences.setSyncRoot(itemId, driveRelativePath, label)
     }
 
+    /** Após limpar o índice local — força nova listagem completa na nuvem. */
+    fun resetRemoteListingState() {
+        graphFolderPreferences.clearDriveDeltaLink()
+        graphFolderPreferences.lastFullRemoteListingAtMs = 0L
+    }
+
     /** Verdadeiro se a seleção é diferente da pasta salva (inclui primeira configuração). */
     fun isDifferentSyncRoot(itemId: String, driveRelativePath: String): Boolean {
         return !graphFolderPreferences.matchesRoot(itemId, driveRelativePath.trim('/'))
@@ -199,7 +205,12 @@ class OneDriveRepository(
                 graphFolderPreferences.driveDeltaLink = delta.deltaLink
                 var files = mergeRemoteBaseline(indexBaseline, delta)
                 var supplemental = 0
-                if (shouldRunRecursiveRemoteComplement(delta.unresolvedDeltaSkips)) {
+                if (shouldRunRecursiveRemoteComplement(
+                        unresolvedDeltaSkips = delta.unresolvedDeltaSkips,
+                        indexBaselineSize = indexBaseline.size,
+                        mergedFileCount = files.size,
+                    )
+                ) {
                     val recursive = listFilesRecursive(token, rootId)
                     val merged = mergeRemoteFileListings(files, recursive)
                     supplemental = (merged.size - files.size).coerceAtLeast(0)
@@ -251,10 +262,16 @@ class OneDriveRepository(
         )
     }
 
-    private fun shouldRunRecursiveRemoteComplement(unresolvedDeltaSkips: Int): Boolean {
+    private fun shouldRunRecursiveRemoteComplement(
+        unresolvedDeltaSkips: Int,
+        indexBaselineSize: Int,
+        mergedFileCount: Int,
+    ): Boolean {
+        // Índice vazio + delta sem alterações (ex.: após migração Room) → nuvem parecia “vazia”.
+        if (indexBaselineSize == 0 && mergedFileCount == 0) return true
         if (unresolvedDeltaSkips > 0) return true
         val last = graphFolderPreferences.lastFullRemoteListingAtMs
-        if (last <= 0L) return false
+        if (last <= 0L) return true
         return System.currentTimeMillis() - last >= FULL_REMOTE_LISTING_INTERVAL_MS
     }
 
