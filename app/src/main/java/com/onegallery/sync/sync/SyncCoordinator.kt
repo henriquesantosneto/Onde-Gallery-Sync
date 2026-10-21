@@ -2068,10 +2068,22 @@ class SyncCoordinator(
             !row.cachedFilePath.isNullOrBlank()
     }
 
+    /**
+     * Referência para “por inatividade”: abertura no app; senão captura/alteração local (como no MediaStore).
+     * Assim, após reindexar sem [localLastAccessedAtMs], não libera antes do prazo desde a foto.
+     */
+    private fun baselineMsForIdleRelease(row: SyncMetadataEntity): Long? {
+        row.localLastAccessedAtMs?.let { return it }
+        row.capturedAtSeconds?.takeIf { it > 0L }?.let { return it * 1000L }
+        row.localModifiedAt?.takeIf { it > 0L }?.let { return it * 1000L }
+        row.remoteModifiedAt?.takeIf { it > 0L }?.let { return it * 1000L }
+        return null
+    }
+
     private fun isLocalCopyIdleBeyondPolicy(row: SyncMetadataEntity, idleDays: Int): Boolean {
-        val lastAccess = row.localLastAccessedAtMs ?: return false
+        val baseline = baselineMsForIdleRelease(row) ?: return false
         val idleMs = idleDays.toLong() * 24L * 60L * 60L * 1000L
-        return System.currentTimeMillis() - lastAccess >= idleMs
+        return System.currentTimeMillis() - baseline >= idleMs
     }
 
     private fun canRemoveLocalCopiesWithoutPrompt(): Boolean {
@@ -2861,8 +2873,7 @@ class SyncCoordinator(
             localGalleryRelativePath = item.relativePath?.takeIf { it.isNotBlank() }
                 ?: existing?.localGalleryRelativePath,
             localReleasedForSpace = false,
-            localLastAccessedAtMs = existing?.localLastAccessedAtMs
-                ?: System.currentTimeMillis(),
+            localLastAccessedAtMs = existing?.localLastAccessedAtMs,
             oneDriveItemId = existing?.oneDriveItemId,
             localModifiedAt = item.dateModifiedSeconds,
             localSizeBytes = item.sizeBytes,

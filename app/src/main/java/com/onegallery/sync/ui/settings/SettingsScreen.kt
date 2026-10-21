@@ -403,9 +403,9 @@ fun SettingsScreen(
                     summary = "Remove se não abrir no prazo",
                     info = SettingsInfoDialog(
                         title = "Por inatividade",
-                        body = "Conta só depois que você **abriu a foto no app** (não usa a data da foto). " +
-                            "Se passar o prazo sem abrir de novo, remove a cópia local — o OneDrive " +
-                            "permanece. Reindexar não zera para “liberar na hora”.",
+                        body = "Usa a última vez que você abriu no app; se nunca abriu, a data de captura " +
+                            "ou de criação local (como na galeria). Só remove a cópia após o prazo — " +
+                            "o OneDrive permanece.",
                     ),
                     checked = autoFreeLocalWhenIdle,
                     onInfoClick = { settingsInfo = it },
