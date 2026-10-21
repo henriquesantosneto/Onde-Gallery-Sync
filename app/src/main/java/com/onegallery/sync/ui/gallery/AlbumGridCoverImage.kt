@@ -47,6 +47,12 @@ fun AlbumGridCoverImage(
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(false) }
     var coverCacheKey by remember(album.bucketId) { mutableStateOf(album.bucketId) }
 
+    LaunchedEffect(album.bucketId, fallbackCover) {
+        if (displayModel == null && fallbackCover != null) {
+            displayModel = fallbackCover
+        }
+    }
+
     LaunchedEffect(album.bucketId, coverRevision) {
         val live = withContext(Dispatchers.IO) { resolveLiveCover(album) }
         val isVideo = live.sourceItem?.kind == MediaKind.VIDEO
@@ -56,14 +62,15 @@ fun AlbumGridCoverImage(
             } ?: live.displayModel
         }
         val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId
-        if (resolved != null) {
-            if (cacheKey != coverCacheKey || displayModel == null) {
+        when {
+            resolved != null -> {
                 displayModel = resolved
                 coverIsVideo = isVideo
                 coverCacheKey = cacheKey
             }
-        } else if (displayModel == null && fallbackCover != null) {
-            displayModel = fallbackCover
+            displayModel == null && fallbackCover != null -> {
+                displayModel = fallbackCover
+            }
         }
     }
 

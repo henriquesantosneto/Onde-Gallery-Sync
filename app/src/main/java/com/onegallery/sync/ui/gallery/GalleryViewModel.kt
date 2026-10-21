@@ -125,10 +125,16 @@ class GalleryViewModel(
     private var latestLibraryItems: List<GalleryDisplayItem> = emptyList()
 
     @Volatile
+    private var latestCatalogItems: List<GalleryDisplayItem> = emptyList()
+
+    @Volatile
     private var pendingPlacesMapFocus: PlacesMapFocus? = null
 
     private data class LibrarySnapshot(
-        val allItems: List<GalleryDisplayItem>,
+        /** Índice completo (contagens, capas, locais). */
+        val catalogItems: List<GalleryDisplayItem>,
+        /** Grade Fotos / browse: exige miniatura ou mídia local. */
+        val visibleItems: List<GalleryDisplayItem>,
         val userAlbums: List<UserAlbumEntity>,
     )
 
@@ -141,16 +147,22 @@ class GalleryViewModel(
     }.conflate()
         .map { (metadata, userAlbums) ->
             runCatching {
+                val catalog = dedupeGalleryDisplayItems(
+                    metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
+                )
                 LibrarySnapshot(
-                    allItems = dedupeGalleryDisplayItems(
-                        metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
-                    ).filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
+                    catalogItems = catalog,
+                    visibleItems = catalog.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
                     userAlbums = userAlbums,
                 )
             }.getOrElse { error ->
                 if (error is OutOfMemoryError) {
                     errorState.value = "Biblioteca muito grande para exibir de uma vez. Sincronize em partes."
-                    LibrarySnapshot(allItems = emptyList(), userAlbums = userAlbums)
+                    LibrarySnapshot(
+                        catalogItems = emptyList(),
+                        visibleItems = emptyList(),
+                        userAlbums = userAlbums,
+                    )
                 } else {
                     throw error
                 }
@@ -187,25 +199,28 @@ class GalleryViewModel(
         syncCoordinator.albumCoverRevisions,
     ) { snapshot, controls, coverRevisions ->
         coverRevisions.forEach { (key, stamp) ->
-            if (lastAlbumCoverRevisions[key] != stamp) {
+            val previous = lastAlbumCoverRevisions[key]
+            if (previous != null && previous != stamp) {
                 albumCoverLocalIndex.invalidateKey(key)
             }
         }
         lastAlbumCoverRevisions = coverRevisions
-        val allItems = snapshot.allItems
-        latestLibraryItems = allItems
-        val coverKeysToRefresh = detectAlbumCoverSignatureChanges(allItems)
+        val catalogItems = snapshot.catalogItems
+        val visibleItems = snapshot.visibleItems
+        latestCatalogItems = catalogItems
+        latestLibraryItems = visibleItems
+        val coverKeysToRefresh = detectAlbumCoverSignatureChanges(catalogItems)
         if (coverKeysToRefresh.isNotEmpty()) {
             syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(coverKeysToRefresh)
         }
         val userAlbums = snapshot.userAlbums
-        val libraryItems = allItems.sortedBy(controls.order)
+        val libraryItems = visibleItems.sortedBy(controls.order)
         val items = when (val filter = controls.browseFilter) {
             GalleryBrowseFilter.All -> libraryItems
-            is GalleryBrowseFilter.AlbumFolder -> allItems
+            is GalleryBrowseFilter.AlbumFolder -> visibleItems
                 .filter { it.albumName == filter.name }
                 .sortedBy(controls.order)
-            is GalleryBrowseFilter.Place -> allItems
+            is GalleryBrowseFilter.Place -> visibleItems
                 .filter { item ->
                     PlaceMatchKey.decode(filter.matchKey)?.let { key ->
                         item.matchesPlace(key)
@@ -223,9 +238,9 @@ class GalleryViewModel(
             isLoading = controls.isLoading,
             libraryItems = libraryItems,
             items = items,
-            albums = buildAlbums(allItems, userAlbums, controls.albumSort, albumCoverLocalIndex, mediaCacheRepository),
+            albums = buildAlbums(catalogItems, userAlbums, controls.albumSort, albumCoverLocalIndex, mediaCacheRepository),
             placeAlbums = sortPlaceAlbums(
-                buildPlaceAlbums(allItems, albumCoverLocalIndex, mediaCacheRepository),
+                buildPlaceAlbums(catalogItems, albumCoverLocalIndex, mediaCacheRepository),
                 controls.albumSort,
             ),
             userAlbums = userAlbums,
@@ -239,16 +254,17 @@ class GalleryViewModel(
             albumSelectionMode = controls.albumSelecting,
             selectedAlbumTitles = controls.selectedAlbums,
             error = controls.error,
-            geoItems = allItems.filter { it.latitude != null && it.longitude != null },
+            geoItems = catalogItems.filter { it.latitude != null && it.longitude != null },
             albumCoverRevisions = coverRevisions,
         )
     }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GalleryUiState())
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000, Long.MAX_VALUE),
+            GalleryUiState(),
+        )
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { syncCoordinator.compactDuplicateIndexRows() }
-        }
         viewModelScope.launch {
             try {
                 syncCoordinator.galleryMetadata.first()
@@ -334,18 +350,18 @@ class GalleryViewModel(
         return resolveLiveAlbumCover(items, mediaCacheRepository, album.coverModel)
     }
 
-    private fun detectAlbumCoverSignatureChanges(allItems: List<GalleryDisplayItem>): Set<String> {
-        if (allItems.isEmpty()) return emptySet()
+    private fun detectAlbumCoverSignatureChanges(catalogItems: List<GalleryDisplayItem>): Set<String> {
+        if (catalogItems.isEmpty()) return emptySet()
         val changed = mutableSetOf<String>()
-        allItems.groupBy { it.albumName }.forEach { (name, items) ->
+        catalogItems.groupBy { it.albumName }.forEach { (name, items) ->
             val key = "album:$name"
             val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
-            if (folderAlbumLatestSort[key] != latest) {
-                folderAlbumLatestSort[key] = latest
+            val previous = folderAlbumLatestSort.put(key, latest)
+            if (previous != null && previous != latest) {
                 changed.add(key)
             }
         }
-        val placeLocated = allItems.mapNotNull { item ->
+        val placeLocated = catalogItems.mapNotNull { item ->
             val label = item.locationLabel?.trim().orEmpty()
             val components = PlaceComponents.forItem(item)
                 ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
@@ -358,8 +374,8 @@ class GalleryViewModel(
         placeLocated.groupBy({ it.first }, { it.second }).forEach { (encoded, group) ->
             val key = "place:$encoded"
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
-            if (placeAlbumLatestSort[key] != latest) {
-                placeAlbumLatestSort[key] = latest
+            val previous = placeAlbumLatestSort.put(key, latest)
+            if (previous != null && previous != latest) {
                 changed.add(key)
             }
         }
@@ -414,7 +430,7 @@ class GalleryViewModel(
     }
 
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {
-        val all = latestLibraryItems
+        val all = latestCatalogItems
         if (all.isEmpty()) return emptyList()
         return when {
             album.bucketId.startsWith("place:") -> {
