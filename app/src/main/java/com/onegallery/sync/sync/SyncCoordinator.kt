@@ -1372,6 +1372,10 @@ class SyncCoordinator(
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
+        if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
+            persistMinimalPlaceholderThumbnail(row)?.let { return Result.success(it) }
+            return Result.success(null)
+        }
         mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
             ?.let {
                 syncPreferences.clearThumbnailFailure(canonicalPath)
@@ -2347,11 +2351,28 @@ class SyncCoordinator(
     }
 
     private fun rowCanBuildThumbnail(row: SyncMetadataEntity): Boolean {
+        if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) return false
         if (row.oneDriveItemId != null) return true
         if (row.localMediaId != null) return true
         if (!row.localContentUri.isNullOrBlank()) return true
         if (!row.cachedFilePath.isNullOrBlank()) return true
         return false
+    }
+
+    /** Áudio (ex.: .opus), PDF etc. — placeholder fixo, sem fila de download Graph. */
+    private suspend fun materializeNonVisualThumbnails() {
+        val rows = syncMetadataDao.getAll().filter { row ->
+            mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
+                !GalleryMapper.supportsGeneratedThumbnail(row.displayName) &&
+                (
+                    row.oneDriveItemId != null || row.localMediaId != null ||
+                        !row.localContentUri.isNullOrBlank() || !row.cachedFilePath.isNullOrBlank()
+                    )
+        }
+        if (rows.isEmpty()) return
+        rows.forEach { row ->
+            persistMinimalPlaceholderThumbnail(row)
+        }
     }
 
     private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
@@ -2978,6 +2999,7 @@ class SyncCoordinator(
                     alsoUpdateLastMessage = false,
                 )
                 ensureAlbumCoverThumbnails()
+                materializeNonVisualThumbnails()
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Miniaturas na galeria…",

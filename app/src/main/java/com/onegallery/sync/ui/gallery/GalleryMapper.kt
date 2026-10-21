@@ -9,12 +9,37 @@ import com.onegallery.sync.sync.SyncPaths
 import java.io.File
 
 object GalleryMapper {
-    private val videoExtensions = setOf("mp4", "mkv", "webm", "mov", "3gp", "avi")
+    private val videoExtensions = setOf("mp4", "mkv", "webm", "mov", "3gp", "avi", "m4v")
+    private val imageExtensions = setOf(
+        "jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp", "tif", "tiff", "dng", "raw",
+    )
+    private val audioExtensions = setOf(
+        "opus", "ogg", "oga", "mp3", "m4a", "aac", "wav", "flac", "amr", "3ga", "aiff", "aif", "wma",
+    )
 
     fun isVideoFileName(displayName: String): Boolean {
-        val ext = displayName.substringAfterLast('.', "").lowercase()
-        return ext in videoExtensions
+        return fileExtension(displayName) in videoExtensions
     }
+
+    fun isAudioFileName(displayName: String): Boolean {
+        return fileExtension(displayName) in audioExtensions
+    }
+
+    /** Tipos para os quais faz sentido baixar/gerar miniatura (foto ou vídeo). */
+    fun supportsGeneratedThumbnail(displayName: String): Boolean {
+        val ext = fileExtension(displayName)
+        if (ext in imageExtensions || ext in videoExtensions) return true
+        if (ext in audioExtensions) return false
+        // Extensão desconhecida: tenta só se parecer imagem/vídeo pelo nome
+        return ext.isNotBlank() && ext !in documentLikeExtensions
+    }
+
+    private val documentLikeExtensions = setOf(
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "apk",
+    )
+
+    private fun fileExtension(displayName: String): String =
+        displayName.substringAfterLast('.', "").lowercase()
 
     fun toDisplayItem(
         entity: SyncMetadataEntity,

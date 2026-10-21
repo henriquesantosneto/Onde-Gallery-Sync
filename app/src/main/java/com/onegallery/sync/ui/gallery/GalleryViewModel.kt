@@ -396,6 +396,7 @@ class GalleryViewModel(
     }
 
     private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {
+        if (!GalleryMapper.supportsGeneratedThumbnail(item.displayName)) return false
         if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath) != null) return false
         if (item.oneDriveItemId != null) return true
         if (item.localMediaId != null) return true

@@ -56,6 +56,7 @@ object AlbumCoverThumbnailPlanner {
     }
 
     private fun canBuildThumbnail(item: GalleryDisplayItem): Boolean {
+        if (!GalleryMapper.supportsGeneratedThumbnail(item.displayName)) return false
         if (item.oneDriveItemId != null) return true
         if (item.localMediaId != null) return true
         if (item.localUri != null) return true
