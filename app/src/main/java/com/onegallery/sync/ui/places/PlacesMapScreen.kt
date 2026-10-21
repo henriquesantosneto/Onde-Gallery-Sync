@@ -36,7 +36,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,6 +55,7 @@ import com.onegallery.sync.data.local.MediaAccessPermissions
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.ui.gallery.GalleryViewModel
+import com.onegallery.sync.ui.gallery.PlacesMapFocus
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -105,6 +105,7 @@ fun PlacesMapScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pinSignature = remember(state.geoItems) { buildPhotoMapPinSignature(state.geoItems) }
     val pins = remember(pinSignature) { buildPhotoMapPins(state.geoItems) }
+    val initialFocus = remember { viewModel.consumePlacesMapFocus() }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -201,6 +202,7 @@ fun PlacesMapScreen(
                         modifier = Modifier.fillMaxSize(),
                         pins = pins,
                         pinSignature = pinSignature,
+                        initialFocus = initialFocus,
                         syncCoordinator = syncCoordinator,
                         deviceLocationGranted = deviceLocationGranted,
                         locateUserRequest = locateUserRequest,
@@ -249,6 +251,9 @@ fun PlacesMapScreen(
 
 }
 
+/** ~15 km em graus (aprox.) para enquadrar locais próximos ao toque nos detalhes. */
+private const val PLACES_MAP_FOCUS_RADIUS_DEG = 0.14
+
 /** Enquadra os locais das fotos (comportamento próximo ao mapa do app Fotos no iPhone). */
 private fun animateCameraToPhotoPins(map: MapLibreMap, pins: List<PhotoMapPin>) {
     if (pins.isEmpty()) return
@@ -266,10 +271,58 @@ private fun animateCameraToPhotoPins(map: MapLibreMap, pins: List<PhotoMapPin>) 
     }
 }
 
+private fun pinsNearFocus(
+    pins: List<PhotoMapPin>,
+    focus: PlacesMapFocus,
+): List<PhotoMapPin> {
+    val maxDistSq = PLACES_MAP_FOCUS_RADIUS_DEG * PLACES_MAP_FOCUS_RADIUS_DEG
+    return pins.filter { pin ->
+        val dLat = pin.latitude - focus.latitude
+        val dLng = pin.longitude - focus.longitude
+        dLat * dLat + dLng * dLng <= maxDistSq
+    }
+}
+
+private fun animateCameraToPhotoPinsNearFocus(
+    map: MapLibreMap,
+    pins: List<PhotoMapPin>,
+    focus: PlacesMapFocus,
+) {
+    if (pins.isEmpty()) return
+    runCatching {
+        val nearby = pinsNearFocus(pins, focus)
+        when {
+            nearby.isEmpty() -> {
+                map.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(focus.latitude, focus.longitude),
+                        15.0,
+                    ),
+                )
+            }
+            nearby.size == 1 -> {
+                map.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(focus.latitude, focus.longitude),
+                        14.5,
+                    ),
+                )
+            }
+            else -> {
+                val builder = LatLngBounds.Builder()
+                builder.include(LatLng(focus.latitude, focus.longitude))
+                nearby.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
+                map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
+            }
+        }
+    }
+}
+
 @Composable
 private fun PlacesMapView(
     pins: List<PhotoMapPin>,
     pinSignature: String,
+    initialFocus: PlacesMapFocus?,
     syncCoordinator: SyncCoordinator,
     deviceLocationGranted: Boolean,
     locateUserRequest: Int,
@@ -287,7 +340,8 @@ private fun PlacesMapView(
     var styleReady by remember { mutableStateOf(false) }
     val markerByPath = remember { mutableStateMapOf<String, Pair<Marker, PhotoMapPin>>() }
     var mapInitialized by remember { mutableStateOf(false) }
-    var initialCameraApplied by rememberSaveable { mutableStateOf(false) }
+    val initialCameraKey = initialFocus?.let { "${it.latitude},${it.longitude}" } ?: "all"
+    var appliedInitialCameraKey by remember { mutableStateOf<String?>(null) }
     var mountingPins by remember(pinSignature) { mutableStateOf(pins.isNotEmpty()) }
 
     DisposableEffect(lifecycle, mapView) {
@@ -321,11 +375,15 @@ private fun PlacesMapView(
         }
     }
 
-    LaunchedEffect(mapRef, styleReady, pins, initialCameraApplied) {
+    LaunchedEffect(mapRef, styleReady, pins, initialCameraKey) {
         val map = mapRef ?: return@LaunchedEffect
-        if (!styleReady || initialCameraApplied || pins.isEmpty()) return@LaunchedEffect
-        initialCameraApplied = true
-        animateCameraToPhotoPins(map, pins)
+        if (!styleReady || pins.isEmpty() || appliedInitialCameraKey == initialCameraKey) return@LaunchedEffect
+        appliedInitialCameraKey = initialCameraKey
+        if (initialFocus != null) {
+            animateCameraToPhotoPinsNearFocus(map, pins, initialFocus)
+        } else {
+            animateCameraToPhotoPins(map, pins)
+        }
     }
 
     LaunchedEffect(locateUserRequest, mapRef, styleReady, deviceLocationGranted) {

@@ -41,6 +41,7 @@ fun MediaDetailSamsungSheet(
     scrollContentInternally: Boolean = true,
     scrollBelowMapOnly: Boolean = false,
     firstSectionDragModifier: Modifier = Modifier,
+    onOpenPlacesMap: ((latitude: Double, longitude: Double) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val effectiveAdvanced = showAdvanced || contentLevel == MediaDetailContentLevel.Full
@@ -162,6 +163,11 @@ fun MediaDetailSamsungSheet(
                                 longitude = info.mapLongitude!!,
                                 locationLabel = info.locationLabel,
                                 contentOnDark = contentOnDark,
+                                onOpenPlacesMap = onOpenPlacesMap?.let { open ->
+                                    {
+                                        open(info.mapLatitude!!, info.mapLongitude!!)
+                                    }
+                                },
                                 modifier = Modifier.padding(top = 16.dp),
                             )
                         } else if (!info.locationLabel.isNullOrBlank()) {

@@ -60,6 +60,7 @@ fun MediaSamsungDetailsContent(
     scrollBelowMapOnly: Boolean = false,
     /** Arraste do painel na área resumo+mapa (nível 2, sem roubar scroll do EXIF). */
     firstSectionDragModifier: Modifier = Modifier,
+    onOpenPlacesMap: ((latitude: Double, longitude: Double) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var infos by remember(canonicalPaths) { mutableStateOf<List<MediaDetailInfo>>(emptyList()) }
@@ -102,6 +103,7 @@ fun MediaSamsungDetailsContent(
                 scrollContentInternally = scrollContentInternally && !scrollBelowMapOnly,
                 scrollBelowMapOnly = scrollBelowMapOnly,
                 firstSectionDragModifier = firstSectionDragModifier,
+                onOpenPlacesMap = onOpenPlacesMap,
             )
             footer?.invoke()
         }
@@ -144,6 +146,7 @@ private fun SamsungDetailBlock(
     scrollContentInternally: Boolean = true,
     scrollBelowMapOnly: Boolean = false,
     firstSectionDragModifier: Modifier = Modifier,
+    onOpenPlacesMap: ((latitude: Double, longitude: Double) -> Unit)? = null,
 ) {
     var showAdvanced by remember(info.displayName) { mutableStateOf(false) }
     MediaDetailSamsungSheet(
@@ -159,6 +162,7 @@ private fun SamsungDetailBlock(
         scrollContentInternally = scrollContentInternally,
         scrollBelowMapOnly = scrollBelowMapOnly,
         firstSectionDragModifier = firstSectionDragModifier,
+        onOpenPlacesMap = onOpenPlacesMap,
         modifier = modifier,
     )
 }

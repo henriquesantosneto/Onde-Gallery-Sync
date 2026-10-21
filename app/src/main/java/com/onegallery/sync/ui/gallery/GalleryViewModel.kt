@@ -31,6 +31,12 @@ import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+/** Foco inicial ao abrir o mapa de locais a partir dos detalhes de uma foto. */
+data class PlacesMapFocus(
+    val latitude: Double,
+    val longitude: Double,
+)
+
 data class GalleryUiState(
     val isLoading: Boolean = true,
     val items: List<GalleryDisplayItem> = emptyList(),
@@ -104,6 +110,9 @@ class GalleryViewModel(
     private val placeAlbumLatestSort = mutableMapOf<String, Long>()
     @Volatile
     private var latestLibraryItems: List<GalleryDisplayItem> = emptyList()
+
+    @Volatile
+    private var pendingPlacesMapFocus: PlacesMapFocus? = null
 
     private data class LibrarySnapshot(
         val allItems: List<GalleryDisplayItem>,
@@ -225,6 +234,17 @@ class GalleryViewModel(
     fun clearBrowseFilters() {
         browseFilter.value = GalleryBrowseFilter.All
         clearSelection()
+    }
+
+    fun requestPlacesMapFocus(latitude: Double, longitude: Double) {
+        pendingPlacesMapFocus = PlacesMapFocus(latitude, longitude)
+    }
+
+    /** Lê e limpa o foco pedido antes de abrir [com.onegallery.sync.ui.places.PlacesMapScreen]. */
+    fun consumePlacesMapFocus(): PlacesMapFocus? {
+        val focus = pendingPlacesMapFocus
+        pendingPlacesMapFocus = null
+        return focus
     }
 
     fun setAlbumFilter(album: String?) {

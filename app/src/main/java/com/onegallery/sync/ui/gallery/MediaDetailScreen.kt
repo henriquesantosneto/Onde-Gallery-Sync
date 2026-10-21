@@ -68,6 +68,7 @@ fun MediaDetailScreen(
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     onBack: () -> Unit,
+    onOpenPlacesMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     fun leaveDetail() {
@@ -498,6 +499,7 @@ fun MediaDetailScreen(
                         detailsDragging = false
                     },
                     deferBackToSelectionHandler = state.selectionMode,
+                    onOpenPlacesMap = onOpenPlacesMap,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()

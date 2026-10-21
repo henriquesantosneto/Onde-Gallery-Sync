@@ -39,6 +39,7 @@ fun MediaDetailPushDetailsSheet(
     onPanelDragStart: () -> Unit = {},
     /** Quando true, o botão Voltar do sistema cancela a seleção (prioridade sobre fechar o painel). */
     deferBackToSelectionHandler: Boolean = false,
+    onOpenPlacesMap: ((latitude: Double, longitude: Double) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (canonicalPaths.isEmpty() || panelFraction <= 0f) return
@@ -111,6 +112,7 @@ fun MediaDetailPushDetailsSheet(
                 scrollContentInternally = false,
                 scrollBelowMapOnly = canonicalPaths.size == 1,
                 firstSectionDragModifier = summaryDragModifier,
+                onOpenPlacesMap = onOpenPlacesMap,
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(),

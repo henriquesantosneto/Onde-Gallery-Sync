@@ -461,6 +461,10 @@ fun OneGalleryApp(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onBack = { navController.popBackStack() },
+                    onOpenPlacesMap = { lat, lng ->
+                        galleryViewModel.requestPlacesMapFocus(lat, lng)
+                        navController.navigate(PLACES_MAP_ROUTE)
+                    },
                 )
             }
         }

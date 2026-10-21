@@ -1,6 +1,8 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +45,7 @@ fun PhotoDetailLocationSection(
     locationLabel: String?,
     modifier: Modifier = Modifier,
     contentOnDark: Boolean = false,
+    onOpenPlacesMap: (() -> Unit)? = null,
 ) {
     val addressColor = if (contentOnDark) {
         Color.White.copy(alpha = 0.92f)
@@ -65,6 +68,7 @@ fun PhotoDetailLocationSection(
             latitude = latitude,
             longitude = longitude,
             locationLabel = locationLabel,
+            onOpenPlacesMap = onOpenPlacesMap,
             modifier = Modifier.fillMaxWidth(),
             mapCornerRadius = 0.dp,
         )
@@ -86,6 +90,7 @@ fun PhotoDetailLocationMap(
     locationLabel: String?,
     modifier: Modifier = Modifier,
     mapCornerRadius: androidx.compose.ui.unit.Dp = 12.dp,
+    onOpenPlacesMap: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -152,12 +157,24 @@ fun PhotoDetailLocationMap(
         RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
     }
 
+    val openMap = onOpenPlacesMap
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(168.dp)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(
+                if (openMap != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = openMap,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
