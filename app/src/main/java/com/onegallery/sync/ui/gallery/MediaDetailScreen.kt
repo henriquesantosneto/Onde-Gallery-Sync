@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
@@ -122,12 +123,18 @@ fun MediaDetailScreen(
         return
     }
 
+    val galleryPreferences = (LocalContext.current.applicationContext as OneGalleryApplication)
+        .galleryPreferences
+    val timelineGrouping = timelineGroupingForGridScale(galleryPreferences.galleryGridZoom)
+
     val contextItems = remember(
         liveItems,
         state.albumFilter,
         state.locationFilter,
         state.geoItems,
         initialCanonicalPath,
+        state.sortOrder,
+        timelineGrouping,
     ) {
         detailContextItems(
             allItems = liveItems,
@@ -135,6 +142,8 @@ fun MediaDetailScreen(
             locationFilter = state.locationFilter,
             anchorPath = initialCanonicalPath,
             geoItems = state.geoItems,
+            sortOrder = state.sortOrder,
+            timelineGrouping = timelineGrouping,
         )
     }
 

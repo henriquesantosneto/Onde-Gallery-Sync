@@ -69,6 +69,29 @@ fun formatTimelineDayLabel(date: LocalDate, today: LocalDate = LocalDate.now()):
     }
 }
 
+/** Mesma chave de seção que [buildGalleryGridEntries] (ex.: "day-today" → Hoje). */
+fun timelineSectionKey(
+    epochSeconds: Long,
+    grouping: TimelineGrouping,
+    today: LocalDate = LocalDate.now(),
+): String {
+    val date = timestampToDate(epochSeconds)
+    return when (grouping) {
+        TimelineGrouping.BY_DAY -> "day-$date"
+        TimelineGrouping.RELAXED -> when {
+            date == today -> "day-today"
+            date == today.minusDays(1) -> "day-yesterday"
+            else -> "month-${date.year}-${date.monthValue}"
+        }
+    }
+}
+
+fun timelineSectionKeyForItem(
+    item: GalleryDisplayItem,
+    grouping: TimelineGrouping,
+    today: LocalDate = LocalDate.now(),
+): String = timelineSectionKey(item.sortTimestamp, grouping, today)
+
 fun timelineSectionTitle(date: LocalDate, grouping: TimelineGrouping, today: LocalDate = LocalDate.now()): String {
     return when (grouping) {
         TimelineGrouping.BY_DAY -> formatTimelineDayLabel(date, today)
@@ -132,14 +155,7 @@ fun buildGalleryGridEntries(
             lastSectionKey = null
         }
 
-        val sectionKey = when (grouping) {
-            TimelineGrouping.BY_DAY -> "day-${date}"
-            TimelineGrouping.RELAXED -> when {
-                date == today -> "day-today"
-                date == today.minusDays(1) -> "day-yesterday"
-                else -> "month-${date.year}-${date.monthValue}"
-            }
-        }
+        val sectionKey = timelineSectionKey(item.sortTimestamp, grouping, today)
         val sectionTitle = timelineSectionTitle(date, grouping, today)
         val headerKind = if (grouping == TimelineGrouping.BY_DAY) {
             TimelineHeaderKind.DAY
