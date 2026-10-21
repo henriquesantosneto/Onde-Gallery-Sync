@@ -25,7 +25,7 @@ Graph/SAF ───┘              │
 | Auto-sync não compete | `shouldDeferAutomaticBidirectionalSync()` — usado por `SyncWorker` e `runBidirectionalSync` |
 | Intervalo mínimo auto bidirecional | `SyncPreferences.AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS` (12 min) |
 | Cooldown pós-cancelamento | `CANCEL_COOLDOWN_MS` |
-| Pós-sync enrichment | `schedulePostSyncEnrichment` — `tryLock` no mutex; não bloquear forever |
+| Pós-sync enrichment | `runPostSyncEnrichmentInternal` **inline** após núcleo (mesmo `longTaskMutex` + FGS); não agendar async solto |
 
 ### 2.2 Loop infinito (regressões conhecidas)
 

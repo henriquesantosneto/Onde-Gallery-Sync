@@ -1211,19 +1211,12 @@ class SyncCoordinator(
                             append("\nManutenção: ${sanitized.removedRows} entrada(s) obsoleta(s) removida(s).")
                         }
                         append(
-                            "\nMiniaturas e GPS continuam em segundo plano — " +
-                                "acompanhe na aba Sincronismo.",
+                            "\nEm seguida: miniaturas, capas e metadados (mesma sessão de sync).",
                         )
                     }
                     _state.value = _state.value.copy(
-                        isRunning = false,
-                        activeItems = emptyList(),
-                        runQueue = emptyList(),
                         isOffline = false,
                         pendingOperations = pendingCount,
-                        progressPhase = SyncProgressPhase.IDLE,
-                        activityHeadline = "",
-                        activityDetail = "",
                         lastMessage = coreSyncMessage,
                     )
                     sweepTransientErrorsAfterSuccessfulSync()
@@ -1233,7 +1226,10 @@ class SyncCoordinator(
                             SyncPreferences.MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS,
                         )
                     }
-                    schedulePostSyncEnrichment(coreSyncMessagePrefix = coreSyncMessage.substringBefore("\n"))
+                    // Mesmo mutex + foreground service até terminar miniaturas/GPS (não perder ao minimizar).
+                    runPostSyncEnrichmentInternal(
+                        coreSyncMessagePrefix = coreSyncMessage.substringBefore("\n"),
+                    )
                     SyncSummary(uploaded, pendingDownloadPlaceholders, cloudOnly)
                 }.onFailure { error ->
                     val cancelled = error is CancellationException
@@ -2717,25 +2713,6 @@ class SyncCoordinator(
             mediaLocationResolver,
             fileNameHint,
         ).getOrNull()
-    }
-
-    /** Miniaturas, capas, GPS e data de captura após o núcleo do sync (não bloqueia envio/listagem). */
-    private fun schedulePostSyncEnrichment(coreSyncMessagePrefix: String) {
-        val scope = backgroundScope ?: return
-        registerManagedSyncJob(
-            scope.launch {
-                while (!longTaskMutex.tryLock()) {
-                    delay(40)
-                    if (syncCancelRequested.get()) return@launch
-                }
-                try {
-                    if (syncCancelRequested.get()) return@launch
-                    runPostSyncEnrichmentInternal(coreSyncMessagePrefix)
-                } finally {
-                    longTaskMutex.unlock()
-                }
-            },
-        )
     }
 
     private suspend fun seedResidualRunQueueAfterCoreSync() {

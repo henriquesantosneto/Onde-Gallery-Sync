@@ -81,7 +81,7 @@ Uploads em lote: **`PARALLEL_UPLOADS = 3`**, com barras de progresso na aba Sync
 ### 7. Finalização e pós-sync
 
 - `FINISHING`: mensagem resumida, contagem de pendentes.
-- **`schedulePostSyncEnrichment`**: continua em background (mesmo mutex com `tryLock` / fila) com headline *“Completando galeria em segundo plano…”*.
+- **Pós-sync inline:** miniaturas/GPS rodam **na mesma sessão** do sync (mutex + foreground service), para não parar ao minimizar o app entre o núcleo e as miniaturas.
 
 #### Pós-sync (`runPostSyncEnrichmentInternal`)
 
