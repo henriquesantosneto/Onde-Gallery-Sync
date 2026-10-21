@@ -45,5 +45,7 @@ data class DriveFolderFacet(
 )
 
 data class ParentReference(
+    val id: String? = null,
+    val name: String? = null,
     val path: String?,
 )

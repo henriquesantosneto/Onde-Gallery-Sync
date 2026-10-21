@@ -894,10 +894,20 @@ class SyncCoordinator(
                     setSyncProgress(
                         SyncProgressPhase.LISTING_REMOTE,
                         if (remoteListing.incremental) "Nuvem atualizada (delta)" else "Listagem na nuvem concluída",
-                        if (remoteListing.incremental) {
-                            "${remoteListing.changedCount} alteração(ões) · ${remoteFiles.size} arquivo(s) no índice."
-                        } else {
-                            "${remoteFiles.size} arquivo(s) na pasta de sync."
+                        buildString {
+                            if (remoteListing.incremental) {
+                                append("${remoteListing.changedCount} alteração(ões) · ")
+                            }
+                            append("${remoteFiles.size} arquivo(s) na pasta de sync.")
+                            if (remoteListing.supplementalFromRecursive > 0) {
+                                append(
+                                    " (+${remoteListing.supplementalFromRecursive} via varredura completa " +
+                                        "que o delta não listou)",
+                                )
+                            }
+                            if (remoteListing.unresolvedDeltaSkips > 0) {
+                                append(" · ${remoteListing.unresolvedDeltaSkips} ignorado(s) no delta (sem caminho)")
+                            }
                         },
                     )
 
@@ -1024,6 +1034,7 @@ class SyncCoordinator(
                     val cloudOnlyCandidates = remoteByPath.keys.count { it !in knownPaths }
                     var cloudOnlyProcessed = 0
                     val cloudOnlyInserts = mutableListOf<SyncMetadataEntity>()
+                    val cloudOnlyUpdates = mutableListOf<SyncMetadataEntity>()
                     remoteByPath.forEach { (path, remote) ->
                         ensureSyncMayContinue()
                         if (path in knownPaths) return@forEach
@@ -1057,9 +1068,31 @@ class SyncCoordinator(
                                 ),
                             )
                             cloudOnly++
+                        } else {
+                            val existing = existingByPath[path]!!
+                            if (existing.localMediaId == null &&
+                                (
+                                    existing.oneDriveItemId == null ||
+                                        existing.cloudState == CloudSyncState.LOCAL_ONLY ||
+                                        existing.cloudState == CloudSyncState.ERROR
+                                    )
+                            ) {
+                                cloudOnlyUpdates.add(
+                                    existing.copy(
+                                        displayName = remote.name,
+                                        oneDriveItemId = remote.itemId,
+                                        remoteModifiedAt = remote.modifiedAtEpoch,
+                                        remoteQuickXorHash = remote.quickXorHash,
+                                        remoteSizeBytes = remote.sizeBytes,
+                                        cloudState = CloudSyncState.CLOUD_ONLY,
+                                        lastError = null,
+                                    ),
+                                )
+                                cloudOnly++
+                            }
                         }
                     }
-                    cloudOnlyInserts.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+                    (cloudOnlyInserts + cloudOnlyUpdates).chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
                         syncMetadataDao.upsertAll(chunk)
                     }
 
@@ -3148,6 +3181,8 @@ class SyncCoordinator(
         val files: List<RemoteDriveFile>,
         val incremental: Boolean,
         val changedCount: Int,
+        val unresolvedDeltaSkips: Int = 0,
+        val supplementalFromRecursive: Int = 0,
     )
 
     private fun remoteBaselineFromIndex(rows: List<SyncMetadataEntity>): List<RemoteDriveFile> {
@@ -3179,6 +3214,8 @@ class SyncCoordinator(
                         files = listing.files,
                         incremental = listing.incremental,
                         changedCount = listing.deltaChangeCount,
+                        unresolvedDeltaSkips = listing.unresolvedDeltaSkips,
+                        supplementalFromRecursive = listing.supplementalFromRecursive,
                     )
                 }
             }

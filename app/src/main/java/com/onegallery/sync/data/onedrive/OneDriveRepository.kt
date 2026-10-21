@@ -41,6 +41,10 @@ data class RemoteDriveListing(
     /** true = só alterações desde o último sync (Graph delta). */
     val incremental: Boolean,
     val deltaChangeCount: Int = 0,
+    /** Itens do delta ignorados por falta de caminho (antes do complemento recursivo). */
+    val unresolvedDeltaSkips: Int = 0,
+    /** Quantos arquivos vieram só da varredura recursiva (não estavam no delta desta passagem). */
+    val supplementalFromRecursive: Int = 0,
 )
 
 data class OneDriveBrowseEntry(
@@ -189,10 +193,21 @@ class OneDriveRepository(
                     knownByItemId = knownByItemId,
                 )
                 graphFolderPreferences.driveDeltaLink = delta.deltaLink
+                var files = mergeRemoteBaseline(indexBaseline, delta)
+                var supplemental = 0
+                if (shouldRunRecursiveRemoteComplement(delta.unresolvedDeltaSkips)) {
+                    val recursive = listFilesRecursive(token, rootId)
+                    val merged = mergeRemoteFileListings(files, recursive)
+                    supplemental = (merged.size - files.size).coerceAtLeast(0)
+                    files = merged
+                    graphFolderPreferences.lastFullRemoteListingAtMs = System.currentTimeMillis()
+                }
                 RemoteDriveListing(
-                    files = mergeRemoteBaseline(indexBaseline, delta),
+                    files = files,
                     incremental = true,
                     deltaChangeCount = deltaChangeCount(delta),
+                    unresolvedDeltaSkips = delta.unresolvedDeltaSkips,
+                    supplementalFromRecursive = supplemental,
                 )
             } else {
                 buildInitialRemoteListing(token, rootId, knownByItemId)
@@ -219,15 +234,50 @@ class OneDriveRepository(
             knownByItemId = knownByItemId,
         )
         graphFolderPreferences.driveDeltaLink = delta.deltaLink
-        var files = mergeRemoteBaseline(emptyList(), delta)
-        if (files.isEmpty()) {
-            files = listFilesRecursive(token, rootId)
-        }
+        val fromDelta = mergeRemoteBaseline(emptyList(), delta)
+        val recursive = listFilesRecursive(token, rootId)
+        val files = mergeRemoteFileListings(fromDelta, recursive)
+        graphFolderPreferences.lastFullRemoteListingAtMs = System.currentTimeMillis()
         return RemoteDriveListing(
             files = files,
             incremental = false,
             deltaChangeCount = deltaChangeCount(delta).coerceAtLeast(files.size),
+            unresolvedDeltaSkips = delta.unresolvedDeltaSkips,
+            supplementalFromRecursive = (files.size - fromDelta.size).coerceAtLeast(0),
         )
+    }
+
+    private fun shouldRunRecursiveRemoteComplement(unresolvedDeltaSkips: Int): Boolean {
+        if (unresolvedDeltaSkips > 0) return true
+        val last = graphFolderPreferences.lastFullRemoteListingAtMs
+        if (last <= 0L) return true
+        return System.currentTimeMillis() - last >= FULL_REMOTE_LISTING_INTERVAL_MS
+    }
+
+    /** União por itemId; metadados do delta têm prioridade sobre a varredura recursiva. */
+    private fun mergeRemoteFileListings(
+        primary: List<RemoteDriveFile>,
+        supplemental: List<RemoteDriveFile>,
+    ): List<RemoteDriveFile> {
+        if (supplemental.isEmpty()) return primary
+        val byId = primary.associateBy { it.itemId }.toMutableMap()
+        supplemental.forEach { file ->
+            val existing = byId[file.itemId]
+            if (existing == null) {
+                byId[file.itemId] = file
+            } else if (existing.canonicalPath != file.canonicalPath &&
+                existing.quickXorHash == null &&
+                file.quickXorHash != null
+            ) {
+                byId[file.itemId] = existing.copy(
+                    canonicalPath = file.canonicalPath,
+                    quickXorHash = file.quickXorHash,
+                    sizeBytes = file.sizeBytes ?: existing.sizeBytes,
+                    modifiedAtEpoch = file.modifiedAtEpoch ?: existing.modifiedAtEpoch,
+                )
+            }
+        }
+        return byId.values.toList()
     }
 
     private fun configuredSyncRootItemId(): String {
@@ -241,6 +291,7 @@ class OneDriveRepository(
         val changedFiles: MutableList<RemoteDriveFile>,
         val removedItemIds: MutableSet<String>,
         var deltaLink: String?,
+        var unresolvedDeltaSkips: Int = 0,
     )
 
     private suspend fun collectDriveDeltaPages(
@@ -271,7 +322,11 @@ class OneDriveRepository(
                 }
                 if (item.file == null) continue
                 val fileName = item.name ?: continue
-                val canonical = resolveCanonicalPathForDeltaFile(auth, item, knownByItemId) ?: continue
+                val canonical = resolveCanonicalPathForDeltaFile(auth, item, knownByItemId)
+                if (canonical == null) {
+                    acc.unresolvedDeltaSkips++
+                    continue
+                }
                 if (!SyncPolicy.shouldIncludeLocalItem(canonical, fileName)) continue
                 val remote = remoteDriveFileFromItem(item, canonical)
                 acc.changedFiles.add(remote)
@@ -298,9 +353,31 @@ class OneDriveRepository(
         canonicalPathForDriveItem(item)?.let { return it }
         val itemId = item.id ?: return null
         knownByItemId[itemId]?.let { return it }
+        resolveCanonicalPathViaItemFetch(auth, itemId)?.let { return it }
         val full = runCatching { graphApi.getDriveItem(auth, itemId) }.getOrNull() ?: return null
         canonicalPathForDriveItem(full)?.let { return it }
+        resolveCanonicalPathViaItemFetch(auth, itemId)?.let { return it }
         return knownByItemId[itemId]
+    }
+
+    /** Sobe pela cadeia parentReference.id quando o delta não traz parentReference.path. */
+    private suspend fun resolveCanonicalPathViaItemFetch(auth: String, startItemId: String): String? {
+        val rootId = configuredSyncRootItemId()
+        val segments = mutableListOf<String>()
+        var currentId: String? = startItemId
+        repeat(PARENT_WALK_MAX_DEPTH) {
+            val id = currentId ?: return null
+            if (id == rootId) {
+                val raw = segments.joinToString("/")
+                return if (raw.isBlank()) null else SyncPaths.shortenWhatsAppPath(raw)
+            }
+            val item = runCatching { graphApi.getDriveItem(auth, id) }.getOrNull() ?: return null
+            canonicalPathForDriveItem(item)?.let { return it }
+            val name = item.name ?: return null
+            segments.add(0, name)
+            currentId = item.parentReference?.id
+        }
+        return null
     }
 
     private fun deltaChangeCount(delta: DriveDeltaAccum): Int {
@@ -562,6 +639,8 @@ class OneDriveRepository(
     private companion object {
         const val EXIF_PROBE_BYTES = 512 * 1024L
         const val STREAM_BUFFER_BYTES = 64 * 1024
+        const val FULL_REMOTE_LISTING_INTERVAL_MS = 24L * 60L * 60L * 1000L
+        const val PARENT_WALK_MAX_DEPTH = 48
 
         fun exifProbeTempSuffix(fileName: String?): String {
             if (fileName.isNullOrBlank()) return ".jpg"
@@ -652,10 +731,12 @@ class OneDriveRepository(
                     if (item.folder != null) {
                         folders.add(itemId to childPrefix)
                     } else if (item.file != null) {
+                        val canonical = SyncPaths.shortenWhatsAppPath(childPrefix)
+                        if (!SyncPolicy.shouldIncludeLocalItem(canonical, itemName)) return@forEach
                         files.add(
                             remoteDriveFileFromItem(
                                 item,
-                                SyncPaths.shortenWhatsAppPath(childPrefix),
+                                canonical,
                             ),
                         )
                     }

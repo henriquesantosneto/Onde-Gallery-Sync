@@ -49,6 +49,11 @@ class GraphFolderPreferences(context: Context) {
         prefs.edit().remove(KEY_DRIVE_DELTA_LINK).apply()
     }
 
+    /** Última listagem recursiva completa (complemento ao delta). */
+    var lastFullRemoteListingAtMs: Long
+        get() = prefs.getLong(KEY_LAST_FULL_REMOTE_LISTING_MS, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_FULL_REMOTE_LISTING_MS, value).apply()
+
     fun clear() {
         prefs.edit().clear().apply()
     }
@@ -58,5 +63,6 @@ class GraphFolderPreferences(context: Context) {
         private const val KEY_DRIVE_PATH = "sync_root_drive_path"
         private const val KEY_LABEL = "sync_root_label"
         private const val KEY_DRIVE_DELTA_LINK = "sync_root_drive_delta_link"
+        private const val KEY_LAST_FULL_REMOTE_LISTING_MS = "sync_root_last_full_listing_ms"
     }
 }
