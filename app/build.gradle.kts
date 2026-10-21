@@ -28,13 +28,22 @@ fun msalRedirectUri(packageName: String, hashBase64: String): String {
     return "msauth://$packageName/$encoded"
 }
 
-/** Mesmo keystore padrão do `signingConfig debug` do Android Gradle Plugin. */
+/** Keystore debug versionado — mesma assinatura em CI e no link do GitHub Releases. */
+fun projectDebugKeystoreFile(rootDir: File): File? {
+    val committed = File(rootDir, "keystore/debug.keystore")
+    return committed.takeIf { it.isFile }
+}
+
+/** Fallback local (~/.android/debug.keystore) só em dev sem keystore no repo. */
 fun defaultDebugKeystoreFile(): File =
     File(System.getProperty("user.home"), ".android/debug.keystore")
 
-fun resolveDebugMsalSignature(): Pair<String, String> {
-    val storeFile = defaultDebugKeystoreFile()
-    val hash = sha1SignatureHashBase64(storeFile, "android", "androiddebugkey")
+fun resolveDebugKeystoreFile(rootDir: File): File =
+    projectDebugKeystoreFile(rootDir) ?: defaultDebugKeystoreFile()
+
+val debugKeystoreFile = resolveDebugKeystoreFile(rootProject.projectDir)
+val (msalSignatureHashBase64, msalRedirectUriForBuild) = run {
+    val hash = sha1SignatureHashBase64(debugKeystoreFile, "android", "androiddebugkey")
         ?: "UNCONFIGURED"
     val packageName = "com.onegallery.sync"
     val redirect = if (hash == "UNCONFIGURED") {
@@ -42,10 +51,8 @@ fun resolveDebugMsalSignature(): Pair<String, String> {
     } else {
         msalRedirectUri(packageName, hash)
     }
-    return hash to redirect
+    hash to redirect
 }
-
-val (msalSignatureHashBase64, msalRedirectUriForBuild) = resolveDebugMsalSignature()
 
 plugins {
     id("com.android.application")
@@ -73,8 +80,8 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 235
-        versionName = "0.8.183"
+        versionCode = 236
+        versionName = "0.8.184"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -90,7 +97,21 @@ android {
         )
     }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = debugKeystoreFile
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

@@ -20,6 +20,11 @@ echo "==> Build $version_name ($version_code)"
 mkdir -p releases
 cp -f app/build/outputs/apk/debug/app-debug.apk "$RELEASES_APK"
 
+APKSIGNER="${ANDROID_HOME:-$HOME/android-sdk}/build-tools/34.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --min-sdk-version 26 "$RELEASES_APK" >/dev/null
+fi
+
 cat > releases/LEIA-ME.txt <<EOF
 OneGallery Sync — APK $version_name (versionCode $version_code)
 =============================================
@@ -29,6 +34,12 @@ Download:
   https://github.com/$GITHUB_REPO/releases/download/$tag/$APK_NAME
 
 Hash Azure (Assinatura debug deste build): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
+
+Se a instalação falhar ("pacote inválido" / "app não instalado"):
+  1. Desinstale qualquer OneGallery Sync antigo (Ajustes → Apps).
+  2. Baixe só pelo link GitHub Releases acima (não use HTML do repositório).
+  3. Permita instalar apps desconhecidos para Chrome ou "Meus arquivos".
+  4. Se você compilou o APK no seu PC antes, a assinatura era outra — desinstale primeiro.
 EOF
 
 if ! git diff --quiet -- releases/ app/build.gradle.kts 2>/dev/null || [[ -n "$(git status --porcelain releases/)" ]]; then
