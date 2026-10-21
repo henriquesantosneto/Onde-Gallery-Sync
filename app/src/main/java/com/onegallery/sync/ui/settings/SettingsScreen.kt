@@ -2,19 +2,24 @@ package com.onegallery.sync.ui.settings
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
@@ -56,7 +61,9 @@ fun SettingsScreen(
     onOpenCloudFolderPicker: () -> Unit,
     onMicrosoftSignIn: () -> Unit,
 ) {
-    val app = LocalContext.current.applicationContext as OneGalleryApplication
+    val context = LocalContext.current
+    val app = context.applicationContext as OneGalleryApplication
+    val cloudFolderReindexHint = stringResource(R.string.settings_cloud_folder_reindex_hint)
     val syncCoordinator = app.syncCoordinator
     val syncTasks = remember { SyncTaskLauncher.from(app) }
     val scope = rememberCoroutineScope()
@@ -74,10 +81,29 @@ fun SettingsScreen(
     var idleReleaseDays by remember {
         mutableStateOf(syncPreferences.localCopyIdleReleaseDays.toFloat())
     }
+    var settingsInfo by remember { mutableStateOf<SettingsInfoDialog?>(null) }
 
     val cloudFolderLabel = when (syncPreferences.syncMode) {
         SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Pasta na nuvem não escolhida"
         else -> "Conecte a conta e escolha a pasta na nuvem"
+    }
+
+    settingsInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = { settingsInfo = null },
+            title = { Text(info.title) },
+            text = {
+                Text(
+                    info.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { settingsInfo = null }) {
+                    Text("Entendi")
+                }
+            },
+        )
     }
 
     Scaffold(
@@ -147,24 +173,31 @@ fun SettingsScreen(
                     ) {
                         Text("Escolher pasta na nuvem")
                     }
-                    if (
-                        syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH &&
-                        !authState.isSignedIn &&
-                        !authState.isCheckingStoredAccount
+                    TextButton(
+                        onClick = {
+                            settingsInfo = SettingsInfoDialog(
+                                title = "Pasta na nuvem",
+                                body = if (
+                                    syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH &&
+                                    !authState.isSignedIn &&
+                                    !authState.isCheckingStoredAccount
+                                ) {
+                                    "Entre na Microsoft antes de escolher ou alterar a pasta de sync."
+                                } else {
+                                    cloudFolderReindexHint
+                                },
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(
-                            "Entre na Microsoft antes de escolher ou alterar a pasta de sync.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    } else {
-                        Text(
-                            stringResource(R.string.settings_cloud_folder_reindex_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Info,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text("Sobre a pasta de sync", modifier = Modifier.padding(start = 6.dp))
+                        }
                     }
                     TextButton(
                         onClick = { scope.launch { authManager.signOut() } },
@@ -182,77 +215,74 @@ fun SettingsScreen(
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
             }
             item {
-                Text(
-                    "Liberação automática de espaço",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
-                )
-                Text(
-                    "Pode usar as duas opções juntas ou só uma. Miniatura no app e arquivo na nuvem " +
-                        "sempre permanecem.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
-                )
-            }
-            item {
                 ListItem(
-                    headlineContent = { Text("Remover local logo após backup") },
-                    supportingContent = {
-                        Text(
-                            "Assim que o item estiver no OneDrive, apaga a cópia na galeria do aparelho. " +
-                                "Se você abrir depois e o app fizer recall, volta o original até você liberar " +
-                                "de novo ou até valer a opção por dias sem abrir.",
-                        )
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = autoFreeLocalAfterSync,
-                            onCheckedChange = {
-                                autoFreeLocalAfterSync = it
-                                syncPreferences.autoFreeLocalSpaceWhenSynced = it
+                    headlineContent = {
+                        SettingsHeadlineWithInfo(
+                            title = "Espaço local",
+                            onInfoClick = {
+                                settingsInfo = SettingsInfoDialog(
+                                    title = "Espaço local",
+                                    body = "Você pode usar as duas opções abaixo juntas ou só uma. " +
+                                        "Miniatura no app e arquivo no OneDrive sempre permanecem. " +
+                                        "Liberar espaço manualmente na foto continua imediato.",
+                                )
                             },
                         )
                     },
                 )
             }
             item {
-                ListItem(
-                    headlineContent = { Text("Remover local após dias sem abrir") },
-                    supportingContent = {
-                        Text(
-                            "Para fotos que ainda têm cópia no aparelho ou que você baixou de novo da " +
-                                "nuvem (recall ao abrir). Se passar o prazo sem abrir de novo, o app " +
-                                "remove essa cópia ou cache — não apaga o arquivo no OneDrive.",
-                        )
+                SettingsSwitchRow(
+                    title = "Após backup",
+                    summary = "Remove cópia local na hora",
+                    info = SettingsInfoDialog(
+                        title = "Após backup",
+                        body = "Assim que o item estiver no OneDrive, apaga a cópia na galeria do aparelho. " +
+                            "Se você abrir depois e o app fizer recall, volta o original até você liberar " +
+                            "de novo ou até valer a opção por inatividade.",
+                    ),
+                    checked = autoFreeLocalAfterSync,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = {
+                        autoFreeLocalAfterSync = it
+                        syncPreferences.autoFreeLocalSpaceWhenSynced = it
                     },
-                    trailingContent = {
-                        Switch(
-                            checked = autoFreeLocalWhenIdle,
-                            onCheckedChange = {
-                                autoFreeLocalWhenIdle = it
-                                syncPreferences.autoFreeLocalSpaceWhenIdle = it
-                            },
-                        )
+                )
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Por inatividade",
+                    summary = "Remove se não abrir no prazo",
+                    info = SettingsInfoDialog(
+                        title = "Por inatividade",
+                        body = "Para fotos que ainda têm cópia no aparelho ou que você baixou de novo da " +
+                            "nuvem (recall ao abrir). Se passar o prazo sem abrir de novo, o app remove " +
+                            "essa cópia ou cache — não apaga o arquivo no OneDrive.",
+                    ),
+                    checked = autoFreeLocalWhenIdle,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = {
+                        autoFreeLocalWhenIdle = it
+                        syncPreferences.autoFreeLocalSpaceWhenIdle = it
                     },
                 )
             }
             if (autoFreeLocalWhenIdle) {
                 item {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Text(
-                            "Prazo: ${idleReleaseDays.toInt()} dias sem abrir",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            "O prazo recomeça cada vez que você abre a foto (incluindo depois de um " +
-                                "recall: ao ver o original baixado da nuvem, a contagem zera). " +
-                                "Se nunca abriu no app, usa a data da captura (EXIF). " +
-                                "Intervalo: ${SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS}–" +
-                                "${SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS} dias.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        SettingsHeadlineWithInfo(
+                            title = "${idleReleaseDays.toInt()} dias sem abrir",
+                            onInfoClick = {
+                                settingsInfo = SettingsInfoDialog(
+                                    title = "Prazo de inatividade",
+                                    body = "O prazo recomeça cada vez que você abre a foto (incluindo depois " +
+                                        "de um recall: ao ver o original baixado da nuvem, a contagem zera). " +
+                                        "Se nunca abriu no app, usa a data da captura (EXIF). " +
+                                        "Intervalo: ${SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS}–" +
+                                        "${SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS} dias.",
+                                )
+                            },
+                            modifier = Modifier.padding(bottom = 4.dp),
                         )
                         Slider(
                             value = idleReleaseDays,
@@ -274,49 +304,46 @@ fun SettingsScreen(
                 }
             }
             item {
-                ListItem(
-                    headlineContent = { Text("Apagar na nuvem se sumir do aparelho") },
-                    supportingContent = {
-                        Text("Sem confirmação — espelha exclusões da galeria do sistema")
+                SettingsSwitchRow(
+                    title = "Espelhar exclusão",
+                    summary = "Apaga na nuvem se sumir do aparelho",
+                    info = SettingsInfoDialog(
+                        title = "Espelhar exclusão",
+                        body = "Sem confirmação — quando você apaga na galeria do sistema, o app tenta " +
+                            "apagar também no OneDrive.",
+                    ),
+                    checked = autoDeleteRemote,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = {
+                        autoDeleteRemote = it
+                        syncPreferences.autoDeleteRemoteWhenLocalRemoved = it
                     },
-                    trailingContent = {
-                        Switch(
-                            checked = autoDeleteRemote,
-                            onCheckedChange = {
-                                autoDeleteRemote = it
-                                syncPreferences.autoDeleteRemoteWhenLocalRemoved = it
-                            },
-                        )
+                )
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Sync em segundo plano",
+                    summary = "Boot, rede, ~15 min e mudanças na galeria",
+                    info = SettingsInfoDialog(
+                        title = "Sync em segundo plano",
+                        body = "Após reiniciar o aparelho, a cada ~15 min, ao voltar a internet e quando " +
+                            "fotos/vídeos mudam na galeria. Durante o sync aparece a notificação em " +
+                            "primeiro plano.",
+                    ),
+                    checked = backgroundAlways,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = { enabled ->
+                        backgroundAlways = enabled
+                        syncPreferences.backgroundSyncAlwaysEnabled = enabled
+                        app.rescheduleBackgroundSync()
                     },
                 )
             }
             item {
                 ListItem(
-                    headlineContent = { Text("Sync sempre em segundo plano") },
+                    headlineContent = { Text("Só Wi‑Fi") },
                     supportingContent = {
-                        Text(
-                            "Após reiniciar o aparelho, a cada ~15 min, ao voltar a internet " +
-                                "e quando fotos/vídeos mudam na galeria. Durante o sync aparece " +
-                                "a notificação em primeiro plano.",
-                        )
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = backgroundAlways,
-                            onCheckedChange = { enabled ->
-                                backgroundAlways = enabled
-                                syncPreferences.backgroundSyncAlwaysEnabled = enabled
-                                app.rescheduleBackgroundSync()
-                            },
-                        )
-                    },
-                )
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text("Sync apenas em Wi‑Fi") },
-                    supportingContent = {
-                        Text("Evita uso de dados móveis")
+                        Text("Evita dados móveis")
                     },
                     trailingContent = {
                         Switch(
@@ -338,23 +365,32 @@ fun SettingsScreen(
                 )
             }
             item {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     OutlinedButton(
                         onClick = {
                             syncTasks.runIndexSanitation(userInitiated = true)
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f),
                         enabled = !syncState.isRunning,
                     ) {
-                        Text("Verificar e limpar índice")
+                        Text("Limpar índice")
                     }
-                    Text(
-                        "Remove entradas órfãs do índice. Trocar a pasta na nuvem recria o índice " +
-                            "no próximo sync; cada sync também faz uma verificação rápida.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
+                    IconButton(
+                        onClick = {
+                            settingsInfo = SettingsInfoDialog(
+                                title = "Limpar índice",
+                                body = "Remove entradas órfãs do índice. Trocar a pasta na nuvem recria o " +
+                                    "índice no próximo sync; cada sync também faz uma verificação rápida.",
+                            )
+                        },
+                    ) {
+                        Icon(Icons.Outlined.Info, contentDescription = "Mais informações")
+                    }
                 }
             }
             item {
@@ -374,6 +410,71 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private data class SettingsInfoDialog(
+    val title: String,
+    val body: String,
+)
+
+@Composable
+private fun SettingsHeadlineWithInfo(
+    title: String,
+    onInfoClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = onInfoClick,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Outlined.Info,
+                contentDescription = "Mais informações",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    summary: String,
+    info: SettingsInfoDialog,
+    checked: Boolean,
+    onInfoClick: (SettingsInfoDialog) -> Unit,
+    onCheckedChange: (Boolean) -> Unit,
+    leadingContent: (@Composable () -> Unit)? = null,
+) {
+    ListItem(
+        headlineContent = {
+            SettingsHeadlineWithInfo(
+                title = title,
+                onInfoClick = { onInfoClick(info) },
+            )
+        },
+        supportingContent = {
+            Text(
+                summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        leadingContent = leadingContent,
+        trailingContent = {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        },
+    )
 }
 
 @Composable
