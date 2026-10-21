@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.onegallery.sync.sync.CloudSyncState
+import com.onegallery.sync.ui.theme.OneDriveBlue
 import android.content.Context
 
 fun cloudBadgeState(item: GalleryDisplayItem): CloudSyncState {
@@ -86,10 +88,15 @@ fun GalleryCloudBadge(
         CloudSyncState.CLOUD_ONLY -> "Só na nuvem"
         else -> state.name
     }
+    val tint = when (state) {
+        CloudSyncState.LOCAL_ONLY -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> OneDriveBlue
+    }
     Icon(
         icon,
         contentDescription = description,
         modifier = modifier.size(iconSize),
+        tint = tint,
     )
 }
 

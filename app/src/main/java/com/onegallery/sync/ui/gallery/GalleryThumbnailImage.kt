@@ -19,6 +19,7 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.ui.theme.OneDriveBlue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -100,7 +101,11 @@ fun MediaThumbnailPlaceholder(
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (showCloudIcon) {
-            Icon(Icons.Outlined.Cloud, contentDescription = null)
+            Icon(
+                Icons.Outlined.Cloud,
+                contentDescription = null,
+                tint = com.onegallery.sync.ui.theme.OneDriveBlue,
+            )
         }
     }
 }
