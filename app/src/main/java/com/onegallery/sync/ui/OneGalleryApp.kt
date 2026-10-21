@@ -295,9 +295,13 @@ fun OneGalleryApp(
     }
 
     if (!setupDone) {
+        val appContext = LocalContext.current.applicationContext as OneGalleryApplication
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
-            onFinished = { setupDone = true },
+            onFinished = {
+                setupDone = true
+                appContext.rescheduleBackgroundSync()
+            },
             onConnectOneDriveCloud = { openCloudFolderPicker() },
         )
         return

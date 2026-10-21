@@ -61,6 +61,7 @@ fun SettingsScreen(
     val authState by authManager.state.collectAsStateWithLifecycle()
     val syncState by syncCoordinator.state.collectAsStateWithLifecycle()
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
+    var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
 
@@ -202,6 +203,28 @@ fun SettingsScreen(
                             onCheckedChange = {
                                 autoDeleteRemote = it
                                 syncPreferences.autoDeleteRemoteWhenLocalRemoved = it
+                            },
+                        )
+                    },
+                )
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Sync sempre em segundo plano") },
+                    supportingContent = {
+                        Text(
+                            "Após reiniciar o aparelho, a cada ~15 min, ao voltar a internet " +
+                                "e quando fotos/vídeos mudam na galeria. Durante o sync aparece " +
+                                "a notificação em primeiro plano.",
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = backgroundAlways,
+                            onCheckedChange = { enabled ->
+                                backgroundAlways = enabled
+                                syncPreferences.backgroundSyncAlwaysEnabled = enabled
+                                app.rescheduleBackgroundSync()
                             },
                         )
                     },

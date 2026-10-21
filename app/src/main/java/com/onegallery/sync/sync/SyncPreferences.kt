@@ -36,6 +36,14 @@ class SyncPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_WIFI_ONLY, true)
         set(value) = prefs.edit().putBoolean(KEY_WIFI_ONLY, value).apply()
 
+    /**
+     * Sync automático contínuo: WorkManager periódico, boot, rede e mudanças no MediaStore.
+     * Desligar deixa só sync manual e ao abrir o app.
+     */
+    var backgroundSyncAlwaysEnabled: Boolean
+        get() = prefs.getBoolean(KEY_BACKGROUND_SYNC_ALWAYS, true)
+        set(value) = prefs.edit().putBoolean(KEY_BACKGROUND_SYNC_ALWAYS, value).apply()
+
     var hasCompletedSetup: Boolean
         get() = prefs.getBoolean(KEY_SETUP_DONE, false)
         set(value) = prefs.edit().putBoolean(KEY_SETUP_DONE, value).apply()
@@ -74,6 +82,7 @@ class SyncPreferences(context: Context) {
 
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
+        private const val KEY_BACKGROUND_SYNC_ALWAYS = "background_sync_always"
         private const val KEY_SETUP_DONE = "setup_done"
         private const val KEY_SYNC_MODE = "sync_mode"
         private const val KEY_LAST_VERSION = "last_version_code"

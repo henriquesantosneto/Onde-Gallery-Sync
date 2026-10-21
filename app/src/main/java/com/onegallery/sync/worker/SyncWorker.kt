@@ -12,7 +12,14 @@ class SyncWorker(
 
     override suspend fun doWork(): Result {
         val app = applicationContext as OneGalleryApplication
-        if (app.syncPreferences.isAutoSyncPaused()) {
+        val prefs = app.syncPreferences
+        if (!prefs.hasCompletedSetup) {
+            return Result.success()
+        }
+        if (!prefs.backgroundSyncAlwaysEnabled) {
+            return Result.success()
+        }
+        if (prefs.isAutoSyncPaused()) {
             return Result.success()
         }
         return app.syncCoordinator.runBidirectionalSync(userInitiated = false)

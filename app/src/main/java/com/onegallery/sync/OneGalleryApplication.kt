@@ -7,11 +7,8 @@ import android.net.NetworkCapabilities
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
+import com.onegallery.sync.sync.MediaLibraryChangeWatcher
+import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.BuildConfig
 import com.onegallery.sync.auth.AuthPreferences
 import com.onegallery.sync.auth.MsalAuthManager
@@ -33,8 +30,6 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
-import com.onegallery.sync.worker.SyncWorker
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,6 +72,9 @@ class OneGalleryApplication : Application() {
         private set
 
     lateinit var mediaCacheRepository: MediaCacheRepository
+        private set
+
+    lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
         private set
 
     override fun onCreate() {
@@ -127,6 +125,7 @@ class OneGalleryApplication : Application() {
             backgroundScope = applicationScope,
         )
         syncTaskLauncher = SyncTaskLauncher(applicationScope, syncCoordinator)
+        mediaLibraryChangeWatcher = MediaLibraryChangeWatcher(applicationContext, syncPreferences)
         registerWifiSyncNetworkGuard()
         rescheduleBackgroundSync()
     }
@@ -135,8 +134,25 @@ class OneGalleryApplication : Application() {
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
         connectivityManager.registerDefaultNetworkCallback(
             object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    BackgroundSyncScheduler.enqueueSyncSoon(
+                        context = this@OneGalleryApplication,
+                        prefs = syncPreferences,
+                        delaySeconds = 25,
+                    )
+                }
+
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                     enforceWifiOnlyDuringSync()
+                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    ) {
+                        BackgroundSyncScheduler.enqueueSyncSoon(
+                            context = this@OneGalleryApplication,
+                            prefs = syncPreferences,
+                            delaySeconds = 25,
+                        )
+                    }
                 }
 
                 override fun onLost(network: Network) {
@@ -155,21 +171,6 @@ class OneGalleryApplication : Application() {
     }
 
     fun rescheduleBackgroundSync() {
-        val networkType = if (syncPreferences.wifiOnly) {
-            NetworkType.UNMETERED
-        } else {
-            NetworkType.CONNECTED
-        }
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(networkType)
-            .build()
-        val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(constraints)
-            .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            SyncWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            request,
-        )
+        BackgroundSyncScheduler.applyAlwaysOnPolicy(this)
     }
 }
