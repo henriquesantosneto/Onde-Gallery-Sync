@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -122,6 +121,8 @@ class GalleryViewModel(
     private val folderAlbumLatestSort = mutableMapOf<String, Long>()
     private val placeAlbumLatestSort = mutableMapOf<String, Long>()
     @Volatile
+    private var initialLibrarySnapshotApplied = false
+    @Volatile
     private var latestLibraryItems: List<GalleryDisplayItem> = emptyList()
 
     @Volatile
@@ -205,10 +206,15 @@ class GalleryViewModel(
             }
         }
         lastAlbumCoverRevisions = coverRevisions
+        if (!initialLibrarySnapshotApplied) {
+            initialLibrarySnapshotApplied = true
+            loading.value = false
+        }
         val catalogItems = snapshot.catalogItems
         val visibleItems = snapshot.visibleItems
         latestCatalogItems = catalogItems
         latestLibraryItems = visibleItems
+        val deferAlbumCoverModels = catalogItems.size > 3_000
         val coverKeysToRefresh = detectAlbumCoverSignatureChanges(catalogItems)
         if (coverKeysToRefresh.isNotEmpty()) {
             syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(coverKeysToRefresh)
@@ -238,9 +244,21 @@ class GalleryViewModel(
             isLoading = controls.isLoading,
             libraryItems = libraryItems,
             items = items,
-            albums = buildAlbums(catalogItems, userAlbums, controls.albumSort, albumCoverLocalIndex, mediaCacheRepository),
+            albums = buildAlbums(
+                catalogItems,
+                userAlbums,
+                controls.albumSort,
+                albumCoverLocalIndex,
+                mediaCacheRepository,
+                resolveCoverModels = !deferAlbumCoverModels,
+            ),
             placeAlbums = sortPlaceAlbums(
-                buildPlaceAlbums(catalogItems, albumCoverLocalIndex, mediaCacheRepository),
+                buildPlaceAlbums(
+                    catalogItems,
+                    albumCoverLocalIndex,
+                    mediaCacheRepository,
+                    resolveCoverModels = !deferAlbumCoverModels,
+                ),
                 controls.albumSort,
             ),
             userAlbums = userAlbums,
@@ -263,16 +281,6 @@ class GalleryViewModel(
             SharingStarted.WhileSubscribed(5_000, Long.MAX_VALUE),
             GalleryUiState(),
         )
-
-    init {
-        viewModelScope.launch {
-            try {
-                syncCoordinator.galleryMetadata.first()
-            } finally {
-                loading.value = false
-            }
-        }
-    }
 
     fun clearBrowseFilters() {
         browseFilter.value = GalleryBrowseFilter.All
@@ -664,6 +672,7 @@ private fun buildAlbums(
     sort: AlbumListSort,
     albumCoverLocalIndex: AlbumCoverLocalIndex,
     mediaCacheRepository: MediaCacheRepository,
+    resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
     val grouped = mirrored.groupBy { it.albumName }
     val titles = (userAlbums.map { it.title } + grouped.keys).distinct()
@@ -680,11 +689,15 @@ private fun buildAlbums(
             itemCount = items.size,
             photoCount = photoCount,
             videoCount = videoCount,
-            coverModel = albumCoverLocalIndex.coverModelForKey(
-                cacheKey = "album:$title",
-                items = items,
-                mediaCacheRepository = mediaCacheRepository,
-            ),
+            coverModel = if (resolveCoverModels) {
+                albumCoverLocalIndex.coverModelForKey(
+                    cacheKey = "album:$title",
+                    items = items,
+                    mediaCacheRepository = mediaCacheRepository,
+                )
+            } else {
+                null
+            },
             sortTimestamp = latest,
             isUserManaged = userMeta != null,
             userAlbumId = userMeta?.id,
@@ -706,6 +719,7 @@ private fun buildPlaceAlbums(
     items: List<GalleryDisplayItem>,
     albumCoverLocalIndex: AlbumCoverLocalIndex,
     mediaCacheRepository: MediaCacheRepository,
+    resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
     val located = items.mapNotNull { item ->
         val label = item.locationLabel?.trim().orEmpty()
@@ -736,11 +750,15 @@ private fun buildPlaceAlbums(
                 itemCount = group.size,
                 photoCount = photoCount,
                 videoCount = videoCount,
-                coverModel = albumCoverLocalIndex.coverModelForKey(
-                    cacheKey = "place:$encodedKey",
-                    items = group,
-                    mediaCacheRepository = mediaCacheRepository,
-                ),
+                coverModel = if (resolveCoverModels) {
+                    albumCoverLocalIndex.coverModelForKey(
+                        cacheKey = "place:$encodedKey",
+                        items = group,
+                        mediaCacheRepository = mediaCacheRepository,
+                    )
+                } else {
+                    null
+                },
                 sortTimestamp = latest,
             )
         }

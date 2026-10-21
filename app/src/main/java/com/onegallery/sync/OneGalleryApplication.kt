@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class OneGalleryApplication : Application() {
     lateinit var authManager: MsalAuthManager
@@ -121,6 +122,9 @@ class OneGalleryApplication : Application() {
         )
         galleryPreferences = GalleryPreferences(this)
         mediaCacheRepository = MediaCacheRepository(this)
+        applicationScope.launch(Dispatchers.IO) {
+            mediaCacheRepository.warmThumbnailExistsCache()
+        }
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
         val cloudSyncBackendRegistry = CloudSyncBackendRegistry(

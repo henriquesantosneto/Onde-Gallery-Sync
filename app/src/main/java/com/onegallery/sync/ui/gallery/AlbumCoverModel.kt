@@ -53,7 +53,7 @@ fun hasCachedThumbnailFile(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath)?.isFile == true) return true
+    if (mediaCacheRepository.isThumbnailCachedFast(item.canonicalPath, item.oneDriveItemId)) return true
     return item.cachedPlaceholderThumb?.isFile == true && item.cachedPlaceholderThumb.length() > 0L
 }
 

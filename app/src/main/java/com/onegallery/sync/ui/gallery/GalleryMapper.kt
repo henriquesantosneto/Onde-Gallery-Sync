@@ -49,11 +49,13 @@ object GalleryMapper {
         val localUri = entity.localContentUri?.let { Uri.parse(it) }
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
-            ?: mediaCacheRepository.originalIfCached(entity.canonicalPath)
-        val placeholderThumb = mediaCacheRepository.thumbnailIfCached(
-            entity.canonicalPath,
-            entity.oneDriveItemId,
-        )
+        val placeholderThumb = if (
+            mediaCacheRepository.isThumbnailCachedFast(entity.canonicalPath, entity.oneDriveItemId)
+        ) {
+            mediaCacheRepository.thumbFile(entity.canonicalPath).takeIf { it.isFile && it.length() > 0L }
+        } else {
+            null
+        }
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }
             ?: entity.localModifiedAt?.takeIf { it > 0L }

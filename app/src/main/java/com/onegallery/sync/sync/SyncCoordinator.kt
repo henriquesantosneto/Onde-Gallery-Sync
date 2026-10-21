@@ -56,6 +56,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.update
 import java.io.File
 import java.util.Locale
@@ -603,8 +606,11 @@ class SyncCoordinator(
         }
     }
 
-    val galleryMetadata: Flow<List<SyncMetadataEntity>> =
-        syncMetadataDao.observeAll().debounce(GALLERY_METADATA_DEBOUNCE_MS)
+    private val galleryMetadataSource = syncMetadataDao.observeAll()
+    val galleryMetadata: Flow<List<SyncMetadataEntity>> = merge(
+        galleryMetadataSource.take(1),
+        galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
+    )
     val syncIndexStats: Flow<SyncIndexStatsRow> = syncMetadataDao.observeIndexStats()
     val syncAttentionItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAttentionItems()
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()

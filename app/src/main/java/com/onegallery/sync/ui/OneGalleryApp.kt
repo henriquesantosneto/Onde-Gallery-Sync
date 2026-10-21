@@ -70,9 +70,12 @@ import com.onegallery.sync.ui.navigation.decodeBrowseNavKey
 import com.onegallery.sync.ui.navigation.encodeBrowseNavKey
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val PLACES_MAP_ROUTE = "places_map"
+/** Dá a UI montar a galeria antes de disputar CPU/rede com sync automático. */
+private const val DEFER_INITIAL_AUTO_SYNC_MS = 12_000L
 /** Conteúdo filtrado de um álbum/local; mantém a aba Álbuns selecionada na barra inferior. */
 private const val ALBUM_BROWSE_FOLDER_ROUTE = "albums/browse/folder/{folderKey}"
 private const val ALBUM_BROWSE_PLACE_ROUTE = "albums/browse/place/{placeKey}/{placeTitle}"
@@ -211,7 +214,10 @@ fun OneGalleryApp(
         val locationOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             results[Manifest.permission.ACCESS_MEDIA_LOCATION] == true
         if (mediaOk && locationOk) {
-            triggerInitialAutoSyncIfReady()
+            scope.launch {
+                delay(DEFER_INITIAL_AUTO_SYNC_MS)
+                triggerInitialAutoSyncIfReady()
+            }
         }
     }
 
@@ -242,6 +248,7 @@ fun OneGalleryApp(
 
     LaunchedEffect(setupDone, syncPreferences.syncMode, authState.isSignedIn) {
         if (!setupDone) return@LaunchedEffect
+        delay(DEFER_INITIAL_AUTO_SYNC_MS)
         triggerInitialAutoSyncIfReady()
     }
 

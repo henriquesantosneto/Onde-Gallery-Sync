@@ -9,6 +9,8 @@ class MediaCacheRepository(context: Context) {
     private val originalsDir = File(context.cacheDir, "originals").apply { mkdirs() }
     private val thumbsDir = File(context.cacheDir, "thumbs").apply { mkdirs() }
     private val thumbExistsCache = ConcurrentHashMap<String, Boolean>()
+    /** Nomes de arquivo em `thumbs/` (sem decode) — aquecido na abertura do app. */
+    private val thumbOnDiskBySafeName = ConcurrentHashMap<String, Boolean>()
 
     /** Disparado após cada miniatura gravada (`canonicalPath` do item). */
     @Volatile
@@ -72,13 +74,49 @@ class MediaCacheRepository(context: Context) {
         }
         val committed = dest.takeIf { it.isFile && it.length() > 0L }
         if (committed != null) {
-            thumbExistsCache[canonicalPath] = true
+            rememberThumbOnDisk(canonicalPath, committed)
             oneDriveItemId?.takeIf { it.isNotBlank() }?.let { itemId ->
                 mirrorThumbToRemoteItemAlias(committed, itemId)
             }
             onThumbnailCommitted?.invoke(canonicalPath)
         }
         return committed
+    }
+
+    /** Varre `thumbs/` uma vez (IO barato) para acelerar filtros com biblioteca grande. */
+    fun warmThumbnailExistsCache() {
+        val files = thumbsDir.listFiles() ?: return
+        for (file in files) {
+            if (!file.isFile || file.name.endsWith(".new")) continue
+            if (file.length() <= 24L) continue
+            thumbOnDiskBySafeName[file.name] = true
+        }
+    }
+
+    /**
+     * Checagem O(1)/stat para montar a galeria — **sem** BitmapFactory nem cópia de alias.
+     */
+    fun isThumbnailCachedFast(canonicalPath: String, oneDriveItemId: String? = null): Boolean {
+        if (thumbExistsCache[canonicalPath] == true) return true
+        val safe = safeFileName(canonicalPath)
+        if (thumbOnDiskBySafeName[safe] == true) {
+            thumbExistsCache[canonicalPath] = true
+            return true
+        }
+        val file = thumbFile(canonicalPath)
+        if (file.isFile && file.length() > 24L) {
+            rememberThumbOnDisk(canonicalPath, file)
+            return true
+        }
+        val itemId = oneDriveItemId?.takeIf { it.isNotBlank() } ?: return false
+        val alias = thumbFileByRemoteItemId(itemId)
+        if (alias.isFile && alias.length() > 24L) return true
+        return false
+    }
+
+    private fun rememberThumbOnDisk(canonicalPath: String, file: File) {
+        thumbExistsCache[canonicalPath] = true
+        thumbOnDiskBySafeName[file.name] = true
     }
 
     private fun mirrorThumbToRemoteItemAlias(source: File, oneDriveItemId: String) {
@@ -115,13 +153,20 @@ class MediaCacheRepository(context: Context) {
     }
 
     fun thumbnailIfCached(canonicalPath: String, oneDriveItemId: String? = null): File? {
+        if (thumbExistsCache[canonicalPath] == true) {
+            val cached = thumbFile(canonicalPath)
+            if (cached.isFile && cached.length() > 0L) return cached
+            thumbExistsCache.remove(canonicalPath)
+            thumbOnDiskBySafeName.remove(safeFileName(canonicalPath))
+        }
         val file = thumbFile(canonicalPath)
         if (file.isFile && file.length() > 0L) {
             if (!isReadableThumbnailFile(file)) {
                 file.delete()
                 thumbExistsCache.remove(canonicalPath)
+                thumbOnDiskBySafeName.remove(file.name)
             } else {
-                thumbExistsCache[canonicalPath] = true
+                rememberThumbOnDisk(canonicalPath, file)
                 return file
             }
         }
@@ -140,7 +185,7 @@ class MediaCacheRepository(context: Context) {
             }
         }
         if (file.isFile && file.length() > 0L && isReadableThumbnailFile(file)) {
-            thumbExistsCache[canonicalPath] = true
+            rememberThumbOnDisk(canonicalPath, file)
             return file
         }
         file.delete()
@@ -174,5 +219,6 @@ class MediaCacheRepository(context: Context) {
         originalsDir.listFiles()?.forEach { it.delete() }
         thumbsDir.listFiles()?.forEach { it.delete() }
         thumbExistsCache.clear()
+        thumbOnDiskBySafeName.clear()
     }
 }
