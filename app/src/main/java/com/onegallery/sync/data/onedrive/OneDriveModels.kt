@@ -18,10 +18,16 @@ data class DriveItem(
     val lastModifiedDateTime: String?,
     val parentReference: ParentReference?,
     val deleted: DeletedItemFacet? = null,
+    @Json(name = "@removed") val removed: RemovedItemFacet? = null,
 )
 
 data class DeletedItemFacet(
     val state: String? = null,
+)
+
+/** Delta/tracking: item saiu do escopo ou foi apagado. */
+data class RemovedItemFacet(
+    val reason: String? = null,
 )
 
 data class DriveFileFacet(

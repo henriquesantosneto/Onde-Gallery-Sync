@@ -180,9 +180,14 @@ class OneDriveRepository(
     ): RemoteDriveListing {
         val rootId = configuredSyncRootItemId()
         val savedDelta = graphFolderPreferences.driveDeltaLink
+        val knownByItemId = indexBaseline.associate { it.itemId to it.canonicalPath }.toMutableMap()
         return try {
             if (savedDelta != null) {
-                val delta = collectDriveDeltaPages(token, savedDelta)
+                val delta = collectDriveDeltaPages(
+                    token = token,
+                    start = savedDelta,
+                    knownByItemId = knownByItemId,
+                )
                 graphFolderPreferences.driveDeltaLink = delta.deltaLink
                 RemoteDriveListing(
                     files = mergeRemoteBaseline(indexBaseline, delta),
@@ -190,28 +195,39 @@ class OneDriveRepository(
                     deltaChangeCount = deltaChangeCount(delta),
                 )
             } else {
-                val delta = collectDriveDeltaPages(token, rootId, initialFromItemId = true)
-                graphFolderPreferences.driveDeltaLink = delta.deltaLink
-                RemoteDriveListing(
-                    files = mergeRemoteBaseline(emptyList(), delta),
-                    incremental = false,
-                    deltaChangeCount = deltaChangeCount(delta),
-                )
+                buildInitialRemoteListing(token, rootId, knownByItemId)
             }
         } catch (http: HttpException) {
             if (savedDelta != null && (http.code() == 410 || http.code() == 404)) {
                 graphFolderPreferences.clearDriveDeltaLink()
-                val delta = collectDriveDeltaPages(token, rootId, initialFromItemId = true)
-                graphFolderPreferences.driveDeltaLink = delta.deltaLink
-                RemoteDriveListing(
-                    files = mergeRemoteBaseline(emptyList(), delta),
-                    incremental = false,
-                    deltaChangeCount = deltaChangeCount(delta),
-                )
+                buildInitialRemoteListing(token, rootId, knownByItemId)
             } else {
                 throw http
             }
         }
+    }
+
+    private suspend fun buildInitialRemoteListing(
+        token: String,
+        rootId: String,
+        knownByItemId: MutableMap<String, String>,
+    ): RemoteDriveListing {
+        val delta = collectDriveDeltaPages(
+            token = token,
+            start = rootId,
+            initialFromItemId = true,
+            knownByItemId = knownByItemId,
+        )
+        graphFolderPreferences.driveDeltaLink = delta.deltaLink
+        var files = mergeRemoteBaseline(emptyList(), delta)
+        if (files.isEmpty()) {
+            files = listFilesRecursive(token, rootId)
+        }
+        return RemoteDriveListing(
+            files = files,
+            incremental = false,
+            deltaChangeCount = deltaChangeCount(delta).coerceAtLeast(files.size),
+        )
     }
 
     private fun configuredSyncRootItemId(): String {
@@ -231,6 +247,7 @@ class OneDriveRepository(
         token: String,
         start: String,
         initialFromItemId: Boolean = false,
+        knownByItemId: MutableMap<String, String> = mutableMapOf(),
     ): DriveDeltaAccum {
         val auth = "Bearer $token"
         val acc = DriveDeltaAccum(mutableListOf(), mutableSetOf(), null)
@@ -247,16 +264,18 @@ class OneDriveRepository(
                 else -> break
             }
             started = true
-            page.value.forEach { item ->
-                if (item.deleted != null) {
+            for (item in page.value) {
+                if (item.deleted != null || item.removed != null) {
                     item.id?.let { acc.removedItemIds.add(it) }
-                    return@forEach
+                    continue
                 }
-                if (item.file == null) return@forEach
-                val fileName = item.name ?: return@forEach
-                val canonical = canonicalPathForDriveItem(item) ?: return@forEach
-                if (!SyncPolicy.shouldIncludeLocalItem(canonical, fileName)) return@forEach
-                acc.changedFiles.add(remoteDriveFileFromItem(item, canonical))
+                if (item.file == null) continue
+                val fileName = item.name ?: continue
+                val canonical = resolveCanonicalPathForDeltaFile(auth, item, knownByItemId) ?: continue
+                if (!SyncPolicy.shouldIncludeLocalItem(canonical, fileName)) continue
+                val remote = remoteDriveFileFromItem(item, canonical)
+                acc.changedFiles.add(remote)
+                knownByItemId[remote.itemId] = canonical
             }
             nextLink = page.nextLink
             if (page.deltaLink != null) {
@@ -268,6 +287,20 @@ class OneDriveRepository(
             error("Graph delta terminou sem @odata.deltaLink")
         }
         return acc
+    }
+
+    /** Delta muitas vezes omite parentReference.path — usa índice local ou GET do item. */
+    private suspend fun resolveCanonicalPathForDeltaFile(
+        auth: String,
+        item: DriveItem,
+        knownByItemId: Map<String, String>,
+    ): String? {
+        canonicalPathForDriveItem(item)?.let { return it }
+        val itemId = item.id ?: return null
+        knownByItemId[itemId]?.let { return it }
+        val full = runCatching { graphApi.getDriveItem(auth, itemId) }.getOrNull() ?: return null
+        canonicalPathForDriveItem(full)?.let { return it }
+        return knownByItemId[itemId]
     }
 
     private fun deltaChangeCount(delta: DriveDeltaAccum): Int {
