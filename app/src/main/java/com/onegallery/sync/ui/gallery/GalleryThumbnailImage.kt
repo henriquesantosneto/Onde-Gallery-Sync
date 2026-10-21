@@ -88,8 +88,9 @@ fun GalleryThumbnailImage(
             },
         )
     } else {
-        val showCenterCloud = item.cloudState != CloudSyncState.CLOUD_ONLY &&
-            item.cloudState != CloudSyncState.PENDING_DOWNLOAD
+        val showCenterCloud = item.oneDriveItemId != null ||
+            item.cloudState == CloudSyncState.CLOUD_ONLY ||
+            item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         MediaThumbnailPlaceholder(modifier = modifier, showCloudIcon = showCenterCloud)
     }
 }

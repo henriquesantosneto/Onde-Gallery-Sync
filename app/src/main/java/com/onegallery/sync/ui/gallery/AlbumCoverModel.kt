@@ -70,7 +70,9 @@ fun galleryItemCoverReady(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    return resolveGalleryCoverModel(item, mediaCacheRepository) != null
+    if (resolveGalleryCoverModel(item, mediaCacheRepository) != null) return true
+    return item.oneDriveItemId != null &&
+        GalleryMapper.supportsGeneratedThumbnail(item.displayName)
 }
 
 fun resolveGalleryCoverModel(

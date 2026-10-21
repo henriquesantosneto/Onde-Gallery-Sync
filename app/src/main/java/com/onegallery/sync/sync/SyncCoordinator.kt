@@ -3135,8 +3135,8 @@ class SyncCoordinator(
                     val missingGps = countIndexedMissingGps()
                     if (missingThumb > 0) {
                         append(
-                            "\nMiniaturas pendentes: $missingThumb — " +
-                                "alguns itens falharam ou o sync foi interrompido.",
+                            "\nMiniaturas pendentes: $missingThumb — itens já aparecem na galeria " +
+                                "(ícone de nuvem); miniaturas continuam em segundo plano e ao rolar.",
                         )
                     }
                     if (missingGps > 0) {
@@ -3158,6 +3158,7 @@ class SyncCoordinator(
                     activityDetail = "",
                     lastMessage = finalMessage,
                 )
+                scheduleBackgroundThumbnailPrefetchIfNeeded()
             }.onFailure { error ->
                 if (error is CancellationException) {
                     _state.value = _state.value.copy(
@@ -3204,8 +3205,45 @@ class SyncCoordinator(
             } finally {
                 longTaskMutex.unlock()
             }
+            scheduleBackgroundThumbnailPrefetchIfNeeded()
         }
         registerManagedSyncJob(job)
+    }
+
+    /** Continua miniaturas após o sync principal (bibliotecas grandes, ex. dezenas de milhares na nuvem). */
+    private fun scheduleBackgroundThumbnailPrefetchIfNeeded() {
+        val scope = backgroundScope ?: return
+        scope.launch {
+            delay(BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS)
+            var stalledPasses = 0
+            repeat(THUMB_BACKGROUND_CONTINUE_PASSES) {
+                if (_state.value.isRunning) return@launch
+                if (countIndexedMissingThumbnails() == 0) return@launch
+                if (!longTaskMutex.tryLock()) {
+                    delay(BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS)
+                    return@repeat
+                }
+                try {
+                    val before = countIndexedMissingThumbnails()
+                    if (before == 0) return@launch
+                    prefetchMissingThumbnails(
+                        honorUserSyncCancel = false,
+                        maxTotalPerRun = THUMB_BACKGROUND_MAX_TOTAL_PER_PASS,
+                    )
+                    val after = countIndexedMissingThumbnails()
+                    if (after == 0) return@launch
+                    if (after >= before) {
+                        stalledPasses++
+                        if (stalledPasses >= 3) return@launch
+                    } else {
+                        stalledPasses = 0
+                    }
+                } finally {
+                    longTaskMutex.unlock()
+                }
+                delay(BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS)
+            }
+        }
     }
 
     /** Uma leva: no máximo uma miniatura por álbum ainda sem capa (UI usa qualquer thumb local). */
@@ -3229,7 +3267,11 @@ class SyncCoordinator(
     }
 
     /** Miniaturas faltantes em levas; limite por sync para não travar GPS/resto do app. */
-    private suspend fun prefetchMissingThumbnails(batchSize: Int = THUMB_PREFETCH_BATCH) {
+    private suspend fun prefetchMissingThumbnails(
+        batchSize: Int = THUMB_PREFETCH_BATCH,
+        honorUserSyncCancel: Boolean = true,
+        maxTotalPerRun: Int = THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
+    ) {
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
         bulkThumbnailPrefetchDepth.incrementAndGet()
@@ -3244,8 +3286,12 @@ class SyncCoordinator(
         var stoppedByCap = false
         try {
             while (round < maxRounds) {
-                ensureNotCancelled()
-                if (totalCached >= THUMB_PREFETCH_MAX_TOTAL_PER_SYNC) {
+                if (honorUserSyncCancel) {
+                    ensureNotCancelled()
+                } else {
+                    coroutineContext.ensureActive()
+                }
+                if (totalCached >= maxTotalPerRun) {
                     stoppedByCap = true
                     break
                 }
@@ -4006,9 +4052,13 @@ class SyncCoordinator(
         const val THUMB_CACHE_JPEG_QUALITY = 88
         /** Itens por leva no pós-sync (miniaturas locais + download na nuvem). */
         const val THUMB_PREFETCH_BATCH = 512
-        const val THUMB_PREFETCH_EXTRA_ROUNDS = 8
-        const val THUMB_PREFETCH_MAX_ROUNDS = 36
-        const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 2_500
+        const val THUMB_PREFETCH_EXTRA_ROUNDS = 12
+        const val THUMB_PREFETCH_MAX_ROUNDS = 48
+        const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 6_000
+        const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 4_000
+        const val THUMB_BACKGROUND_CONTINUE_PASSES = 24
+        const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
+        const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 2
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
