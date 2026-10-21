@@ -1295,7 +1295,7 @@ class SyncCoordinator(
                     if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
                         freedLocal += autoReleaseSyncedLocalCopies(
                             allowSystemDialog = allowDialog,
-                            onlyCanonicalPaths = pathsUploadedThisSync.toSet(),
+                            scope = AutoReleaseSyncedScope.UPLOADED_THIS_SESSION,
                         )
                     }
                     if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
@@ -2081,7 +2081,7 @@ class SyncCoordinator(
         if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
             autoReleaseSyncedLocalCopies(
                 allowSystemDialog = allowDialog,
-                onlyCanonicalPaths = emptySet(),
+                scope = AutoReleaseSyncedScope.ALL_ELIGIBLE,
             )
         }
         if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
@@ -2098,16 +2098,31 @@ class SyncCoordinator(
         syncMetadataDao.upsert(row.copy(localLastAccessedAtMs = now))
     }
 
+    private enum class AutoReleaseSyncedScope {
+        /** Fim do sync: reforço só nos enviados nesta execução (cada upload já tenta liberar na hora). */
+        UPLOADED_THIS_SESSION,
+        /** Abertura do app / manutenção: qualquer item já na nuvem com cópia local ainda no aparelho. */
+        ALL_ELIGIBLE,
+    }
+
     private suspend fun autoReleaseSyncedLocalCopies(
         allowSystemDialog: Boolean,
-        onlyCanonicalPaths: Set<String>,
+        scope: AutoReleaseSyncedScope,
     ): Int {
-        ensureSyncMayContinue()
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
-        if (onlyCanonicalPaths.isEmpty()) return 0
+        val sessionPaths = when (scope) {
+            AutoReleaseSyncedScope.UPLOADED_THIS_SESSION -> pathsUploadedThisSync.toSet()
+            AutoReleaseSyncedScope.ALL_ELIGIBLE -> null
+        }
+        if (scope == AutoReleaseSyncedScope.UPLOADED_THIS_SESSION && sessionPaths.isNullOrEmpty()) {
+            return 0
+        }
+        if (scope == AutoReleaseSyncedScope.UPLOADED_THIS_SESSION) {
+            ensureSyncMayContinue()
+        }
         val rows = syncMetadataDao.getAll().filter { row ->
-            row.canonicalPath in onlyCanonicalPaths &&
-                row.localMediaId != null &&
+            (sessionPaths == null || row.canonicalPath in sessionPaths) &&
+                rowHasReleasableLocalCopy(row) &&
                 row.oneDriveItemId != null &&
                 row.cloudState == CloudSyncState.SYNCED &&
                 row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
