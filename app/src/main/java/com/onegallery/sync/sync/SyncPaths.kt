@@ -6,8 +6,11 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 object SyncPaths {
-    /** Pastas conhecidas do WhatsApp (Android/media/.../Media/…). Ficam na raiz do espelho OneGallerySync. */
-    private val whatsAppMediaLeafFolders = listOf(
+    /**
+     * Pastas de mídia WhatsApp na raiz do espelho (um álbum por tipo: Video, Images…).
+     * Subpastas (Sent, Private) entram no álbum do tipo pai — não viram álbum separado.
+     */
+    private val whatsAppPrimaryMediaLeaves = listOf(
         "WhatsApp Images",
         "WhatsApp Video",
         "WhatsApp Animated Gifs",
@@ -16,9 +19,9 @@ object SyncPaths {
         "WhatsApp Stickers",
         "WhatsApp Profile Photos",
         "WhatsApp Voice Notes",
-        "Private",
-        "Sent",
     )
+
+    private val whatsAppKnownSubfolders = setOf("Sent", "Private")
 
     fun canonicalFromLocal(item: LocalMediaItem): String {
         return syncRelativePath(item.relativePath, item.displayName)
@@ -46,7 +49,7 @@ object SyncPaths {
         if (segments.isEmpty()) return normalized
         val fileName = segments.last()
 
-        whatsAppMediaLeafFolders.firstOrNull { leaf ->
+        whatsAppPrimaryMediaLeaves.firstOrNull { leaf ->
             segments.any { it.equals(leaf, ignoreCase = true) }
         }?.let { leaf ->
             return "$leaf/$fileName"
@@ -271,14 +274,47 @@ object SyncPaths {
         }
         if (segments.isEmpty()) return "Raiz"
         val canonicalSegments = segments.map { segment ->
-            whatsAppMediaLeafFolders.firstOrNull { it.equals(segment, ignoreCase = true) } ?: segment
+            whatsAppPrimaryMediaLeaves.firstOrNull { it.equals(segment, ignoreCase = true) }
+                ?: segment
         }
         val collapsed = mutableListOf<String>()
         for (segment in canonicalSegments) {
             if (collapsed.lastOrNull()?.equals(segment, ignoreCase = true) == true) continue
             collapsed.add(segment)
         }
-        return collapsed.joinToString("/")
+        return collapseWhatsAppAlbumGrouping(collapsed.joinToString("/"))
+    }
+
+    /**
+     * Um álbum por tipo de mídia WhatsApp (ex.: só `WhatsApp Video`), mesmo com subpastas Sent/Private
+     * ou caminhos legados `WhatsApp/Sent/…` no aparelho ou na nuvem.
+     */
+    internal fun collapseWhatsAppAlbumGrouping(folderAlbum: String): String {
+        val normalized = folderAlbum.trim('/').replace('\\', '/')
+        if (normalized.isBlank() || normalized.equals("Raiz", ignoreCase = true)) {
+            return normalized.ifBlank { "Raiz" }
+        }
+        val segments = normalized.split('/').filter { it.isNotBlank() }
+        if (segments.isEmpty()) return normalized
+
+        segments.firstOrNull { seg ->
+            whatsAppPrimaryMediaLeaves.any { it.equals(seg, ignoreCase = true) }
+        }?.let { hit ->
+            return whatsAppPrimaryMediaLeaves.first { it.equals(hit, ignoreCase = true) }
+        }
+
+        if (segments.first().equals("WhatsApp", ignoreCase = true) && segments.size >= 2) {
+            return when {
+                segments[1].equals("Video", ignoreCase = true) -> "WhatsApp Video"
+                else -> "WhatsApp Images"
+            }
+        }
+
+        if (segments.size == 1 && whatsAppKnownSubfolders.any { it.equals(segments[0], ignoreCase = true) }) {
+            return "WhatsApp Images"
+        }
+
+        return normalized
     }
 
     /** Título na grade de álbuns — omite o prefixo DCIM/; caminho completo fica nos detalhes. */
