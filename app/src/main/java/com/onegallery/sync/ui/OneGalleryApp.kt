@@ -160,7 +160,6 @@ fun OneGalleryApp(
     galleryPreferences: GalleryPreferences,
     mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
 ) {
-    OneGalleryEdgeToEdgeEffect()
     var setupDone by rememberSaveable { mutableStateOf(syncPreferences.hasCompletedSetup) }
     var cloudSetupStepOrdinal by rememberSaveable { mutableStateOf(CloudSetupStep.Hidden.ordinal) }
     var postSignInStepOrdinal by rememberSaveable {
@@ -263,6 +262,7 @@ fun OneGalleryApp(
     }
 
     if (cloudSetupStep == CloudSetupStep.Browse) {
+        OneGalleryEdgeToEdgeEffect(currentRoute = null)
         OneDriveCloudBrowserScreen(
             oneDriveRepository = oneDriveRepository,
             onFolderSelected = { itemId, path, label ->
@@ -276,6 +276,7 @@ fun OneGalleryApp(
     }
 
     if (cloudSetupStep == CloudSetupStep.SignIn) {
+        OneGalleryEdgeToEdgeEffect(currentRoute = null)
         SignInGate(
             authManager = authManager,
             msalConfigurationError = null,
@@ -295,6 +296,7 @@ fun OneGalleryApp(
     }
 
     if (!setupDone) {
+        OneGalleryEdgeToEdgeEffect(currentRoute = null)
         val appContext = LocalContext.current.applicationContext as OneGalleryApplication
         WelcomeScreen(
             syncCoordinator = syncCoordinator,
@@ -319,6 +321,8 @@ fun OneGalleryApp(
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBottomBar = showsMainBottomBar(currentRoute)
+
+    OneGalleryEdgeToEdgeEffect(currentRoute = currentRoute)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
