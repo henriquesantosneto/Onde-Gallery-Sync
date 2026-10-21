@@ -125,13 +125,22 @@ class GalleryViewModel(
         metadata to userAlbums
     }.conflate()
         .map { (metadata, userAlbums) ->
-        LibrarySnapshot(
-            allItems = dedupeGalleryDisplayItems(
-                metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
-            ).filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
-            userAlbums = userAlbums,
-        )
-    }.flowOn(Dispatchers.Default)
+            runCatching {
+                LibrarySnapshot(
+                    allItems = dedupeGalleryDisplayItems(
+                        metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
+                    ).filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
+                    userAlbums = userAlbums,
+                )
+            }.getOrElse { error ->
+                if (error is OutOfMemoryError) {
+                    errorState.value = "Biblioteca muito grande para exibir de uma vez. Sincronize em partes."
+                    LibrarySnapshot(allItems = emptyList(), userAlbums = userAlbums)
+                } else {
+                    throw error
+                }
+            }
+        }.flowOn(Dispatchers.Default)
 
     private val uiControls = combine(
         combine(browseFilter, loading, errorState, selectionMode) { filter, isLoading, error, selecting ->
