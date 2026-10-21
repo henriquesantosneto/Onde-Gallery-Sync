@@ -18,9 +18,7 @@ fun MediaGalleryOverflowMenuButton(
     showDetails: Boolean,
     onDetails: () -> Unit,
     onFreeSpace: () -> Unit,
-    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
-    deleteLabel: String = "Excluir",
 ) {
     Box(modifier = modifier) {
         IconButton(onClick = { onExpandedChange(true) }) {
@@ -44,13 +42,6 @@ fun MediaGalleryOverflowMenuButton(
                 onClick = {
                     onExpandedChange(false)
                     onFreeSpace()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(deleteLabel) },
-                onClick = {
-                    onExpandedChange(false)
-                    onDelete()
                 },
             )
         }

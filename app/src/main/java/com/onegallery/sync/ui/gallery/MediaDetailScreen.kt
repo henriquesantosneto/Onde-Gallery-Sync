@@ -14,6 +14,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
@@ -410,6 +411,13 @@ fun MediaDetailScreen(
                                 Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                             }
                             if (state.selectedPaths.isNotEmpty()) {
+                                IconButton(onClick = { showDeleteConfirm = true }) {
+                                    Icon(
+                                        Icons.Outlined.Delete,
+                                        contentDescription = "Excluir",
+                                        tint = Color.White,
+                                    )
+                                }
                                 MediaGalleryOverflowMenuButton(
                                     expanded = showOverflowMenu,
                                     onExpandedChange = { showOverflowMenu = it },
@@ -419,8 +427,6 @@ fun MediaDetailScreen(
                                         markSuppressAutoRecall(state.selectedPaths)
                                         viewModel.releaseLocalSpaceSelected()
                                     },
-                                    onDelete = { showDeleteConfirm = true },
-                                    deleteLabel = "Excluir tudo",
                                 )
                             }
                             TextButton(onClick = { viewModel.clearSelection() }) {
@@ -446,6 +452,13 @@ fun MediaDetailScreen(
                                     contentDescription = "Selecionar foto",
                                 )
                             }
+                            IconButton(onClick = { showDeleteConfirm = true }) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = "Excluir",
+                                    tint = Color.White,
+                                )
+                            }
                             MediaGalleryOverflowMenuButton(
                                 expanded = showOverflowMenu,
                                 onExpandedChange = { showOverflowMenu = it },
@@ -455,7 +468,6 @@ fun MediaDetailScreen(
                                     markSuppressAutoRecall(listOf(currentPath))
                                     viewModel.releaseSingle(currentPath)
                                 },
-                                onDelete = { showDeleteConfirm = true },
                             )
                         }
                     },

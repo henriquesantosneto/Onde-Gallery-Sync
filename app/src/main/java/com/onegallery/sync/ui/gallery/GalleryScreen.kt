@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Sort
@@ -156,14 +157,15 @@ fun GalleryScreen(
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
                         if (state.selectedPaths.isNotEmpty()) {
+                            IconButton(onClick = { showDeleteConfirm = true }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = "Excluir")
+                            }
                             MediaGalleryOverflowMenuButton(
                                 expanded = showSelectionOverflow,
                                 onExpandedChange = { showSelectionOverflow = it },
                                 showDetails = true,
                                 onDetails = { showMediaDetails = true },
                                 onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
-                                onDelete = { showDeleteConfirm = true },
-                                deleteLabel = "Excluir tudo",
                             )
                         }
                         TextButton(onClick = { viewModel.clearSelection() }) {
