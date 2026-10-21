@@ -25,6 +25,7 @@ Em `app/build.gradle.kts`: `versionName`, `versionCode` (ex.: 0.8.211 / 263).
 | `THUMB_PREFETCH_MAX_TOTAL_PER_SYNC` | 2500 | Teto de thumbs por sync |
 | `GPS_BACKFILL_ROUNDS` | 8 | Passagens GPS |
 | `GPS_LOCAL_BATCH` / `GPS_CLOUD_BATCH` | 500 | Probes por passagem |
+| `PARALLEL_GPS_BACKFILL` | 3 | Análises EXIF/GPS em paralelo por passagem |
 | `LOCAL_ACCESS_WRITE_THROTTLE_MS` | 60000 | Throttle gravações MediaStore |
 
 Tolerância de timestamp na reconciliação: **2 s** (privado no coordinator).
