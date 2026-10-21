@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.onegallery.sync.data.local.db.SyncIndexStatsRow
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
@@ -51,19 +52,19 @@ fun SyncStatusScreen(
     syncPreferences: SyncPreferences,
 ) {
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
-    val metadata by syncCoordinator.galleryMetadata.collectAsStateWithLifecycle(initialValue = emptyList())
+    val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle(
+        initialValue = null,
+    )
+    val problemItems by syncCoordinator.syncAttentionItems.collectAsStateWithLifecycle(
+        initialValue = emptyList(),
+    )
     val pendingOps by syncCoordinator.pendingOperationCount.collectAsStateWithLifecycle(initialValue = 0)
     val syncQueue by syncCoordinator.syncQueue.collectAsStateWithLifecycle(initialValue = emptyList())
     val app = LocalContext.current.applicationContext as OneGalleryApplication
     val syncTasks = remember { SyncTaskLauncher.from(app) }
 
-    val stats = remember(metadata) { computeSyncStats(metadata) }
-    val problemCount = remember(metadata) {
-        metadata.count { syncCoordinator.shouldShowAttentionItem(it) }
-    }
-    val problemItems = remember(metadata) {
-        metadata.filter { syncCoordinator.shouldShowAttentionItem(it) }.take(25)
-    }
+    val stats = indexStats?.toSyncStats() ?: SyncStats(0, 0, 0, 0, 0, 0, 0, 0, 0)
+    val problemCount = indexStats?.attention ?: problemItems.size
     var clearingErrors by remember { mutableStateOf(false) }
     val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
         when {
@@ -461,21 +462,17 @@ private data class SyncStats(
     val conflicts: Int,
 )
 
-private fun computeSyncStats(metadata: List<SyncMetadataEntity>): SyncStats {
-    return SyncStats(
-        total = metadata.size,
-        withLocal = metadata.count { it.localMediaId != null },
-        synced = metadata.count { it.cloudState == CloudSyncState.SYNCED },
-        pendingUpload = metadata.count { it.cloudState == CloudSyncState.PENDING_UPLOAD },
-        pendingDownload = metadata.count { it.cloudState == CloudSyncState.PENDING_DOWNLOAD },
-        cloudOnly = metadata.count { it.cloudState == CloudSyncState.CLOUD_ONLY },
-        localOnly = metadata.count { it.cloudState == CloudSyncState.LOCAL_ONLY },
-        errors = metadata.count { it.cloudState == CloudSyncState.ERROR },
-        conflicts = metadata.count {
-            it.cloudState == CloudSyncState.CONFLICT || it.pendingDeleteTarget != PendingDeleteTarget.NONE
-        },
-    )
-}
+private fun SyncIndexStatsRow.toSyncStats(): SyncStats = SyncStats(
+    total = total,
+    withLocal = withLocal,
+    synced = synced,
+    pendingUpload = pendingUpload,
+    pendingDownload = pendingDownload,
+    cloudOnly = cloudOnly,
+    localOnly = localOnly,
+    errors = errors,
+    conflicts = conflicts,
+)
 
 private fun connectionHeadline(mode: SyncMode, coordinator: SyncCoordinator): String = when (mode) {
     SyncMode.ONEDRIVE_GRAPH -> coordinator.graphSyncRootLabel()?.let { "OneDrive: $it" }

@@ -31,6 +31,8 @@ import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,7 +69,15 @@ class OneGalleryApplication : Application() {
 
     val appForegroundState = AppForegroundState()
 
-    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val applicationCoroutineExceptionHandler = CoroutineExceptionHandler { _, error ->
+        Log.e("OneGallerySync", "Erro em segundo plano (app continua)", error)
+    }
+
+    val applicationScope = CoroutineScope(
+        SupervisorJob() +
+            Dispatchers.Default +
+            applicationCoroutineExceptionHandler,
+    )
 
     lateinit var syncTaskLauncher: SyncTaskLauncher
         private set

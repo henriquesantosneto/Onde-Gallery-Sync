@@ -20,6 +20,7 @@ import com.onegallery.sync.ui.gallery.AlbumCoverThumbnailPlanner
 import com.onegallery.sync.ui.gallery.GalleryMapper
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.MediaDeleteResult
+import com.onegallery.sync.data.local.db.SyncIndexStatsRow
 import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumDao
@@ -506,6 +507,8 @@ class SyncCoordinator(
 
     val galleryMetadata: Flow<List<SyncMetadataEntity>> =
         syncMetadataDao.observeAll().debounce(GALLERY_METADATA_DEBOUNCE_MS)
+    val syncIndexStats: Flow<SyncIndexStatsRow> = syncMetadataDao.observeIndexStats()
+    val syncAttentionItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAttentionItems()
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
 
     private val _galleryDisplayRefreshEpoch = MutableStateFlow(0L)
@@ -2736,7 +2739,7 @@ class SyncCoordinator(
     }
 
     private suspend fun seedResidualRunQueueAfterCoreSync() {
-        val residual = syncMetadataDao.getAll().filter { row ->
+        val residual = syncMetadataDao.getPostSyncResidualCandidates().filter { row ->
             when {
                 row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
                 row.oneDriveItemId != null &&
@@ -3016,6 +3019,10 @@ class SyncCoordinator(
                                 )
                             }
                             if (hit) 1 else 0
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            0
                         } finally {
                             removeActiveSyncItem(row.canonicalPath)
                             removeFromRunQueue(row.canonicalPath)

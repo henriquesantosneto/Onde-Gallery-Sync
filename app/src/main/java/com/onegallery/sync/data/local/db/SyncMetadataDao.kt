@@ -72,6 +72,51 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
     fun observePendingDeletes(): Flow<List<SyncMetadataEntity>>
 
+    @Query(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM sync_metadata) AS total,
+            (SELECT COUNT(*) FROM sync_metadata WHERE localMediaId IS NOT NULL) AS withLocal,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'SYNCED') AS synced,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_UPLOAD') AS pendingUpload,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_DOWNLOAD') AS pendingDownload,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CLOUD_ONLY') AS cloudOnly,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'LOCAL_ONLY') AS localOnly,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR') AS errors,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CONFLICT'
+                OR pendingDeleteTarget != 'NONE') AS conflicts,
+            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR'
+                OR cloudState = 'CONFLICT'
+                OR (lastError IS NOT NULL AND TRIM(lastError) != '')) AS attention
+        """,
+    )
+    fun observeIndexStats(): Flow<SyncIndexStatsRow>
+
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE cloudState = 'ERROR'
+           OR cloudState = 'CONFLICT'
+           OR (lastError IS NOT NULL AND TRIM(lastError) != '')
+        ORDER BY COALESCE(localModifiedAt, remoteModifiedAt) DESC
+        LIMIT 25
+        """,
+    )
+    fun observeAttentionItems(): Flow<List<SyncMetadataEntity>>
+
+    /** Candidatos à fila pós-sync (sem varrer toda a tabela). */
+    @Query(
+        """
+        SELECT * FROM sync_metadata WHERE
+            pendingDeleteTarget != 'NONE'
+            OR (
+                oneDriveItemId IS NOT NULL
+                AND cloudState IN ('PENDING_DOWNLOAD', 'CLOUD_ONLY')
+            )
+        """,
+    )
+    suspend fun getPostSyncResidualCandidates(): List<SyncMetadataEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: SyncMetadataEntity)
 
