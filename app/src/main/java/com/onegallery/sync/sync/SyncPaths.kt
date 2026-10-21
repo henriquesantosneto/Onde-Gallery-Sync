@@ -6,10 +6,6 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 object SyncPaths {
-    /** Raiz MediaStore usada pelo WhatsApp (Android 10+). */
-    private const val WHATSAPP_MEDIA_STORE_ROOT =
-        "Android/media/com.whatsapp/WhatsApp/Media"
-
     /** Pastas conhecidas do WhatsApp (Android/media/.../Media/…). Ficam na raiz do espelho OneGallerySync. */
     private val whatsAppMediaLeafFolders = listOf(
         "WhatsApp Images",
@@ -95,46 +91,63 @@ object SyncPaths {
     }
 
     /**
-     * Pasta de destino na galeria do Android ao importar/recall.
-     * Prioriza [storedGalleryFolder] (caminho real visto no MediaStore) para coexistir com álbuns nativos.
+     * Pasta na galeria (MediaStore) ao importar/recall.
+     * [storedGalleryFolder] = caminho real do aparelho (WhatsApp, DCIM…).
+     * Sem pasta salva, espelha o **caminho canônico da nuvem** em `Pictures/OneGallerySync/…`
+     * (mesma árvore do espelho local / OneDrive), separado da adaptação de paths do MediaStore.
      */
     fun mediaStoreRelativePathForImport(
         canonicalPath: String,
         kind: MediaKind,
         storedGalleryFolder: String? = null,
-    ): String {
+    ): String = mediaStoreImportFolderCandidates(
+        canonicalPath,
+        kind,
+        storedGalleryFolder,
+    ).first()
+
+    /** Ordem: pasta nativa conhecida → fallback alinhado ao espelho `Pictures/OneGallerySync/…`. */
+    fun mediaStoreImportFolderCandidates(
+        canonicalPath: String,
+        kind: MediaKind,
+        storedGalleryFolder: String? = null,
+    ): List<String> {
+        val candidates = linkedSetOf<String>()
         storedGalleryFolder?.trim()?.takeIf { it.isNotBlank() }?.let { stored ->
-            return normalizeMediaStoreFolder(stored, kind)
-        }
-        canonicalDefaultGalleryFolder(canonicalPath)?.let { return it }
-        return mediaStoreFolderFromAlbumName(albumFromCanonical(canonicalPath), kind)
-    }
-
-    /** Heurística quando só temos o caminho canônico (ex.: item só na nuvem, WhatsApp encurtado). */
-    internal fun canonicalDefaultGalleryFolder(canonicalPath: String): String? {
-        val album = albumFromCanonical(canonicalPath).trim('/').replace('\\', '/')
-        if (album.isBlank() || album.equals("Raiz", ignoreCase = true)) {
-            return null
-        }
-
-        whatsAppMediaLeafFolders.firstOrNull { leaf ->
-            album.equals(leaf, ignoreCase = true) ||
-                album.startsWith("$leaf/", ignoreCase = true)
-        }?.let { leaf ->
-            val suffix = album.removePrefix(leaf).trim('/')
-            val base = "$WHATSAPP_MEDIA_STORE_ROOT/$leaf"
-            return if (suffix.isBlank()) "$base/" else "$base/$suffix/"
-        }
-
-        if (album.startsWith("WhatsApp/", ignoreCase = true)) {
-            val tail = album.removePrefix("WhatsApp/").trim('/')
-            return when {
-                tail.isBlank() -> "Pictures/WhatsApp/"
-                else -> "Pictures/WhatsApp/$tail/"
+            if (isDeviceGalleryRelativeFolder(stored)) {
+                candidates.add(normalizeMediaStoreFolder(stored, kind))
             }
         }
+        candidates.add(galleryFolderFromCanonicalForImport(canonicalPath, kind))
+        return candidates.toList()
+    }
 
-        return null
+    /** Caminho canônico (nuvem) → pasta MediaStore alinhada ao espelho local, salvo DCIM/Pictures/Movies nativos. */
+    internal fun galleryFolderFromCanonicalForImport(canonicalPath: String, kind: MediaKind): String {
+        val album = albumFromCanonical(canonicalPath).trim('/').replace('\\', '/')
+        if (album.isBlank() || album.equals("Raiz", ignoreCase = true)) {
+            return defaultOneGallerySyncFolder(kind)
+        }
+        val segments = album.split('/').filter { it.isNotBlank() }
+        val primary = segments.first()
+        val deviceGalleryPrimaries = when (kind) {
+            MediaKind.IMAGE -> setOf("DCIM", "Pictures")
+            MediaKind.VIDEO -> setOf("DCIM", "Pictures", "Movies")
+        }
+        if (deviceGalleryPrimaries.any { primary.equals(it, ignoreCase = true) }) {
+            return mediaStoreFolderFromAlbumName(album, kind)
+        }
+        val mirrorRoot = SyncPolicy.ONEDRIVE_MIRROR_ROOT
+        return "Pictures/$mirrorRoot/$album/"
+    }
+
+    internal fun isDeviceGalleryRelativeFolder(raw: String): Boolean {
+        val folder = raw.trim().replace('\\', '/').trim('/').lowercase()
+        if (folder.isBlank()) return false
+        return folder.startsWith("dcim/") ||
+            folder.startsWith("pictures/") ||
+            folder.startsWith("movies/") ||
+            folder.startsWith("android/media/")
     }
 
     internal fun normalizeMediaStoreFolder(raw: String, kind: MediaKind): String {

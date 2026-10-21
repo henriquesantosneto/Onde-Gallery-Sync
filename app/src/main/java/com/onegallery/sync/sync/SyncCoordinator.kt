@@ -891,7 +891,14 @@ class SyncCoordinator(
                 )
                 return Result.failure(IllegalStateException("Pasta de sync não conectada"))
             }
-            SyncMode.ONEDRIVE_LOCAL_MIRROR -> Unit
+            SyncMode.ONEDRIVE_LOCAL_MIRROR -> {
+                localMirrorRepository.ensureMirrorRootReady().getOrElse {
+                    _state.value = _state.value.copy(
+                        lastMessage = it.message ?: "Não foi possível criar Pictures/OneGallerySync.",
+                    )
+                    return Result.failure(it)
+                }
+            }
             SyncMode.ONEDRIVE_GRAPH -> {
                 if (!oneDriveRepository.isSyncRootConfigured()) {
                     _state.value = _state.value.copy(

@@ -120,13 +120,45 @@ class LocalMediaRepository(private val context: Context) {
         }
         val collection = mediaCollectionUri(kind)
         val folder = SyncPaths.albumFromCanonical(canonicalPath)
-        val relativePath = SyncPaths.mediaStoreRelativePathForImport(
+        val folderCandidates = SyncPaths.mediaStoreImportFolderCandidates(
             canonicalPath,
             kind,
             storedGalleryFolder,
         )
         val mime = guessMimeType(displayName, kind)
         val takenSec = takenAtEpochSeconds?.takeIf { it > 0L }
+        var lastFailure: Throwable? = null
+        for (relativePath in folderCandidates) {
+            val result = importIntoMediaStoreAtRelativePath(
+                collection = collection,
+                relativePath = relativePath,
+                displayName = displayName,
+                folder = folder,
+                mime = mime,
+                takenSec = takenSec,
+                sourceFile = sourceFile,
+                kind = kind,
+            )
+            if (result.isSuccess) {
+                return@withContext result
+            }
+            lastFailure = result.exceptionOrNull()
+        }
+        return@withContext Result.failure(
+            lastFailure ?: IllegalStateException("Não foi possível importar para a galeria."),
+        )
+    }
+
+    private suspend fun importIntoMediaStoreAtRelativePath(
+        collection: Uri,
+        relativePath: String,
+        displayName: String,
+        folder: String,
+        mime: String,
+        takenSec: Long?,
+        sourceFile: java.io.File,
+        kind: MediaKind,
+    ): Result<LocalMediaItem> {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
@@ -140,7 +172,7 @@ class LocalMediaRepository(private val context: Context) {
             }
         }
         var insertedUri: Uri? = null
-        return@withContext runCatching {
+        return runCatching {
             val uri = context.contentResolver.insert(collection, values)
                 ?: throw IllegalStateException("Não foi possível criar entrada na galeria.")
             insertedUri = uri

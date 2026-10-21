@@ -23,6 +23,14 @@ class LocalMirrorRepository(private val context: Context) {
 
     fun rootPathLabel(): String = mirrorRoot.absolutePath
 
+    /** Garante `Pictures/OneGallerySync/` (base local espelhando a árvore canônica da nuvem). */
+    fun ensureMirrorRootReady(): Result<Unit> = runCatching {
+        val root = mirrorRoot
+        if (!root.isDirectory && !root.mkdirs()) {
+            error("Não foi possível criar a pasta ${root.absolutePath}")
+        }
+    }
+
     fun listMirrorFiles(): Result<List<RemoteDriveFile>> {
         val root = mirrorRoot
         if (!root.exists()) return Result.success(emptyList())
