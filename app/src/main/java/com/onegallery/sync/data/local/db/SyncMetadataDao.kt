@@ -31,7 +31,7 @@ interface SyncMetadataDao {
     @Query(
         """
         SELECT COUNT(*) FROM sync_metadata
-        WHERE cloudState IN ('PENDING_UPLOAD', 'PENDING_DOWNLOAD')
+        WHERE cloudState = 'PENDING_UPLOAD'
            OR pendingDeleteTarget != 'NONE'
         """,
     )
@@ -47,7 +47,7 @@ interface SyncMetadataDao {
     suspend fun getByOneDriveId(itemId: String): SyncMetadataEntity?
 
     @Query(
-        "SELECT COUNT(*) FROM sync_metadata WHERE cloudState IN ('PENDING_UPLOAD', 'PENDING_DOWNLOAD') OR pendingDeleteTarget != 'NONE'",
+        "SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_UPLOAD' OR pendingDeleteTarget != 'NONE'",
     )
     fun observePendingCount(): Flow<Int>
 
@@ -55,13 +55,12 @@ interface SyncMetadataDao {
     @Query(
         """
         SELECT * FROM sync_metadata
-        WHERE cloudState IN ('PENDING_UPLOAD', 'PENDING_DOWNLOAD')
+        WHERE cloudState = 'PENDING_UPLOAD'
            OR pendingDeleteTarget != 'NONE'
         ORDER BY
             CASE cloudState
                 WHEN 'PENDING_UPLOAD' THEN 0
-                WHEN 'PENDING_DOWNLOAD' THEN 1
-                ELSE 2
+                ELSE 1
             END,
             COALESCE(localModifiedAt, remoteModifiedAt) DESC
         LIMIT 200

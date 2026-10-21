@@ -1,6 +1,7 @@
 package com.onegallery.sync.data.local
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -116,8 +117,13 @@ class MediaCacheRepository(context: Context) {
     fun thumbnailIfCached(canonicalPath: String, oneDriveItemId: String? = null): File? {
         val file = thumbFile(canonicalPath)
         if (file.isFile && file.length() > 0L) {
-            thumbExistsCache[canonicalPath] = true
-            return file
+            if (!isReadableThumbnailFile(file)) {
+                file.delete()
+                thumbExistsCache.remove(canonicalPath)
+            } else {
+                thumbExistsCache[canonicalPath] = true
+                return file
+            }
         }
         val itemId = oneDriveItemId?.takeIf { it.isNotBlank() } ?: run {
             thumbExistsCache.remove(canonicalPath)
@@ -133,12 +139,22 @@ class MediaCacheRepository(context: Context) {
                 file.outputStream().buffered().use { output -> input.copyTo(output) }
             }
         }
-        if (file.isFile && file.length() > 0L) {
+        if (file.isFile && file.length() > 0L && isReadableThumbnailFile(file)) {
             thumbExistsCache[canonicalPath] = true
             return file
         }
+        file.delete()
         thumbExistsCache.remove(canonicalPath)
         return null
+    }
+
+    private fun isReadableThumbnailFile(file: File): Boolean {
+        if (file.length() < 24L) return false
+        return runCatching {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, opts)
+            opts.outWidth > 0 && opts.outHeight > 0
+        }.getOrDefault(false)
     }
 
     /** Após recriar o índice (ex.: troca de pasta na nuvem). */

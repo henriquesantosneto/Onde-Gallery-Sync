@@ -681,7 +681,6 @@ class SyncCoordinator(
             row.canonicalPath !in uploadPaths &&
                 (
                     row.pendingDeleteTarget != PendingDeleteTarget.NONE ||
-                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
                         row.cloudState == CloudSyncState.PENDING_UPLOAD
                     )
         }
@@ -950,6 +949,7 @@ class SyncCoordinator(
                         "Exclusões legadas e rebuild de índice, se necessário.",
                     )
                     flushLegacyPendingDeletes()
+                    clearLegacyPendingDownloadStates()
                     applyPendingIndexRebuildIfNeeded()
                     setSyncProgress(
                         SyncProgressPhase.INDEXING_LOCAL,
@@ -2511,7 +2511,8 @@ class SyncCoordinator(
                 if (ContentFingerprint.matchesIndexedLocalWithFallback(row, remote)) {
                     base.copy(cloudState = CloudSyncState.SYNCED)
                 } else {
-                    base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+                    // Original completo só sob demanda (abrir mídia) — não manter fila fantasma.
+                    base.copy(cloudState = CloudSyncState.SYNCED)
                 }
             }
             else -> base.copy(cloudState = CloudSyncState.SYNCED)
@@ -2630,6 +2631,24 @@ class SyncCoordinator(
             } else {
                 syncMetadataDao.deleteByCanonicalPath(row.canonicalPath)
             }
+        }
+    }
+
+    /** Instalações antigas: PENDING_DOWNLOAD não dispara mais download automático. */
+    private suspend fun clearLegacyPendingDownloadStates() {
+        val legacy = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
+        if (legacy.isEmpty()) return
+        legacy.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+            syncMetadataDao.upsertAll(
+                chunk.map { row ->
+                    val state = if (localOriginalPresent(row)) {
+                        CloudSyncState.SYNCED
+                    } else {
+                        CloudSyncState.CLOUD_ONLY
+                    }
+                    row.copy(cloudState = state, lastError = null)
+                },
+            )
         }
     }
 
@@ -2923,10 +2942,7 @@ class SyncCoordinator(
                 row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
                 row.oneDriveItemId != null &&
                     mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
-                    (
-                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
-                            row.cloudState == CloudSyncState.CLOUD_ONLY
-                        ) -> true
+                    row.cloudState == CloudSyncState.CLOUD_ONLY -> true
                 else -> false
             }
         }
@@ -3150,8 +3166,21 @@ class SyncCoordinator(
             if (totalCached > 0) {
                 notifyGalleryDisplayRefresh()
             }
+            forcePlaceholderForStubbornMissingThumbnails()
         } finally {
             bulkThumbnailPrefetchDepth.decrementAndGet()
+        }
+    }
+
+    /** Itens que a nuvem não decodifica ficam com placeholder — encerra o pós-sync. */
+    private suspend fun forcePlaceholderForStubbornMissingThumbnails() {
+        val stubborn = buildMissingThumbnailEntities(maxPerRun = THUMB_STUBBORN_PLACEHOLDER_CAP)
+        if (stubborn.isEmpty()) return
+        stubborn.forEach { row ->
+            persistMinimalPlaceholderThumbnail(row)
+        }
+        if (stubborn.isNotEmpty()) {
+            notifyGalleryDisplayRefresh()
         }
     }
 
@@ -3746,7 +3775,8 @@ class SyncCoordinator(
         const val THUMB_PREFETCH_EXTRA_ROUNDS = 8
         const val THUMB_PREFETCH_MAX_ROUNDS = 36
         const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 2_500
-        const val THUMB_MAX_FAILURE_ATTEMPTS = 3
+        const val THUMB_MAX_FAILURE_ATTEMPTS = 2
+        const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
