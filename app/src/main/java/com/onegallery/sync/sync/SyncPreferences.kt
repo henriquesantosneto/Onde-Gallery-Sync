@@ -113,6 +113,11 @@ class SyncPreferences(context: Context) {
         get() = prefs.getInt(KEY_GPS_BACKFILL_CURSOR, 0).coerceAtLeast(0)
         set(value) = prefs.edit().putInt(KEY_GPS_BACKFILL_CURSOR, value.coerceAtLeast(0)).apply()
 
+    /** Evita que a fila de miniaturas mostre sempre os mesmos nomes no topo. */
+    var thumbPrefetchCursor: Int
+        get() = prefs.getInt(KEY_THUMB_PREFETCH_CURSOR, 0).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_THUMB_PREFETCH_CURSOR, value.coerceAtLeast(0)).apply()
+
     fun thumbnailFailureCount(canonicalPath: String): Int {
         val prefix = thumbnailFailKey(canonicalPath)
         val set = prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()
@@ -198,5 +203,6 @@ class SyncPreferences(context: Context) {
         private const val KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS = "media_watch_suppress_until_ms"
         private const val KEY_GPS_BACKFILL_CURSOR = "gps_backfill_cursor"
         private const val KEY_THUMB_FAIL_COUNTS = "thumb_fail_counts"
+        private const val KEY_THUMB_PREFETCH_CURSOR = "thumb_prefetch_cursor"
     }
 }

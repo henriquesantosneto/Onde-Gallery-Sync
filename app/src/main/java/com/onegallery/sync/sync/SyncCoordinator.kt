@@ -174,6 +174,7 @@ class SyncCoordinator(
     private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
+    private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
 
     init {
@@ -354,6 +355,7 @@ class SyncCoordinator(
         syncPreferences.extendMediaLibraryWatchSuppression(
             SyncPreferences.MEDIA_LIBRARY_SUPPRESS_DURING_SYNC_MS,
         )
+        thumbPrefetchAttemptsThisSession.clear()
     }
 
     /** Sync automático (WorkManager / rede / MediaStore) sem pendências urgentes. */
@@ -2353,15 +2355,20 @@ class SyncCoordinator(
     }
 
     private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
-        return syncMetadataDao.getAll()
+        val missing = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
                 mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
                     rowCanBuildThumbnail(row)
             }
             .sortedWith(missingThumbnailPrefetchComparator)
-            .take(maxPerRun)
             .toList()
+        if (missing.isEmpty()) return emptyList()
+        val cursor = syncPreferences.thumbPrefetchCursor % missing.size
+        val rotated = missing.drop(cursor) + missing.take(cursor)
+        val batch = rotated.take(maxPerRun)
+        syncPreferences.thumbPrefetchCursor = (cursor + batch.size) % missing.size
+        return batch
     }
 
     private suspend fun countIndexedMissingThumbnails(): Int {
@@ -3213,10 +3220,21 @@ class SyncCoordinator(
                                 row.canonicalPath,
                                 activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
                             )
-                            val hit = mediaCacheRepository.thumbnailIfCached(
+                            var hit = mediaCacheRepository.thumbnailIfCached(
                                 row.canonicalPath,
                                 row.oneDriveItemId,
                             ) != null
+                            if (!hit) {
+                                val attempts = thumbPrefetchAttemptsThisSession.merge(
+                                    row.canonicalPath,
+                                    1,
+                                ) { left, _ -> left + 1 } ?: 1
+                                if (attempts >= 2) {
+                                    hit = persistMinimalPlaceholderThumbnail(row) != null
+                                }
+                            } else {
+                                thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
+                            }
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
                             if (_state.value.isRunning &&
