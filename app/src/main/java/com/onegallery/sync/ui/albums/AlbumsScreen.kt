@@ -41,8 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -111,15 +109,6 @@ fun AlbumsScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameValue by remember { mutableStateOf("") }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(state.actionMessage) {
-        state.actionMessage?.let { msg ->
-            snackbarHostState.showSnackbar(msg)
-            viewModel.clearActionMessage()
-        }
-    }
-
     LaunchedEffect(selectedTab) {
         if (selectedTab == AlbumsBrowseTab.PLACES) {
             viewModel.clearAlbumSelection()
@@ -145,7 +134,6 @@ fun AlbumsScreen(
 
     Scaffold(
         contentWindowInsets = ZeroScaffoldContentInsets,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {
                 TopAppBar(

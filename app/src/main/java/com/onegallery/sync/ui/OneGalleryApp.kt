@@ -16,6 +16,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -312,6 +315,17 @@ fun OneGalleryApp(
         return
     }
 
+    val appContext = LocalContext.current.applicationContext as OneGalleryApplication
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        appContext.userMessages.events.collect { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short,
+            )
+        }
+    }
+
     val navController = rememberNavController()
     val galleryViewModel: GalleryViewModel = viewModel(
         factory = GalleryViewModelFactory(
@@ -319,6 +333,7 @@ fun OneGalleryApp(
             syncCoordinator,
             galleryPreferences,
             mediaCacheRepository,
+            appContext.userMessages,
         ),
     )
     val backStack by navController.currentBackStackEntryAsState()
@@ -330,6 +345,7 @@ fun OneGalleryApp(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = ZeroScaffoldContentInsets,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar {

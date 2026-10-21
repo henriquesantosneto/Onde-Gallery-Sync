@@ -104,7 +104,7 @@ fun MediaThumbnailPlaceholder(
             Icon(
                 Icons.Outlined.Cloud,
                 contentDescription = null,
-                tint = com.onegallery.sync.ui.theme.OneDriveBlue,
+                tint = OneDriveBlue,
             )
         }
     }

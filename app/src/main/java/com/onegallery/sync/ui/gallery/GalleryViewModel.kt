@@ -15,6 +15,7 @@ import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
+import com.onegallery.sync.ui.AppUserMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +53,6 @@ data class GalleryUiState(
     val albumSelectionMode: Boolean = false,
     val selectedAlbumTitles: Set<String> = emptySet(),
     val error: String? = null,
-    val actionMessage: String? = null,
     /** Itens com coordenadas GPS (mapa de locais). */
     val geoItems: List<GalleryDisplayItem> = emptyList(),
     /** Revisão por álbum (`bucketId` → nanoTime) após miniatura local gravada. */
@@ -63,7 +63,6 @@ private data class SelectionSlice(
     val browseFilter: GalleryBrowseFilter,
     val isLoading: Boolean,
     val error: String?,
-    val message: String?,
     val selecting: Boolean,
 )
 
@@ -77,7 +76,6 @@ private data class UiControls(
     val browseFilter: GalleryBrowseFilter,
     val isLoading: Boolean,
     val error: String?,
-    val message: String?,
     val selecting: Boolean,
     val selected: Set<String>,
     val order: GallerySortOrder,
@@ -91,12 +89,12 @@ class GalleryViewModel(
     private val syncCoordinator: SyncCoordinator,
     private val galleryPreferences: GalleryPreferences,
     private val mediaCacheRepository: MediaCacheRepository,
+    private val userMessages: AppUserMessages,
 ) : ViewModel() {
 
     private val browseFilter = MutableStateFlow<GalleryBrowseFilter>(GalleryBrowseFilter.All)
     private val loading = MutableStateFlow(true)
     private val errorState = MutableStateFlow<String?>(null)
-    private val actionMessage = MutableStateFlow<String?>(null)
     private val selectionMode = MutableStateFlow(false)
     private val selectedPaths = MutableStateFlow<Set<String>>(emptySet())
     private val sortOrder = MutableStateFlow(galleryPreferences.sortOrder)
@@ -136,9 +134,8 @@ class GalleryViewModel(
     }.flowOn(Dispatchers.Default)
 
     private val uiControls = combine(
-        combine(browseFilter, loading, errorState, actionMessage, selectionMode) {
-                filter, isLoading, error, message, selecting ->
-            SelectionSlice(filter, isLoading, error, message, selecting)
+        combine(browseFilter, loading, errorState, selectionMode) { filter, isLoading, error, selecting ->
+            SelectionSlice(filter, isLoading, error, selecting)
         },
         combine(selectedPaths, sortOrder, albumListSort) { selected, order, albumSort ->
             SortSlice(selected, order, albumSort)
@@ -151,7 +148,6 @@ class GalleryViewModel(
             browseFilter = selection.browseFilter,
             isLoading = selection.isLoading,
             error = selection.error,
-            message = selection.message,
             selecting = selection.selecting,
             selected = sort.selected,
             order = sort.order,
@@ -214,7 +210,6 @@ class GalleryViewModel(
             albumSelectionMode = controls.albumSelecting,
             selectedAlbumTitles = controls.selectedAlbums,
             error = controls.error,
-            actionMessage = controls.message,
             geoItems = allItems.filter { it.latitude != null && it.longitude != null },
             albumCoverRevisions = coverRevisions,
         )
@@ -441,8 +436,8 @@ class GalleryViewModel(
         selectedPaths.value = emptySet()
     }
 
-    fun clearActionMessage() {
-        actionMessage.value = null
+    private fun toast(message: String?) {
+        message?.let { userMessages.show(it) }
     }
 
     fun enterAlbumSelectionMode(initialTitle: String? = null) {
@@ -474,10 +469,10 @@ class GalleryViewModel(
                     selectedAlbumTitles.update { selected ->
                         if (oldTitle in selected) (selected - oldTitle) + newTitle else selected
                     }
-                    actionMessage.value = "Álbum renomeado para \"$newTitle\"."
+                    toast("Álbum renomeado para \"$newTitle\".")
                     onSuccess(newTitle)
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -487,14 +482,16 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.deleteUserAlbums(titles)
                 .onSuccess { count ->
-                    actionMessage.value = if (count > 0) {
-                        "$count álbum(ns) personalizado(s) removido(s). As fotos foram mantidas."
-                    } else {
-                        "Nenhum álbum personalizado para remover."
-                    }
+                    toast(
+                        if (count > 0) {
+                            "$count álbum(ns) personalizado(s) removido(s). As fotos foram mantidas."
+                        } else {
+                            "Nenhum álbum personalizado para remover."
+                        },
+                    )
                     clearAlbumSelection()
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -502,10 +499,10 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.createUserAlbum(title)
                 .onSuccess { album ->
-                    actionMessage.value = "Álbum \"${album.title}\" criado."
+                    toast("Álbum \"${album.title}\" criado.")
                     onSuccess(album.title)
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -516,10 +513,10 @@ class GalleryViewModel(
             syncCoordinator.moveItemsToUserAlbum(paths, albumTitle)
                 .onSuccess {
                     val label = albumTitle ?: "pasta original"
-                    actionMessage.value = "${paths.size} item(ns) movidos para \"$label\"."
+                    toast("${paths.size} item(ns) movidos para \"$label\".")
                     clearSelection()
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -529,10 +526,10 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
                 .onSuccess { count ->
-                    actionMessage.value = "$count item(ns) excluído(s)."
+                    toast("$count item(ns) excluído(s).")
                     clearSelection()
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -542,9 +539,9 @@ class GalleryViewModel(
                 listOf(canonicalPath),
                 PendingDeleteTarget.BOTH,
             ).onSuccess {
-                actionMessage.value = "Item excluído."
+                toast("Item excluído.")
                 onRemoved()
-            }.onFailure { actionMessage.value = it.message }
+            }.onFailure { toast(it.message) }
         }
     }
 
@@ -554,12 +551,13 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.releaseLocalSpace(paths)
                 .onSuccess { count ->
-                    actionMessage.value =
+                    toast(
                         "$count item(ns): só a cópia local foi removida; miniatura no app e " +
-                            "arquivo no OneDrive mantidos."
+                            "arquivo no OneDrive mantidos.",
+                    )
                     clearSelection()
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -567,11 +565,10 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.releaseLocalSpace(listOf(canonicalPath))
                 .onSuccess {
-                    actionMessage.value =
-                        "Cópia local removida; miniatura no app e arquivo no OneDrive mantidos."
+                    toast("Cópia local removida; miniatura no app e arquivo no OneDrive mantidos.")
                     onDone()
                 }
-                .onFailure { actionMessage.value = it.message }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -713,6 +710,7 @@ class GalleryViewModelFactory(
     private val syncCoordinator: SyncCoordinator,
     private val galleryPreferences: GalleryPreferences,
     private val mediaCacheRepository: MediaCacheRepository,
+    private val userMessages: AppUserMessages,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -722,6 +720,7 @@ class GalleryViewModelFactory(
                 syncCoordinator,
                 galleryPreferences,
                 mediaCacheRepository,
+                userMessages,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

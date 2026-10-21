@@ -28,6 +28,7 @@ import com.onegallery.sync.sync.AppForegroundState
 import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
 import kotlinx.coroutines.CoroutineScope
@@ -76,6 +77,8 @@ class OneGalleryApplication : Application() {
 
     lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
         private set
+
+    val userMessages = AppUserMessages()
 
     override fun onCreate() {
         super.onCreate()

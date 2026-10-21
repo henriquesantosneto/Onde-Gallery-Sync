@@ -33,8 +33,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -86,19 +84,11 @@ fun GalleryScreen(
             GalleryThumbnailModels.gridPixelSize(mediaCellMin.roundToPx())
         }
     }
-    val snackbarHostState = remember { SnackbarHostState() }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
     var showMediaDetails by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    LaunchedEffect(state.actionMessage) {
-        state.actionMessage?.let { msg ->
-            snackbarHostState.showSnackbar(msg)
-            viewModel.clearActionMessage()
-        }
-    }
-
     var browseFilterWasActive by remember(requiresActiveBrowseFilter) { mutableStateOf(false) }
     LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
         if (!requiresActiveBrowseFilter) return@LaunchedEffect
@@ -131,7 +121,6 @@ fun GalleryScreen(
 
     Scaffold(
         contentWindowInsets = ZeroScaffoldContentInsets,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {

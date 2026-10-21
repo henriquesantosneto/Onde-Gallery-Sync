@@ -2,6 +2,8 @@
 
 Stack: **Jetpack Compose** + Material 3, edge-to-edge (`OneGalleryEdgeToEdge`).
 
+**Mensagens de ação** (exclusão, mover, álbum): `AppUserMessages` na `OneGalleryApplication`; um único `SnackbarHost` no `Scaffold` raiz de `OneGalleryApp` — permanece visível ao trocar de aba ou voltar do detalhe.
+
 ## Entrada
 
 - `MainActivity` → `OneGalleryTheme` → `OneGalleryApp`.
