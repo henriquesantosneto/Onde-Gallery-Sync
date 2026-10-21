@@ -807,6 +807,7 @@ class SyncCoordinator(
         ) {
             return false
         }
+        if (existing.latitude == null || existing.longitude == null) return false
         return true
     }
 
@@ -1082,7 +1083,8 @@ class SyncCoordinator(
                                 }
                             }
                             else -> {
-                                val merged = reconcileWithRemote(row, remote)
+                                val workRow = ensureLocalContentFingerprint(row)
+                                val merged = reconcileWithRemote(workRow, remote)
                                 upsertBatch.add(merged)
                                 when (merged.cloudState) {
                                     CloudSyncState.PENDING_UPLOAD -> {
@@ -3072,13 +3074,14 @@ class SyncCoordinator(
         var totalIndexed = 0
         var hitLimit = false
         repeat(GPS_BACKFILL_ROUNDS) {
+            if (countIndexedMissingGps() == 0) return@repeat
             val outcome = backfillMissingGpsLocationsOnce(
                 maxLocalProbesPerRun = GPS_LOCAL_BATCH,
                 maxCloudProbesPerRun = GPS_CLOUD_BATCH,
             )
             totalIndexed += outcome.indexed
             hitLimit = hitLimit || outcome.hitProbeLimit
-            if (outcome.indexed == 0) return@repeat
+            if (!outcome.hitProbeLimit && outcome.probesAttempted == 0) return@repeat
         }
         if (totalIndexed > 0) {
             val remaining = countIndexedMissingGps()
@@ -3100,6 +3103,7 @@ class SyncCoordinator(
     private data class GpsBackfillBatchOutcome(
         val indexed: Int,
         val hitProbeLimit: Boolean,
+        val probesAttempted: Int,
     )
 
     private suspend fun backfillMissingGpsLocationsOnce(
@@ -3113,46 +3117,29 @@ class SyncCoordinator(
                         row.cachedFilePath != null || row.oneDriveItemId != null
                     )
         }
-        if (rows.isEmpty()) return GpsBackfillBatchOutcome(0, false)
-        val candidates = rows.size
-        val sorted = rows.sortedWith(
-            compareBy<SyncMetadataEntity>(
-                { entity ->
-                    val cloudOnly = entity.localMediaId == null &&
-                        entity.localContentUri.isNullOrBlank() &&
-                        entity.cachedFilePath.isNullOrBlank() &&
-                        entity.oneDriveItemId != null
-                    if (cloudOnly) 0 else 1
-                },
-                { -(it.remoteModifiedAt ?: it.localModifiedAt ?: 0L) },
-                { it.canonicalPath },
-            ),
-        )
+        if (rows.isEmpty()) return GpsBackfillBatchOutcome(0, false, 0)
+        val sorted = rows.sortedWith(gpsBackfillComparator)
+        val cursor = syncPreferences.gpsBackfillCursor % sorted.size
+        val rotated = sorted.drop(cursor) + sorted.take(cursor)
+        val maxCandidatesThisRound = (maxLocalProbesPerRun + maxCloudProbesPerRun)
+            .coerceAtMost(rotated.size)
+        val batch = rotated.take(maxCandidatesThisRound)
+        syncPreferences.gpsBackfillCursor = (cursor + batch.size) % sorted.size
+        val candidates = batch.size
         val semaphore = Semaphore(PARALLEL_GPS_BACKFILL)
         val localProbeCount = AtomicInteger(0)
         val cloudProbeCount = AtomicInteger(0)
         val indexedCount = AtomicInteger(0)
         val analyzedCount = AtomicInteger(0)
+        val probesAttemptedCount = AtomicInteger(0)
         val probeMutex = Mutex()
         supervisorScope {
-            sorted.map { row ->
+            batch.map { row ->
                 async {
                     semaphore.withPermit {
                         try {
                             ensureNotCancelled()
                             coroutineContext.ensureActive()
-                            val index = analyzedCount.incrementAndGet()
-                            if (index % 16 == 0 && _state.value.isRunning) {
-                                setSyncProgress(
-                                    SyncProgressPhase.BACKFILL_GPS,
-                                    "Indexando localização (GPS)…",
-                                    "Analisados $index/$candidates · ${indexedCount.get()} com GPS · " +
-                                        "local ${localProbeCount.get()}/$maxLocalProbesPerRun · " +
-                                        "nuvem ${cloudProbeCount.get()}/$maxCloudProbesPerRun · " +
-                                        "até $PARALLEL_GPS_BACKFILL em paralelo.",
-                                    alsoUpdateLastMessage = false,
-                                )
-                            }
                             val hasLocal = row.localMediaId != null ||
                                 row.localContentUri != null ||
                                 row.cachedFilePath != null
@@ -3170,6 +3157,19 @@ class SyncCoordinator(
                                     else -> null
                                 }
                             } ?: return@withPermit
+                            probesAttemptedCount.incrementAndGet()
+                            val index = analyzedCount.incrementAndGet()
+                            if (index % 16 == 0 && _state.value.isRunning) {
+                                setSyncProgress(
+                                    SyncProgressPhase.BACKFILL_GPS,
+                                    "Indexando localização (GPS)…",
+                                    "Analisados $index/$candidates · ${indexedCount.get()} com GPS · " +
+                                        "local ${localProbeCount.get()}/$maxLocalProbesPerRun · " +
+                                        "nuvem ${cloudProbeCount.get()}/$maxCloudProbesPerRun · " +
+                                        "até $PARALLEL_GPS_BACKFILL em paralelo.",
+                                    alsoUpdateLastMessage = false,
+                                )
+                            }
                             val resolved = when (probeKind) {
                                 GpsBackfillProbeKind.LOCAL -> resolveLocationForBackfill(row)
                                 GpsBackfillProbeKind.CLOUD -> probeCloudExifLocation(
@@ -3196,8 +3196,9 @@ class SyncCoordinator(
         val localProbes = localProbeCount.get()
         val cloudProbes = cloudProbeCount.get()
         val indexed = indexedCount.get()
+        val probesAttempted = probesAttemptedCount.get()
         val hitLimit = localProbes >= maxLocalProbesPerRun || cloudProbes >= maxCloudProbesPerRun
-        return GpsBackfillBatchOutcome(indexed, hitLimit)
+        return GpsBackfillBatchOutcome(indexed, hitLimit, probesAttempted)
     }
 
     private enum class GpsBackfillProbeKind {

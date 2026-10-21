@@ -108,6 +108,11 @@ class SyncPreferences(context: Context) {
         get() = prefs.getLong(KEY_LAST_BIDIR_SYNC_DONE_MS, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_BIDIR_SYNC_DONE_MS, value).apply()
 
+    /** Round-robin no backfill de GPS para não ficar reprovando sempre os mesmos itens. */
+    var gpsBackfillCursor: Int
+        get() = prefs.getInt(KEY_GPS_BACKFILL_CURSOR, 0).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_GPS_BACKFILL_CURSOR, value.coerceAtLeast(0)).apply()
+
     var mediaLibraryWatchSuppressedUntilMs: Long
         get() = prefs.getLong(KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS, 0L)
         private set(value) = prefs.edit().putLong(KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS, value).apply()
@@ -162,5 +167,6 @@ class SyncPreferences(context: Context) {
 
         private const val KEY_LAST_BIDIR_SYNC_DONE_MS = "last_bidir_sync_done_ms"
         private const val KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS = "media_watch_suppress_until_ms"
+        private const val KEY_GPS_BACKFILL_CURSOR = "gps_backfill_cursor"
     }
 }

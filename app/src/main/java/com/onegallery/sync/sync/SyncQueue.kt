@@ -96,6 +96,19 @@ val syncQueueEntityComparator: Comparator<SyncMetadataEntity> =
         { it.canonicalPath },
     )
 
+/** Backfill GPS: prioriza cópia local (EXIF/MediaStore) antes de sondar a nuvem. */
+val gpsBackfillComparator: Comparator<SyncMetadataEntity> =
+    compareBy<SyncMetadataEntity>(
+        { entity ->
+            val hasLocal = entity.localMediaId != null ||
+                !entity.localContentUri.isNullOrBlank() ||
+                !entity.cachedFilePath.isNullOrBlank()
+            if (hasLocal) 0 else 1
+        },
+        { -(it.localModifiedAt ?: it.remoteModifiedAt ?: 0L) },
+        { it.canonicalPath },
+    )
+
 /** Prefetch de miniaturas: prioriza itens só na nuvem (sem cópia local). */
 val missingThumbnailPrefetchComparator: Comparator<SyncMetadataEntity> =
     compareBy<SyncMetadataEntity>(

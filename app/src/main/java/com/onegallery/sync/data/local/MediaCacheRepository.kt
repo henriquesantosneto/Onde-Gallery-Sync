@@ -93,18 +93,14 @@ class MediaCacheRepository(context: Context) {
     }
 
     fun thumbnailIfCached(canonicalPath: String): File? {
-        thumbExistsCache[canonicalPath]?.let { known ->
-            if (!known) return null
-            val file = thumbFile(canonicalPath)
-            return if (file.isFile && file.length() > 0L) file else {
-                thumbExistsCache.remove(canonicalPath)
-                null
-            }
-        }
         val file = thumbFile(canonicalPath)
         val ok = file.isFile && file.length() > 0L
-        thumbExistsCache[canonicalPath] = ok
-        return file.takeIf { ok }
+        if (ok) {
+            thumbExistsCache[canonicalPath] = true
+            return file
+        }
+        thumbExistsCache.remove(canonicalPath)
+        return null
     }
 
     /** Após recriar o índice (ex.: troca de pasta na nuvem). */
