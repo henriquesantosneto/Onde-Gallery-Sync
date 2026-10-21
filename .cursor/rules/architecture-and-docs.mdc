@@ -1,0 +1,30 @@
+---
+description: Antes de alterar sync, galeria, OneDrive ou background, consultar docs e invariantes do projeto.
+alwaysApply: true
+---
+
+# Arquitetura OneGallery Sync — obrigatório para a IA
+
+## Antes de editar Kotlin deste repo
+
+1. Ler **[AGENTS.md](../../AGENTS.md)** (raiz) e **[docs/AI_AGENT_GUIDE.md](../../docs/AI_AGENT_GUIDE.md)**.
+2. Usar **[docs/CODE_MAP.md](../../docs/CODE_MAP.md)** para achar o arquivo certo (não criar pipeline paralelo).
+3. Índice humano: **[docs/README.md](../../docs/README.md)**.
+
+## Invariantes (não violar)
+
+- Galeria lista a partir de **`sync_metadata` (Room)** via `GalleryViewModel`, não MediaStore/Graph direto.
+- Cloud-only na grade: **`GalleryBrowseVisibility`** exige miniatura em cache.
+- **`longTaskMutex`**: um sync longo; respeitar deferrals (`shouldDeferAutomaticBidirectionalSync`, `shouldDeferBackgroundSyncByTime`).
+- Progresso paralelo: **`activeSyncItemsBacking`** no `SyncCoordinator` — não mutar `activeItems` do StateFlow a partir de IO lendo `_state`.
+- Exclusões: **`pendingDeleteTarget`** + confirmação — sem delete bilateral silencioso.
+- Upload/download/delete: ramificar **`SyncMode`** nos delegados do coordinator.
+- Evitar regressões: loop sync (watcher + duplo auto-sync no start), ANR (flood MainHandler no progresso).
+
+## Após mudar comportamento
+
+- Atualizar doc temático em `docs/` e, se invariante/constante, **`CONFIGURATION_REFERENCE.md`** e **`AI_AGENT_GUIDE.md`**.
+
+## APK
+
+Seguir **[apk-on-sim.mdc](apk-on-sim.mdc)** — não publicar APK sem **Sim** explícito do usuário.

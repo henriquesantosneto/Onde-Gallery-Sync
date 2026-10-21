@@ -45,6 +45,8 @@ Documentação técnica completa (arquitetura, sync, background, OneDrive, galer
 
 **[docs/README.md](docs/README.md)** — índice de todos os documentos.
 
+**Agentes de IA:** começar por **[AGENTS.md](AGENTS.md)** e **[docs/AI_AGENT_GUIDE.md](docs/AI_AGENT_GUIDE.md)** (invariantes e checklist antes de alterar código).
+
 Destaques:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — visão geral e diagramas

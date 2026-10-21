@@ -2,6 +2,17 @@
 
 Índice da documentação técnica do repositório. Tudo aqui descreve o **comportamento implementado no código** (Kotlin/Android), não marketing de produto.
 
+## Para agentes de IA (Cursor / Cloud Agent)
+
+| Documento | Uso |
+|-----------|-----|
+| [../AGENTS.md](../AGENTS.md) | Entrada na raiz do repo — regras resumidas e ordem de leitura |
+| [AI_AGENT_GUIDE.md](AI_AGENT_GUIDE.md) | **Normativo:** invariantes, anti-padrões, checklist, roteiro por tarefa |
+| [CODE_MAP.md](CODE_MAP.md) | Arquivo Kotlin correto por responsabilidade |
+| [.cursor/rules/architecture-and-docs.mdc](../.cursor/rules/architecture-and-docs.mdc) | Regra always-on no Cursor |
+
+**Fluxo:** `AGENTS.md` → `AI_AGENT_GUIDE.md` → `CODE_MAP.md` → doc temático → código.
+
 ## Visão geral
 
 | Documento | Conteúdo |
