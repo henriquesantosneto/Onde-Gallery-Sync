@@ -3104,23 +3104,32 @@ class SyncCoordinator(
                     "Grade, mapa e itens restantes — originais completos sob demanda.",
                     alsoUpdateLastMessage = false,
                 )
-                prefetchMissingThumbnails()
+                val thumbsStillMissing = runCompleteThumbnailPrefetchBeforeMetadata()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
-                setSyncProgress(
-                    SyncProgressPhase.BACKFILL_GPS,
-                    "Indexando localização (GPS)…",
-                    "EXIF local e trechos na nuvem (limite por passagem).",
-                    alsoUpdateLastMessage = false,
-                )
-                backfillMissingGpsLocations()
-                setSyncProgress(
-                    SyncProgressPhase.BACKFILL_CAPTURE_DATE,
-                    "Indexando data de captura…",
-                    "Ordenação por data na galeria; nuvem limitada por sync.",
-                    alsoUpdateLastMessage = false,
-                )
-                backfillMissingCaptureTimes()
+                if (thumbsStillMissing == 0) {
+                    setSyncProgress(
+                        SyncProgressPhase.BACKFILL_GPS,
+                        "Indexando localização (GPS)…",
+                        "Miniaturas concluídas — EXIF local e trechos na nuvem.",
+                        alsoUpdateLastMessage = false,
+                    )
+                    backfillMissingGpsLocations()
+                    setSyncProgress(
+                        SyncProgressPhase.BACKFILL_CAPTURE_DATE,
+                        "Indexando data de captura…",
+                        "Ordenação por data na galeria; nuvem limitada por sync.",
+                        alsoUpdateLastMessage = false,
+                    )
+                    backfillMissingCaptureTimes()
+                } else {
+                    setSyncProgress(
+                        SyncProgressPhase.PREFETCH_THUMBNAILS,
+                        "Miniaturas incompletas",
+                        "~$thumbsStillMissing pendentes — GPS e datas adiados até concluir. " +
+                            "Sincronize de novo (ou aguarde o app em segundo plano).",
+                    )
+                }
                 indexPassLocalItemsById = emptyMap()
                 val finalMessage = buildString {
                     append(coreSyncMessagePrefix)
@@ -3135,8 +3144,8 @@ class SyncCoordinator(
                     val missingGps = countIndexedMissingGps()
                     if (missingThumb > 0) {
                         append(
-                            "\nMiniaturas pendentes: $missingThumb — itens já aparecem na galeria " +
-                                "(ícone de nuvem); miniaturas continuam em segundo plano e ao rolar.",
+                            "\nMiniaturas pendentes: $missingThumb — só entram na galeria após " +
+                                "miniatura; GPS/datas ficaram para a próxima sync completa.",
                         )
                     }
                     if (missingGps > 0) {
@@ -3158,7 +3167,9 @@ class SyncCoordinator(
                     activityDetail = "",
                     lastMessage = finalMessage,
                 )
-                scheduleBackgroundThumbnailPrefetchIfNeeded()
+                if (countIndexedMissingThumbnails() > 0) {
+                    scheduleBackgroundThumbnailPrefetchIfNeeded()
+                }
             }.onFailure { error ->
                 if (error is CancellationException) {
                     _state.value = _state.value.copy(
@@ -3170,6 +3181,7 @@ class SyncCoordinator(
                         activityDetail = "",
                         lastMessage = cancellationResultMessage(),
                     )
+                    scheduleBackgroundThumbnailPrefetchIfNeeded()
                 } else {
                     val prefix = coreSyncMessagePrefix
                     _state.value = _state.value.copy(
@@ -3229,6 +3241,7 @@ class SyncCoordinator(
                     prefetchMissingThumbnails(
                         honorUserSyncCancel = false,
                         maxTotalPerRun = THUMB_BACKGROUND_MAX_TOTAL_PER_PASS,
+                        completeAllPending = true,
                     )
                     val after = countIndexedMissingThumbnails()
                     if (after == 0) return@launch
@@ -3266,11 +3279,44 @@ class SyncCoordinator(
         runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
     }
 
+    /**
+     * Pós-sync: esgota miniaturas antes de GPS/datas. Retorna quantas ainda faltam (0 = galeria liberada).
+     */
+    private suspend fun runCompleteThumbnailPrefetchBeforeMetadata(): Int {
+        var stalledPasses = 0
+        var pass = 0
+        while (pass < THUMB_POST_SYNC_OUTER_PASSES) {
+            ensureNotCancelled()
+            val pending = countIndexedMissingThumbnails()
+            if (pending == 0) return 0
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas na galeria…",
+                "~$pending pendente(s) · leva ${pass + 1} — GPS só depois de concluir.",
+                alsoUpdateLastMessage = false,
+            )
+            val before = pending
+            prefetchMissingThumbnails(completeAllPending = true)
+            forcePlaceholderForStubbornMissingThumbnails()
+            val after = countIndexedMissingThumbnails()
+            if (after == 0) return 0
+            if (after >= before - THUMB_STALL_MIN_PROGRESS) {
+                stalledPasses++
+                if (stalledPasses >= THUMB_POST_SYNC_MAX_STALL_PASSES) return after
+            } else {
+                stalledPasses = 0
+            }
+            pass++
+        }
+        return countIndexedMissingThumbnails()
+    }
+
     /** Miniaturas faltantes em levas; limite por sync para não travar GPS/resto do app. */
     private suspend fun prefetchMissingThumbnails(
         batchSize: Int = THUMB_PREFETCH_BATCH,
         honorUserSyncCancel: Boolean = true,
         maxTotalPerRun: Int = THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
+        completeAllPending: Boolean = false,
     ) {
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
@@ -3279,10 +3325,20 @@ class SyncCoordinator(
         var round = 0
         var consecutiveEmptyBatches = 0
         var remainingEstimate = pendingAtStart
-        val maxRounds = minOf(
-            THUMB_PREFETCH_MAX_ROUNDS,
-            ((pendingAtStart + batchSize - 1) / batchSize) + THUMB_PREFETCH_EXTRA_ROUNDS,
-        )
+        val roundsNeeded = (pendingAtStart + batchSize - 1) / batchSize
+        val maxRounds = if (completeAllPending) {
+            minOf(
+                THUMB_POST_SYNC_COMPLETION_MAX_ROUNDS,
+                roundsNeeded + THUMB_PREFETCH_EXTRA_ROUNDS,
+            )
+        } else {
+            minOf(
+                THUMB_PREFETCH_MAX_ROUNDS,
+                roundsNeeded + THUMB_PREFETCH_EXTRA_ROUNDS,
+            )
+        }
+        val totalCap = if (completeAllPending) Int.MAX_VALUE / 4 else maxTotalPerRun
+        val emptyBatchGiveUp = if (completeAllPending) 8 else 5
         var stoppedByCap = false
         try {
             while (round < maxRounds) {
@@ -3291,7 +3347,7 @@ class SyncCoordinator(
                 } else {
                     coroutineContext.ensureActive()
                 }
-                if (totalCached >= maxTotalPerRun) {
+                if (totalCached >= totalCap) {
                     stoppedByCap = true
                     break
                 }
@@ -3315,7 +3371,7 @@ class SyncCoordinator(
                 round++
                 if (batchCached == 0) {
                     consecutiveEmptyBatches++
-                    if (consecutiveEmptyBatches >= 5) break
+                    if (consecutiveEmptyBatches >= emptyBatchGiveUp) break
                 } else {
                     consecutiveEmptyBatches = 0
                 }
@@ -3327,6 +3383,8 @@ class SyncCoordinator(
                     "Miniaturas",
                     when {
                         remaining == 0 -> "$totalCached gerada(s)/baixada(s); índice completo."
+                        completeAllPending && remaining > 0 ->
+                            "$totalCached nesta leva · ~$remaining ainda — continuando antes do GPS…"
                         stoppedByCap ->
                             "$totalCached nesta sync · ~$remaining ainda pendentes " +
                                 "(limite por passagem — sincronize de novo para continuar)."
@@ -4055,6 +4113,10 @@ class SyncCoordinator(
         const val THUMB_PREFETCH_EXTRA_ROUNDS = 12
         const val THUMB_PREFETCH_MAX_ROUNDS = 48
         const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 6_000
+        const val THUMB_POST_SYNC_COMPLETION_MAX_ROUNDS = 96
+        const val THUMB_POST_SYNC_OUTER_PASSES = 8
+        const val THUMB_POST_SYNC_MAX_STALL_PASSES = 2
+        const val THUMB_STALL_MIN_PROGRESS = 32
         const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 4_000
         const val THUMB_BACKGROUND_CONTINUE_PASSES = 24
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
@@ -4071,7 +4133,7 @@ class SyncCoordinator(
         const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 3
         /** Downloads Graph / decode local em paralelo por leva. */
-        const val PARALLEL_THUMBNAILS = 3
+        const val PARALLEL_THUMBNAILS = 5
         const val PARALLEL_GPS_BACKFILL = 3
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L

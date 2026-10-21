@@ -4,8 +4,8 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.sync.CloudSyncState
 
 /**
- * Itens indexados na nuvem entram na grade/álbuns assim que constam no índice (placeholder + download
- * da miniatura ao rolar). Local continua visível pelo URI / original / miniatura em cache.
+ * Itens só na nuvem (ou com local liberado) entram na grade/álbuns **após** miniatura no cache.
+ * Mídia local continua visível pelo URI / original.
  */
 fun GalleryDisplayItem.isVisibleInGalleryBrowse(
     mediaCacheRepository: MediaCacheRepository,
@@ -13,8 +13,7 @@ fun GalleryDisplayItem.isVisibleInGalleryBrowse(
     if (localUri != null) return true
     if (cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null) return true
     if (localMediaId != null && !localReleasedForSpace) return true
-    if (oneDriveItemId != null) return true
-    if (cloudState == CloudSyncState.LOCAL_ONLY) {
+    if (cloudState == CloudSyncState.LOCAL_ONLY && oneDriveItemId == null) {
         return hasCachedThumbnailFile(this, mediaCacheRepository)
     }
     return hasCachedThumbnailFile(this, mediaCacheRepository)
