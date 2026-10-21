@@ -403,6 +403,7 @@ class SyncCoordinator(
                     val seenLocalIds = items.map { it.id }.toSet()
                     val seenPaths = applyLocalIndexPass(items, lightMetadataOnly = true)
                     reconcileMissingLocalItems(seenPaths)
+                    healAllStaleLocalCopyMetadata()
                     val remoteListingAvailable: Boolean
                     val remotePaths: Set<String> = when (syncPreferences.syncMode) {
                         SyncMode.LOCAL_ONLY -> {
@@ -778,6 +779,7 @@ class SyncCoordinator(
             val seenPaths = applyLocalIndexPass(items, lightMetadataOnly = false)
             ensureNotCancelled()
             reconcileMissingLocalItems(seenPaths)
+            healAllStaleLocalCopyMetadata()
             if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) {
                 val sanitized = runIndexSanitizePass(
                     seenLocalCanonicalPaths = seenPaths,
@@ -1155,6 +1157,7 @@ class SyncCoordinator(
                     }
                     flushReconcileUpserts()
                     healStalePendingDownloads(remoteByPath)
+                    healAllStaleLocalCopyMetadata()
                     pendingDownloadPlaceholders = syncMetadataDao.getAll().count {
                         it.cloudState == CloudSyncState.PENDING_DOWNLOAD
                     }
@@ -1256,6 +1259,7 @@ class SyncCoordinator(
                         "Verificando consistência do índice…",
                         "Remove entradas obsoletas e alinha com aparelho/nuvem.",
                     )
+                    healAllStaleLocalCopyMetadata()
                     val sanitized = runIndexSanitizePass(
                         seenLocalCanonicalPaths = seenLocalPaths,
                         seenLocalMediaIds = seenLocalIds,
@@ -1539,12 +1543,10 @@ class SyncCoordinator(
     }
 
     private suspend fun persistCachedOriginalPath(row: SyncMetadataEntity, file: File) {
+        if (!file.isFile || file.length() <= 0L) return
         val captureFromFile = row.capturedAtSeconds?.takeIf { it > 0L }
             ?: mediaCaptureTimeResolver.resolveFromFile(file)?.takeIf { it > 0L }
-        val nextCloudState = when {
-            row.oneDriveItemId != null -> CloudSyncState.SYNCED
-            else -> row.cloudState
-        }
+        val nextCloudState = cloudStateAfterVerifiedLocal(row, file)
         val nextRow = row.copy(
             cachedFilePath = file.absolutePath,
             lastError = null,
@@ -1721,9 +1723,8 @@ class SyncCoordinator(
             ContentFingerprint.quickXorHashBase64(file)
         }
         val localSize = file.length()
-        val nextCloudState = when {
-            row.oneDriveItemId != null -> CloudSyncState.SYNCED
-            else -> row.cloudState
+        if (!file.isFile || file.length() <= 0L) {
+            return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
         }
         val synced = row.copy(
             cachedFilePath = file.absolutePath,
@@ -1733,7 +1734,7 @@ class SyncCoordinator(
             remoteSizeBytes = remote?.sizeBytes ?: row.remoteSizeBytes,
             remoteModifiedAt = remote?.modifiedAtEpoch ?: row.remoteModifiedAt,
             oneDriveItemId = remote?.itemId ?: row.oneDriveItemId,
-            cloudState = nextCloudState,
+            cloudState = cloudStateAfterVerifiedLocal(row, file),
             localReleasedForSpace = false,
             lastError = null,
         )
@@ -1799,6 +1800,19 @@ class SyncCoordinator(
                 takenAtEpochSeconds = captureSeconds,
                 storedGalleryFolder = row.localGalleryRelativePath,
             ).getOrElse { error ->
+                val message = error.message?.takeIf { it.isNotBlank() }
+                    ?: "Não foi possível copiar para a galeria do aparelho."
+                syncMetadataDao.upsert(
+                    updated.copy(
+                        lastError = message,
+                        cloudState = if (resolveViewableOriginalFile(updated) != null) {
+                            updated.cloudState
+                        } else {
+                            CloudSyncState.CLOUD_ONLY
+                        },
+                    ),
+                )
+                notifyGalleryDisplayRefresh()
                 return Result.failure(
                     error.takeUnless { it is CancellationException }
                         ?: IllegalStateException("Importação cancelada."),
@@ -1987,11 +2001,15 @@ class SyncCoordinator(
                         "Sincronize antes ou escolha outro item.",
                 )
             }
+            val healedRows = rows.map { healAndPersistStaleLocalCopyMetadata(it) }
+            if (healedRows.none { rowHasReleasableLocalCopy(it) }) {
+                error(localSpaceReleaseFailureMessage(noLocalCopyOnDevice = true))
+            }
             val freed = releaseLocalSpaceForRows(
-                rows,
+                healedRows,
                 allowSystemDialog = allowSystemDeleteDialogForLocalRemoval(),
             )
-            if (rows.isNotEmpty() && freed == 0) {
+            if (healedRows.isNotEmpty() && freed == 0) {
                 error(localSpaceReleaseFailureMessage())
             }
             freed
@@ -2063,9 +2081,9 @@ class SyncCoordinator(
     }
 
     private fun rowHasReleasableLocalCopy(row: SyncMetadataEntity): Boolean {
-        return row.localMediaId != null ||
-            row.localContentUri != null ||
-            !row.cachedFilePath.isNullOrBlank()
+        if (row.localReleasedForSpace) return false
+        if (localOriginalPresent(row)) return true
+        return resolveViewableOriginalFile(row) != null
     }
 
     /**
@@ -2096,7 +2114,11 @@ class SyncCoordinator(
         return canRemoveLocalCopiesWithoutPrompt()
     }
 
-    private fun localSpaceReleaseFailureMessage(): String {
+    private fun localSpaceReleaseFailureMessage(noLocalCopyOnDevice: Boolean = false): String {
+        if (noLocalCopyOnDevice) {
+            return "Não há cópia local deste item — só miniatura ou nuvem. " +
+                "Abra a foto para baixar o original, se precisar."
+        }
         return if (!canRemoveLocalCopiesWithoutPrompt()) {
             "Para liberar espaço: Ajustes → Remover cópias no aparelho → Conceder " +
                 "(acesso a todos os arquivos)."
@@ -2111,13 +2133,14 @@ class SyncCoordinator(
         allowSystemDialog: Boolean,
     ): Int {
         if (rows.isEmpty()) return 0
-        val priorReleasedFlag = rows.associate { it.canonicalPath to it.localReleasedForSpace }
-        rows.forEach { row ->
+        val preparedRows = rows.map { healAndPersistStaleLocalCopyMetadata(it) }
+        val priorReleasedFlag = preparedRows.associate { it.canonicalPath to it.localReleasedForSpace }
+        preparedRows.forEach { row ->
             ensureThumbnailCached(row.canonicalPath).getOrNull()
             markLocalSpaceReleasePending(row)
         }
 
-        val pairs = rows.mapNotNull { row -> localContentUri(row)?.let { uri -> uri to row } }
+        val pairs = preparedRows.mapNotNull { row -> localContentUri(row)?.let { uri -> uri to row } }
         val uriToRow = pairs.associate { it.first to it.second }
         val uris = uriToRow.keys.toList()
 
@@ -2142,15 +2165,15 @@ class SyncCoordinator(
             freed++
         }
         val handled = uriToRow.values.map { it.canonicalPath }.toSet()
-        for (row in rows) {
+        for (row in preparedRows) {
             if (row.canonicalPath in handled) continue
             if (row.localContentUri != null || row.localMediaId != null) continue
-            if (row.cachedFilePath == null) continue
+            if (resolveViewableOriginalFile(row) == null) continue
             finalizeLocalSpaceReleased(row)
             freedPaths.add(row.canonicalPath)
             freed++
         }
-        for (path in rows.map { it.canonicalPath }) {
+        for (path in preparedRows.map { it.canonicalPath }) {
             if (path in freedPaths) continue
             val current = syncMetadataDao.getByCanonicalPath(path) ?: continue
             syncMetadataDao.upsert(
@@ -3083,6 +3106,7 @@ class SyncCoordinator(
                 )
                 prefetchMissingThumbnails()
                 healStalePendingDownloads(remoteByPath = null)
+                healAllStaleLocalCopyMetadata()
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_GPS,
                     "Indexando localização (GPS)…",
@@ -3688,10 +3712,102 @@ class SyncCoordinator(
 
     private fun restoredCloudState(row: SyncMetadataEntity): CloudSyncState {
         return when {
-            row.localMediaId != null && row.oneDriveItemId != null -> CloudSyncState.SYNCED
+            row.oneDriveItemId != null && localOriginalPresent(row) -> CloudSyncState.SYNCED
             row.oneDriveItemId != null -> CloudSyncState.CLOUD_ONLY
+            localOriginalPresent(row) -> CloudSyncState.LOCAL_ONLY
             else -> CloudSyncState.LOCAL_ONLY
         }
+    }
+
+    /** Nuvem + original abrível (Galeria ou cache verificado no disco). */
+    private fun cloudStateAfterVerifiedLocal(row: SyncMetadataEntity, verifiedFile: File): CloudSyncState {
+        if (row.oneDriveItemId == null) return row.cloudState
+        if (!verifiedFile.isFile || verifiedFile.length() <= 0L) {
+            return if (localOriginalPresent(row)) CloudSyncState.SYNCED else CloudSyncState.CLOUD_ONLY
+        }
+        return CloudSyncState.SYNCED
+    }
+
+    /**
+     * Limpa [localMediaId], [localContentUri] e [cachedFilePath] que apontam para arquivos inexistentes
+     * e corrige [cloudState] SYNCED fantasma (índice diz local/cache, aparelho não tem).
+     */
+    private suspend fun healAllStaleLocalCopyMetadata() {
+        val rows = syncMetadataDao.getAll()
+        if (rows.isEmpty()) return
+        val updates = mutableListOf<SyncMetadataEntity>()
+        for (row in rows) {
+            val healed = healStaleLocalCopyMetadataRow(row)
+            if (healed != row) updates.add(healed)
+        }
+        if (updates.isEmpty()) return
+        updates.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+            syncMetadataDao.upsertAll(chunk)
+        }
+        notifyGalleryDisplayRefresh()
+    }
+
+    private suspend fun healAndPersistStaleLocalCopyMetadata(row: SyncMetadataEntity): SyncMetadataEntity {
+        val healed = healStaleLocalCopyMetadataRow(row)
+        if (healed != row) {
+            syncMetadataDao.upsert(healed)
+        }
+        return healed
+    }
+
+    private fun healStaleLocalCopyMetadataRow(row: SyncMetadataEntity): SyncMetadataEntity {
+        var work = row
+        var dirty = false
+
+        if (work.localReleasedForSpace) {
+            if (work.localMediaId != null || !work.localContentUri.isNullOrBlank()) {
+                work = work.copy(localMediaId = null, localContentUri = null)
+                dirty = true
+            }
+            if (!work.cachedFilePath.isNullOrBlank() && resolveViewableOriginalFile(work) == null) {
+                work = work.copy(cachedFilePath = null)
+                dirty = true
+            }
+            if (work.oneDriveItemId != null && work.cloudState != CloudSyncState.CLOUD_ONLY) {
+                work = work.copy(cloudState = CloudSyncState.CLOUD_ONLY, lastError = null)
+                dirty = true
+            }
+            return if (dirty) work else row
+        }
+
+        if (work.localMediaId != null && !localOriginalPresent(work)) {
+            work = work.copy(localMediaId = null, localContentUri = null)
+            dirty = true
+        } else if (!work.localContentUri.isNullOrBlank()) {
+            val uri = Uri.parse(work.localContentUri)
+            if (!mediaDeleteRequestRouter.uriExists(appContext, uri)) {
+                work = work.copy(localContentUri = null)
+                dirty = true
+            }
+        }
+
+        val viewableCache = resolveViewableOriginalFile(work)
+        if (!work.cachedFilePath.isNullOrBlank() && viewableCache == null) {
+            work = work.copy(cachedFilePath = null)
+            dirty = true
+        } else if (work.cachedFilePath.isNullOrBlank() && viewableCache != null) {
+            work = work.copy(cachedFilePath = viewableCache.absolutePath)
+            dirty = true
+        }
+
+        val hasLocal = localOriginalPresent(work)
+        val hasCache = resolveViewableOriginalFile(work) != null
+        if (work.oneDriveItemId != null &&
+            work.cloudState == CloudSyncState.SYNCED &&
+            !hasLocal &&
+            !hasCache &&
+            work.pendingDeleteTarget == PendingDeleteTarget.NONE
+        ) {
+            work = work.copy(cloudState = CloudSyncState.CLOUD_ONLY, lastError = null)
+            dirty = true
+        }
+
+        return if (dirty) work else row
     }
 
     private suspend fun sweepTransientErrorsAfterSuccessfulSync() {
