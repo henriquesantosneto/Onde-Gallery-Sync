@@ -86,10 +86,11 @@ Uploads em lote: **`PARALLEL_UPLOADS = 3`**, com barras de progresso na aba Sync
 #### Pós-sync (`runPostSyncEnrichmentInternal`)
 
 1. Fila residual (exclusões pendentes, itens sem miniatura).
-2. **`ensureAlbumCoverThumbnails`**: uma miniatura prioritária por álbum.
-3. **`prefetchMissingThumbnails`**: levas de até 512 itens, **3 em paralelo**, limites por passagem (ver [THUMBNAILS_CACHE_AND_DOWNLOADS.md](THUMBNAILS_CACHE_AND_DOWNLOADS.md)).
-4. **`backfillMissingGpsLocations`**: EXIF local + probe na nuvem (~512 KiB).
-5. **`backfillMissingCaptureTimes`**: ordenação por data de captura na galeria.
+2. **`drainRemainingRunQueueBeforePrefetch`**: confirma exclusões; miniaturas da fila em levas com **`runMissingThumbnailPrefetch`** (3 em paralelo), não uma a uma.
+3. **`ensureAlbumCoverThumbnails`**: uma miniatura prioritária por álbum.
+4. **`prefetchMissingThumbnails`**: levas de até 512 itens, **3 em paralelo**, limites por passagem (ver [THUMBNAILS_CACHE_AND_DOWNLOADS.md](THUMBNAILS_CACHE_AND_DOWNLOADS.md)).
+5. **`backfillMissingGpsLocations`**: EXIF local + probe na nuvem (~512 KiB).
+6. **`backfillMissingCaptureTimes`**: ordenação por data de captura na galeria.
 
 ## UI de progresso (aba Sync)
 

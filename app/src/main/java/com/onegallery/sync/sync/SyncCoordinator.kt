@@ -2211,28 +2211,13 @@ class SyncCoordinator(
         }
     }
 
-    /** Nuvem mais nova: só miniatura no cache — original completo sob demanda na visualização. */
-    private suspend fun registerCloudDownloadPlaceholder(row: SyncMetadataEntity): Int {
-        upsertActiveSyncItem(
-            ActiveSyncItem(
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Baixando miniatura da nuvem…",
-            ),
-        )
-        ensureThumbnailCached(
-            row.canonicalPath,
-            activeSyncProgressCallback(row, "Baixando miniatura da nuvem…"),
-        ).getOrNull()
-        removeActiveSyncItem(row.canonicalPath)
-        removeFromRunQueue(row.canonicalPath)
-        return 1
-    }
-
-    /** Itens ainda listados na fila após a passagem local (ex.: só na nuvem). */
+    /** Exclusões pendentes na fila; miniaturas ficam para [runMissingThumbnailPrefetch] (3 em paralelo). */
     private suspend fun drainRemainingRunQueueBeforePrefetch() {
-        while (true) {
-            val path = _state.value.runQueue.firstOrNull()?.canonicalPath ?: break
+        val snapshot = _state.value.runQueue
+        if (snapshot.isEmpty()) return
+        val thumbRows = mutableListOf<SyncMetadataEntity>()
+        for (displayRow in snapshot) {
+            val path = displayRow.canonicalPath
             val row = syncMetadataDao.getByCanonicalPath(path)
             if (row == null) {
                 removeFromRunQueue(path)
@@ -2245,10 +2230,22 @@ class SyncCoordinator(
                 }
                 row.oneDriveItemId != null &&
                     mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null -> {
-                    registerCloudDownloadPlaceholder(row)
+                    thumbRows.add(row)
                 }
                 else -> removeFromRunQueue(path)
             }
+        }
+        if (thumbRows.isEmpty()) return
+        setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Miniaturas da fila…",
+            "${thumbRows.size} item(ns) · até $PARALLEL_THUMBNAILS em paralelo.",
+            alsoUpdateLastMessage = false,
+        )
+        thumbRows.chunked(THUMB_PREFETCH_BATCH).forEach { batch ->
+            ensureNotCancelled()
+            setRunQueueFromEntities(batch)
+            runMissingThumbnailPrefetch(batch, honorSyncCancel = true)
         }
     }
 
