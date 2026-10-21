@@ -184,6 +184,8 @@ fun GridFastScrollRail(
 
     val scrollThumbFraction by remember(gridState, itemCount) {
         derivedStateOf {
+            if (!gridState.canScrollForward) return@derivedStateOf 1f
+            if (!gridState.canScrollBackward) return@derivedStateOf 0f
             val info = gridState.layoutInfo
             if (info.totalItemsCount <= 1) return@derivedStateOf 0f
             val anchor = info.visibleItemsInfo.minByOrNull { it.offset.y }?.index ?: 0
