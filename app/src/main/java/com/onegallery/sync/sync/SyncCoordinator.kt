@@ -174,6 +174,7 @@ class SyncCoordinator(
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val thumbnailMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
+    private val workerForegroundSession = AtomicBoolean(false)
     private var albumCoverRevisionJob: Job? = null
     private var bulkGalleryDisplayRefreshJob: Job? = null
     private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
@@ -613,6 +614,18 @@ class SyncCoordinator(
         }
     }
 
+    /** WorkManager já promoveu [androidx.work.CoroutineWorker.setForeground] — evita 2º serviço (falha em background). */
+    fun setWorkerForegroundSession(active: Boolean) {
+        workerForegroundSession.set(active)
+    }
+
+    private suspend inline fun <T> withSyncForeground(crossinline block: suspend () -> T): T {
+        if (workerForegroundSession.get()) {
+            return block()
+        }
+        return foregroundGuard.runWithForeground { block() }
+    }
+
     private val galleryMetadataSource = syncMetadataDao.observeAll()
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = merge(
         galleryMetadataSource.take(1),
@@ -807,11 +820,11 @@ class SyncCoordinator(
         if (manageRunningState) {
             ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
             return longTaskMutex.withLock {
-                foregroundGuard.runWithForeground {
+                withSyncForeground {
                     try {
                         prepareSyncSession(userInitiated)
                     } catch (cancelled: CancellationException) {
-                        return@runWithForeground Result.failure(cancelled)
+                        return@withSyncForeground Result.failure(cancelled)
                     }
                     indexLocalLibraryBody(manageRunningState)
                 }
@@ -1037,11 +1050,11 @@ class SyncCoordinator(
         }
 
         return longTaskMutex.withLock {
-            foregroundGuard.runWithForeground {
+            withSyncForeground {
                 try {
                     prepareSyncSession(userInitiated)
                 } catch (cancelled: CancellationException) {
-                    return@runWithForeground Result.failure(cancelled)
+                    return@withSyncForeground Result.failure(cancelled)
                 }
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
@@ -1390,11 +1403,11 @@ class SyncCoordinator(
             return Result.failure(denied.exceptionOrNull() ?: IllegalStateException("Sync pausado"))
         }
         return longTaskMutex.withLock {
-            foregroundGuard.runWithForeground {
+            withSyncForeground {
                 try {
                     prepareSyncSession(userInitiated)
                 } catch (cancelled: CancellationException) {
-                    return@runWithForeground Result.failure(cancelled)
+                    return@withSyncForeground Result.failure(cancelled)
                 }
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
@@ -3181,7 +3194,7 @@ class SyncCoordinator(
     }
 
     private suspend fun runPostSyncEnrichmentInternal(coreSyncMessagePrefix: String) {
-        foregroundGuard.runWithForeground {
+        withSyncForeground {
             runCatching {
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(

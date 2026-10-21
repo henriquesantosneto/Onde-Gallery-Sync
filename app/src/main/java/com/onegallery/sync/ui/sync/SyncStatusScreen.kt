@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.db.SyncIndexStatsRow
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
@@ -57,7 +58,9 @@ fun SyncStatusScreen(
     syncPreferences: SyncPreferences,
     onNavigateBack: (() -> Unit)? = null,
 ) {
-    val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
+    val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle(
+        minActiveState = Lifecycle.State.CREATED,
+    )
     val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle(
         initialValue = null,
     )
@@ -146,6 +149,13 @@ fun SyncStatusScreen(
                                     modifier = Modifier.padding(top = 6.dp),
                                 )
                             }
+                            Text(
+                                "Com o app minimizado, o sync continua pela notificação " +
+                                    "em segundo plano (WorkManager).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
                         } else {
                             Text(
                                 coordinatorState.lastMessage,

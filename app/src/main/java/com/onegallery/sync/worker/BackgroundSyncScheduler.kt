@@ -6,6 +6,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.onegallery.sync.OneGalleryApplication
@@ -98,6 +99,9 @@ object BackgroundSyncScheduler {
         val builder = OneTimeWorkRequestBuilder<SyncWorker>()
             .setInputData(SyncWorker.input(userInitiated))
             .setConstraints(syncConstraints(prefs))
+        if (userInitiated) {
+            builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        }
         if (delaySeconds > 0L) {
             builder.setInitialDelay(delaySeconds, TimeUnit.SECONDS)
         }

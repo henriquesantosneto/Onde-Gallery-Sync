@@ -5,6 +5,10 @@ import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.R
+import com.onegallery.sync.sync.SyncForegroundNotifications
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 class SyncWorker(
     appContext: Context,
@@ -18,6 +22,24 @@ class SyncWorker(
             return Result.success()
         }
         val userInitiated = inputData.getBoolean(KEY_USER_INITIATED, false)
+        setForeground(
+            SyncForegroundNotifications.foregroundInfo(
+                applicationContext,
+                applicationContext.getString(R.string.sync_notification_message),
+            ),
+        )
+        app.syncCoordinator.setWorkerForegroundSession(true)
+        return try {
+            withContext(NonCancellable) {
+                doWorkBody(app, userInitiated)
+            }
+        } finally {
+            app.syncCoordinator.setWorkerForegroundSession(false)
+        }
+    }
+
+    private suspend fun doWorkBody(app: OneGalleryApplication, userInitiated: Boolean): Result {
+        val prefs = app.syncPreferences
         if (!userInitiated && app.syncCoordinator.state.value.isRunning) {
             runAutoReleaseOnly(app)
             return Result.success()
