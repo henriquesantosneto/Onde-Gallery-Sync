@@ -25,6 +25,12 @@ data class DeletedItemFacet(
 
 data class DriveFileFacet(
     val mimeType: String?,
+    val hashes: DriveFileHashes? = null,
+)
+
+data class DriveFileHashes(
+    val quickXorHash: String? = null,
+    val sha1Hash: String? = null,
 )
 
 data class DriveFolderFacet(

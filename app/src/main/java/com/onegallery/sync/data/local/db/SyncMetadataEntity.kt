@@ -27,6 +27,12 @@ data class SyncMetadataEntity(
     /** Quando a foto/vídeo foi capturado (EXIF / DATE_TAKEN), em segundos UTC. */
     val capturedAtSeconds: Long? = null,
     val remoteModifiedAt: Long?,
+    /** Graph `file.hashes.quickXorHash` (Base64) da cópia na nuvem. */
+    val remoteQuickXorHash: String? = null,
+    val remoteSizeBytes: Long? = null,
+    /** Calculado no aparelho só quando necessário (candidatos a upload). */
+    val localQuickXorHash: String? = null,
+    val localSizeBytes: Long? = null,
     val cloudState: CloudSyncState,
     val cachedFilePath: String?,
     val pendingDeleteTarget: PendingDeleteTarget,

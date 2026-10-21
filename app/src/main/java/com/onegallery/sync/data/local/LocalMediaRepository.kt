@@ -77,6 +77,9 @@ class LocalMediaRepository(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    fun openMediaInputStream(item: LocalMediaItem): java.io.InputStream? =
+        context.contentResolver.openInputStream(item.uri)
+
     fun materializeToTempFile(item: LocalMediaItem): java.io.File? {
         return runCatching {
             val suffix = item.displayName.substringAfterLast('.', "bin")

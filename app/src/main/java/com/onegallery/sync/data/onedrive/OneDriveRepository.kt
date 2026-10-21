@@ -33,6 +33,7 @@ data class RemoteDriveFile(
     val canonicalPath: String,
     val modifiedAtEpoch: Long?,
     val sizeBytes: Long?,
+    val quickXorHash: String? = null,
 )
 
 data class RemoteDriveListing(
@@ -250,15 +251,7 @@ class OneDriveRepository(
                 if (item.file == null) return@forEach
                 val canonical = canonicalPathForDriveItem(item) ?: return@forEach
                 if (!SyncPolicy.shouldIncludeLocalItem(canonical, item.name)) return@forEach
-                acc.changedFiles.add(
-                    RemoteDriveFile(
-                        itemId = item.id,
-                        name = item.name,
-                        canonicalPath = canonical,
-                        modifiedAtEpoch = parseGraphTime(item.lastModifiedDateTime),
-                        sizeBytes = item.size,
-                    ),
-                )
+                acc.changedFiles.add(remoteDriveFileFromItem(item, canonical))
             }
             nextLink = page.nextLink
             if (page.deltaLink != null) {
@@ -526,6 +519,33 @@ class OneDriveRepository(
         }
     }
 
+    /** Confirma se já existe arquivo no caminho de sync (útil quando o delta não listou o item). */
+    suspend fun lookupRemoteFileAtCanonicalPath(canonicalPath: String): Result<RemoteDriveFile?> {
+        return runWithToken { token ->
+            val auth = "Bearer $token"
+            val drivePath = encodeDrivePath(syncDrivePathFromCanonical(canonicalPath))
+            try {
+                val item = graphApi.getItemByDrivePath(auth, drivePath)
+                if (item.file == null) return@runWithToken null
+                val canonical = canonicalPathForDriveItem(item) ?: canonicalPath
+                remoteDriveFileFromItem(item, canonical)
+            } catch (http: HttpException) {
+                if (http.code() == 404) null else throw http
+            }
+        }
+    }
+
+    private fun remoteDriveFileFromItem(item: DriveItem, canonicalPath: String): RemoteDriveFile {
+        return RemoteDriveFile(
+            itemId = item.id,
+            name = item.name,
+            canonicalPath = canonicalPath,
+            modifiedAtEpoch = parseGraphTime(item.lastModifiedDateTime),
+            sizeBytes = item.size,
+            quickXorHash = item.file?.hashes?.quickXorHash,
+        )
+    }
+
     private fun syncDrivePathFromCanonical(canonicalPath: String): String {
         val base = graphFolderPreferences.syncRootDrivePath?.trim('/')
             ?: SyncPolicy.ONEDRIVE_MIRROR_ROOT
@@ -555,12 +575,9 @@ class OneDriveRepository(
                         folders.add(item.id to childPrefix)
                     } else if (item.file != null) {
                         files.add(
-                            RemoteDriveFile(
-                                itemId = item.id,
-                                name = item.name,
-                                canonicalPath = SyncPaths.shortenWhatsAppPath(childPrefix),
-                                modifiedAtEpoch = parseGraphTime(item.lastModifiedDateTime),
-                                sizeBytes = item.size,
+                            remoteDriveFileFromItem(
+                                item,
+                                SyncPaths.shortenWhatsAppPath(childPrefix),
                             ),
                         )
                     }

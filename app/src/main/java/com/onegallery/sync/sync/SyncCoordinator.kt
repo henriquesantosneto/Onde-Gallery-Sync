@@ -721,6 +721,7 @@ class SyncCoordinator(
         if (existing.localMediaId != item.id) return false
         if (existing.canonicalPath != canonical) return false
         if (existing.localModifiedAt != item.dateModifiedSeconds) return false
+        if (existing.localSizeBytes != item.sizeBytes) return false
         if (existing.localContentUri != item.uri.toString()) return false
         if (existing.displayName != item.displayName) return false
         if (existing.pendingDeleteTarget != PendingDeleteTarget.NONE) return false
@@ -889,6 +890,7 @@ class SyncCoordinator(
                     val remoteListing = listRemoteFiles().getOrThrow()
                     val remoteFiles = remoteListing.files
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
+                    val remoteByContentKey = buildRemoteContentIndex(remoteFiles)
                     setSyncProgress(
                         SyncProgressPhase.LISTING_REMOTE,
                         if (remoteListing.incremental) "Nuvem atualizada (delta)" else "Listagem na nuvem concluída",
@@ -959,7 +961,8 @@ class SyncCoordinator(
                         }
                         knownPaths.add(row.canonicalPath)
                         if (row.pendingDeleteTarget != PendingDeleteTarget.NONE) continue
-                        val remote = remoteByPath[row.canonicalPath]
+                        var remote = remoteByPath[row.canonicalPath]
+                            ?: resolveRemoteForUploadCandidate(row, remoteByPath)
                         when {
                             remote == null && row.oneDriveItemId != null -> {
                                 upsertBatch.add(
@@ -971,12 +974,33 @@ class SyncCoordinator(
                                     ),
                                 )
                             }
-                            remote == null -> uploadQueue.add(row)
+                            remote == null -> {
+                                var workRow = ensureLocalContentFingerprint(row)
+                                val contentKey = workRow.localQuickXorHash?.let { hash ->
+                                    workRow.localSizeBytes?.let { size ->
+                                        ContentFingerprint.key(hash, size)
+                                    }
+                                }
+                                val contentRemote = contentKey
+                                    ?.let { remoteByContentKey[it] }
+                                    ?.takeIf { it.canonicalPath == row.canonicalPath }
+                                val syncedByHash = contentRemote?.let {
+                                    markSyncedIfContentMatchesRemote(workRow, it)
+                                }
+                                if (syncedByHash == null) {
+                                    uploadQueue.add(workRow)
+                                }
+                            }
                             else -> {
                                 val merged = reconcileWithRemote(row, remote)
                                 upsertBatch.add(merged)
                                 when (merged.cloudState) {
-                                    CloudSyncState.PENDING_UPLOAD -> uploadQueue.add(merged)
+                                    CloudSyncState.PENDING_UPLOAD -> {
+                                        val skip = markSyncedIfContentMatchesRemote(merged, remote)
+                                        if (skip == null) {
+                                            uploadQueue.add(merged)
+                                        }
+                                    }
                                     CloudSyncState.PENDING_DOWNLOAD -> pendingDownloadPlaceholders++
                                     else -> Unit
                                 }
@@ -1024,6 +1048,8 @@ class SyncCoordinator(
                                     oneDriveItemId = remote.itemId,
                                     localModifiedAt = null,
                                     remoteModifiedAt = remote.modifiedAtEpoch,
+                                    remoteQuickXorHash = remote.quickXorHash,
+                                    remoteSizeBytes = remote.sizeBytes,
                                     cloudState = CloudSyncState.CLOUD_ONLY,
                                     cachedFilePath = null,
                                     pendingDeleteTarget = PendingDeleteTarget.NONE,
@@ -1782,16 +1808,55 @@ class SyncCoordinator(
             return 0
         }
         return runCatching {
-            val remoteId = uploadLocalFile(
-                canonicalPath = row.canonicalPath,
-                sourceFile = temp,
-                mimeType = item.mimeType,
-                displayName = row.displayName,
-                operationLabel = "Enviando para OneDrive…",
-            ).getOrThrow()
+            val localHash = ContentFingerprint.quickXorHashBase64(temp)
+            val localSize = temp.length()
+            var remoteId = row.oneDriveItemId
+            var remoteHash = row.remoteQuickXorHash
+            var remoteSize = row.remoteSizeBytes
+            var remoteModified = row.remoteModifiedAt
+            var uploadedBytes = false
+            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                val existingRemote = oneDriveRepository
+                    .lookupRemoteFileAtCanonicalPath(row.canonicalPath)
+                    .getOrNull()
+                if (existingRemote != null &&
+                    ContentFingerprint.matchesRemote(localHash, localSize, existingRemote)
+                ) {
+                    remoteId = existingRemote.itemId
+                    remoteHash = existingRemote.quickXorHash ?: remoteHash
+                    remoteSize = existingRemote.sizeBytes ?: remoteSize
+                    remoteModified = existingRemote.modifiedAtEpoch ?: remoteModified
+                } else {
+                    remoteId = uploadLocalFile(
+                        canonicalPath = row.canonicalPath,
+                        sourceFile = temp,
+                        mimeType = item.mimeType,
+                        displayName = row.displayName,
+                        operationLabel = "Enviando para OneDrive…",
+                    ).getOrThrow()
+                    uploadedBytes = true
+                }
+            } else {
+                remoteId = uploadLocalFile(
+                    canonicalPath = row.canonicalPath,
+                    sourceFile = temp,
+                    mimeType = item.mimeType,
+                    displayName = row.displayName,
+                    operationLabel = "Enviando para OneDrive…",
+                ).getOrThrow()
+                uploadedBytes = true
+            }
             val synced = row.copy(
                 oneDriveItemId = remoteId,
-                remoteModifiedAt = System.currentTimeMillis() / 1000,
+                localQuickXorHash = localHash,
+                localSizeBytes = localSize,
+                remoteQuickXorHash = remoteHash,
+                remoteSizeBytes = remoteSize,
+                remoteModifiedAt = if (uploadedBytes) {
+                    System.currentTimeMillis() / 1000
+                } else {
+                    remoteModified
+                },
                 cloudState = CloudSyncState.SYNCED,
                 lastError = null,
             )
@@ -1907,10 +1972,15 @@ class SyncCoordinator(
         val base = row.copy(
             oneDriveItemId = remote.itemId,
             remoteModifiedAt = remote.modifiedAtEpoch,
+            remoteQuickXorHash = remote.quickXorHash ?: row.remoteQuickXorHash,
+            remoteSizeBytes = remote.sizeBytes ?: row.remoteSizeBytes,
             lastError = null,
         )
         if (row.localMediaId == null) {
             return base.copy(cloudState = CloudSyncState.CLOUD_ONLY)
+        }
+        if (ContentFingerprint.matchesIndexedLocal(row, remote)) {
+            return base.copy(cloudState = CloudSyncState.SYNCED)
         }
         val lastKnownRemote = row.remoteModifiedAt
         val remoteChangedSinceSync = lastKnownRemote != null &&
@@ -1918,11 +1988,66 @@ class SyncCoordinator(
         val localNewerThanCloud = localTs > remoteTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         val remoteNewerThanLocal = remoteTs > localTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         return when {
-            localNewerThanCloud -> base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
-            remoteNewerThanLocal || (remoteChangedSinceSync && !localNewerThanCloud) ->
-                base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+            localNewerThanCloud -> {
+                if (ContentFingerprint.matchesIndexedLocal(row, remote)) {
+                    base.copy(cloudState = CloudSyncState.SYNCED)
+                } else {
+                    base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
+                }
+            }
+            remoteNewerThanLocal || (remoteChangedSinceSync && !localNewerThanCloud) -> {
+                if (ContentFingerprint.matchesIndexedLocal(row, remote)) {
+                    base.copy(cloudState = CloudSyncState.SYNCED)
+                } else {
+                    base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
+                }
+            }
             else -> base.copy(cloudState = CloudSyncState.SYNCED)
         }
+    }
+
+    private fun buildRemoteContentIndex(files: List<RemoteDriveFile>): Map<String, RemoteDriveFile> {
+        return files.mapNotNull { remote ->
+            val hash = remote.quickXorHash?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val size = remote.sizeBytes ?: return@mapNotNull null
+            ContentFingerprint.key(hash, size) to remote
+        }.toMap()
+    }
+
+    private suspend fun ensureLocalContentFingerprint(row: SyncMetadataEntity): SyncMetadataEntity {
+        val sizeKnown = row.localSizeBytes
+        if (row.localQuickXorHash != null && sizeKnown != null) return row
+        val localId = row.localMediaId ?: return row
+        val item = indexPassLocalItemsById[localId]
+            ?: localMediaRepository.findById(localId)
+            ?: return row
+        val size = sizeKnown ?: item.sizeBytes
+        val hash = withContext(Dispatchers.IO) {
+            localMediaRepository.openMediaInputStream(item)?.use { input ->
+                ContentFingerprint.quickXorHashBase64(input)
+            }
+        } ?: return row.copy(localSizeBytes = size)
+        return row.copy(localQuickXorHash = hash, localSizeBytes = size)
+    }
+
+    private suspend fun markSyncedIfContentMatchesRemote(
+        row: SyncMetadataEntity,
+        remote: RemoteDriveFile,
+    ): SyncMetadataEntity? {
+        val enriched = ensureLocalContentFingerprint(row)
+        val merged = reconcileWithRemote(enriched, remote)
+        if (merged.cloudState != CloudSyncState.SYNCED) return null
+        syncMetadataDao.upsert(merged)
+        return merged
+    }
+
+    private suspend fun resolveRemoteForUploadCandidate(
+        row: SyncMetadataEntity,
+        remoteByPath: Map<String, RemoteDriveFile>,
+    ): RemoteDriveFile? {
+        remoteByPath[row.canonicalPath]?.let { return it }
+        if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return null
+        return oneDriveRepository.lookupRemoteFileAtCanonicalPath(row.canonicalPath).getOrNull()
     }
 
     /** Reaplica envios pendentes após o merge principal (ex.: falha de rede na mesma execução). */
@@ -1933,13 +2058,19 @@ class SyncCoordinator(
         for (row in syncMetadataDao.getPendingUploadRows()) {
             ensureSyncMayContinue()
             val remote = remoteByPath[row.canonicalPath]
+                ?: resolveRemoteForUploadCandidate(row, remoteByPath)
             if (remote == null) {
                 toUpload.add(row)
             } else {
                 val merged = reconcileWithRemote(row, remote)
                 syncMetadataDao.upsert(merged)
-                if (merged.cloudState == CloudSyncState.PENDING_UPLOAD) {
-                    toUpload.add(merged)
+                when (merged.cloudState) {
+                    CloudSyncState.PENDING_UPLOAD -> {
+                        if (markSyncedIfContentMatchesRemote(merged, remote) == null) {
+                            toUpload.add(merged)
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }
@@ -2089,8 +2220,12 @@ class SyncCoordinator(
             localReleasedForSpace = false,
             oneDriveItemId = existing?.oneDriveItemId,
             localModifiedAt = item.dateModifiedSeconds,
+            localSizeBytes = item.sizeBytes,
+            localQuickXorHash = existing?.localQuickXorHash,
             capturedAtSeconds = capturedAt,
             remoteModifiedAt = existing?.remoteModifiedAt,
+            remoteQuickXorHash = existing?.remoteQuickXorHash,
+            remoteSizeBytes = existing?.remoteSizeBytes,
             cloudState = when {
                 existing?.oneDriveItemId != null && existing.cloudState != CloudSyncState.LOCAL_ONLY ->
                     existing.cloudState
@@ -2816,7 +2951,8 @@ class SyncCoordinator(
                 name = row.displayName,
                 canonicalPath = row.canonicalPath,
                 modifiedAtEpoch = row.remoteModifiedAt,
-                sizeBytes = null,
+                sizeBytes = row.remoteSizeBytes,
+                quickXorHash = row.remoteQuickXorHash,
             )
         }
     }
