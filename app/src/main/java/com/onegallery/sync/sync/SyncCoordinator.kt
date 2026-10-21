@@ -1265,18 +1265,43 @@ class SyncCoordinator(
         }
     }
 
-    suspend fun ensureThumbnailCached(canonicalPath: String): Result<File?> {
+    suspend fun ensureThumbnailCached(
+        canonicalPath: String,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<File?> {
         return withContext(Dispatchers.IO) {
-            ensureThumbnailCachedOnIo(canonicalPath)
+            ensureThumbnailCachedOnIo(canonicalPath, onProgress)
         }
     }
 
-    private suspend fun ensureThumbnailCachedOnIo(canonicalPath: String): Result<File?> {
+    private fun activeSyncProgressCallback(
+        row: SyncMetadataEntity,
+        operationLabel: String,
+    ): ((Long, Long?) -> Unit)? {
+        if (!_state.value.isRunning) return null
+        return { done, total ->
+            upsertActiveSyncItem(
+                ActiveSyncItem(
+                    canonicalPath = row.canonicalPath,
+                    displayName = row.displayName,
+                    operationLabel = operationLabel,
+                    bytesCompleted = done,
+                    totalBytes = total,
+                ),
+            )
+        }
+    }
+
+    private suspend fun ensureThumbnailCachedOnIo(
+        canonicalPath: String,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<File?> {
         mediaCacheRepository.thumbnailIfCached(canonicalPath)?.let { return Result.success(it) }
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
         staging.delete()
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
+        onProgress?.invoke(0L, null)
 
         fun commitIfReady(): File? =
             mediaCacheRepository.commitThumbnail(staging, canonicalPath)
@@ -1287,7 +1312,12 @@ class SyncCoordinator(
             } else {
                 cacheImageThumbnailFromUri(uri, staging)
             }
-            if (ok) commitIfReady()?.let { return Result.success(it) }
+            if (ok) {
+                commitIfReady()?.let { file ->
+                    onProgress?.invoke(1L, 1L)
+                    return Result.success(file)
+                }
+            }
         }
 
         row.cachedFilePath?.let { path ->
@@ -1298,20 +1328,25 @@ class SyncCoordinator(
                 } else {
                     cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
                 }
-                if (ok) commitIfReady()?.let { return Result.success(it) }
+                if (ok) {
+                    commitIfReady()?.let { file ->
+                        onProgress?.invoke(1L, 1L)
+                        return Result.success(file)
+                    }
+                }
             }
         }
 
         val itemId = row.oneDriveItemId
         if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
             var thumbReady = false
-            oneDriveRepository.downloadThumbnailToFile(itemId, staging).onSuccess {
+            oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
                 if (staging.length() > 0L) thumbReady = true
             }
             if (!thumbReady && !isVideo) {
                 val partial = File(staging.absolutePath + ".partial")
                 partial.delete()
-                oneDriveRepository.downloadImagePrefixForThumbnail(itemId, partial).onSuccess {
+                oneDriveRepository.downloadImagePrefixForThumbnail(itemId, partial, onProgress = onProgress).onSuccess {
                     if (partial.isFile && partial.length() > 0L) {
                         thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(partial), staging)
                     }
@@ -1319,7 +1354,10 @@ class SyncCoordinator(
                 partial.delete()
             }
             if (thumbReady) {
-                commitIfReady()?.let { return Result.success(it) }
+                commitIfReady()?.let {
+                    onProgress?.invoke(it.length(), it.length())
+                    return Result.success(it)
+                }
             }
         }
         staging.delete()
@@ -2131,7 +2169,10 @@ class SyncCoordinator(
                 operationLabel = "Baixando miniatura da nuvem…",
             ),
         )
-        ensureThumbnailCached(row.canonicalPath).getOrNull()
+        ensureThumbnailCached(
+            row.canonicalPath,
+            activeSyncProgressCallback(row, "Baixando miniatura da nuvem…"),
+        ).getOrNull()
         removeActiveSyncItem(row.canonicalPath)
         removeFromRunQueue(row.canonicalPath)
         return 1
@@ -2881,7 +2922,10 @@ class SyncCoordinator(
                                 operationLabel = thumbnailOperationLabel(row),
                             ),
                         )
-                        val hit = ensureThumbnailCached(row.canonicalPath).getOrNull() != null
+                        val hit = ensureThumbnailCached(
+                            row.canonicalPath,
+                            activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
+                        ).getOrNull() != null
                         if (hit) cachedCount.incrementAndGet()
                         val done = completed.incrementAndGet()
                         if (_state.value.isRunning &&

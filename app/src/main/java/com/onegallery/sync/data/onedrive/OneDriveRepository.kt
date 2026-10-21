@@ -528,6 +528,7 @@ class OneDriveRepository(
         itemId: String,
         destination: File,
         maxBytes: Long = 2L * 1024L * 1024L,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()
@@ -538,6 +539,8 @@ class OneDriveRepository(
                 itemId = itemId,
                 rangeHeader = "bytes=0-$end",
                 destination = destination,
+                totalBytesHint = maxBytes,
+                onProgress = onProgress,
             )
             if (!destination.isFile || destination.length() <= 0L) {
                 error("Prefixo vazio para miniatura.")
@@ -545,14 +548,18 @@ class OneDriveRepository(
         }
     }
 
-    suspend fun downloadThumbnailToFile(itemId: String, destination: File): Result<Unit> {
+    suspend fun downloadThumbnailToFile(
+        itemId: String,
+        destination: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()
             val auth = "Bearer $token"
             val large = runCatching {
                 graphApi.downloadItemThumbnailLarge(auth, itemId).use { body ->
                     destination.outputStream().use { out ->
-                        body.byteStream().copyTo(out)
+                        copyStreamWithProgress(body.byteStream(), out, body.contentLength(), onProgress)
                     }
                 }
             }
@@ -560,7 +567,7 @@ class OneDriveRepository(
             destination.delete()
             graphApi.downloadItemThumbnailMedium(auth, itemId).use { body ->
                 destination.outputStream().use { out ->
-                    body.byteStream().copyTo(out)
+                    copyStreamWithProgress(body.byteStream(), out, body.contentLength(), onProgress)
                 }
             }
         }
@@ -639,6 +646,26 @@ class OneDriveRepository(
     private companion object {
         const val EXIF_PROBE_BYTES = 512 * 1024L
         const val STREAM_BUFFER_BYTES = 64 * 1024
+
+        fun copyStreamWithProgress(
+            input: InputStream,
+            output: java.io.OutputStream,
+            totalHint: Long,
+            onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+        ) {
+            val total = totalHint.takeIf { it > 0L }
+            var copied = 0L
+            onProgress?.invoke(0L, total)
+            val buffer = ByteArray(STREAM_BUFFER_BYTES)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                output.write(buffer, 0, read)
+                copied += read
+                onProgress?.invoke(copied, total ?: copied.takeIf { it > 0L })
+            }
+            onProgress?.invoke(copied, total ?: copied.takeIf { it > 0L })
+        }
         const val FULL_REMOTE_LISTING_INTERVAL_MS = 24L * 60L * 60L * 1000L
         const val PARENT_WALK_MAX_DEPTH = 48
 

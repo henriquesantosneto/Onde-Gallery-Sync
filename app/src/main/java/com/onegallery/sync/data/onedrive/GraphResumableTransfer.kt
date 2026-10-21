@@ -119,6 +119,8 @@ class GraphResumableTransfer(
         itemId: String,
         rangeHeader: String,
         destination: File,
+        totalBytesHint: Long? = null,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ) {
         destination.parentFile?.mkdirs()
         val url = "https://graph.microsoft.com/v1.0/me/drive/items/$itemId/content"
@@ -133,8 +135,22 @@ class GraphResumableTransfer(
                 throw IOException("Download parcial falhou: HTTP ${response.code} ${response.message}")
             }
             val body = response.body ?: throw IllegalStateException("Corpo vazio no download parcial")
+            val totalFromHeader = parseTotalFromContentRange(response.header("Content-Range"))
+            val total = totalFromHeader ?: totalBytesHint ?: body.contentLength().takeIf { it > 0L }
             destination.outputStream().use { out ->
-                body.byteStream().copyTo(out)
+                var copied = 0L
+                onProgress?.invoke(0L, total)
+                val buffer = ByteArray(64 * 1024)
+                body.byteStream().use { input ->
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        out.write(buffer, 0, read)
+                        copied += read
+                        onProgress?.invoke(copied, total ?: copied.takeIf { it > 0L })
+                    }
+                }
+                onProgress?.invoke(copied, total ?: copied.takeIf { it > 0L })
             }
         }
     }

@@ -137,73 +137,65 @@ fun SyncStatusScreen(
                         }
                         val activeItems = coordinatorState.activeItems
                         if (coordinatorState.isRunning) {
-                            LinearProgressIndicator(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 12.dp),
-                            )
-                            Row(
-                                modifier = Modifier.padding(top = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                CircularProgressIndicator(strokeWidth = 2.dp)
-                                Text(
-                                    when {
-                                        activeItems.size > 1 ->
-                                            "${activeItems.size} transferências em paralelo…"
-                                        activeItems.size == 1 -> activeItems[0].operationLabel
-                                        coordinatorState.lastMessage.contains(
-                                            "Cancelando",
-                                            ignoreCase = true,
-                                        ) -> "Cancelando…"
-                                        else -> "Em andamento…"
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
+                            if (activeItems.isEmpty()) {
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp),
                                 )
+                                Row(
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    CircularProgressIndicator(strokeWidth = 2.dp)
+                                    Text(
+                                        when {
+                                            coordinatorState.lastMessage.contains(
+                                                "Cancelando",
+                                                ignoreCase = true,
+                                            ) -> "Cancelando…"
+                                            else -> "Em andamento…"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    if (activeItems.size == 1) {
+                                        "Transferência ativa"
+                                    } else {
+                                        "Transferências em paralelo (${activeItems.size})"
+                                    },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    activeItems.forEach { item ->
+                                        SyncQueueActiveOnlyRow(activeItem = item)
+                                    }
+                                }
                             }
                         }
-                        val queueCap = if (coordinatorState.isRunning) 10 else 8
-                        val queueWindowStart = if (coordinatorState.isRunning && activeItems.isNotEmpty()) {
-                            activeItems
-                                .map { item ->
-                                    queueForUi.indexOfFirst { it.canonicalPath == item.canonicalPath }
-                                }
-                                .filter { it >= 0 }
-                                .minOrNull()
-                                ?: 0
-                        } else {
-                            0
-                        }
-                        val queueInStatus = queueForUi
-                            .drop(queueWindowStart)
-                            .take(queueCap)
-                        val activePathsInStatus = queueInStatus.map { it.canonicalPath }.toSet()
-                        val activesMissingFromList = if (coordinatorState.isRunning) {
-                            activeItems.filter { it.canonicalPath !in activePathsInStatus }
-                        } else {
-                            emptyList()
-                        }
-                        if (queueInStatus.isNotEmpty() || activesMissingFromList.isNotEmpty()) {
+                        val activePaths = activeItems.map { it.canonicalPath }.toSet()
+                        val queueCap = if (coordinatorState.isRunning) 12 else 8
+                        val queueWaiting = queueForUi.filter { it.canonicalPath !in activePaths }
+                        val queueInStatus = queueWaiting.take(queueCap)
+                        if (queueInStatus.isNotEmpty()) {
                             Text(
-                                if (coordinatorState.isRunning && queueForUi.size > queueInStatus.size) {
-                                    val from = queueWindowStart + 1
-                                    val to = (queueWindowStart + queueInStatus.size)
-                                        .coerceAtMost(queueForUi.size)
-                                    "Arquivos na fila ($from–$to de ${queueForUi.size})"
-                                } else if (queueForUi.size + activesMissingFromList.size > 1) {
-                                    "Arquivos na fila (${queueForUi.size})"
+                                if (queueWaiting.size > queueInStatus.size) {
+                                    "Aguardando na fila (${queueInStatus.size} de ${queueWaiting.size})"
+                                } else if (queueWaiting.size > 1) {
+                                    "Aguardando na fila (${queueWaiting.size})"
                                 } else {
-                                    "Arquivo na fila"
+                                    "Aguardando na fila"
                                 },
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
                             )
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                activesMissingFromList.forEach { item ->
-                                    SyncQueueActiveOnlyRow(activeItem = item)
-                                }
                                 queueInStatus.forEach { row ->
                                     SyncQueueItemRow(
                                         row = row,
@@ -383,6 +375,7 @@ private fun SyncQueueActiveOnlyRow(activeItem: ActiveSyncItem) {
 @Composable
 private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
     val fraction = activeItem.progressFraction
+    val byteLabel = activeItem.progressByteLabel()
     if (fraction != null) {
         LinearProgressIndicator(
             progress = { fraction },
@@ -395,6 +388,14 @@ private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 6.dp),
+        )
+    }
+    if (byteLabel != null) {
+        Text(
+            byteLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

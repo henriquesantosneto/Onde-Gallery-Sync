@@ -38,6 +38,23 @@ data class ActiveSyncItem(
             if (total <= 0L) return null
             return (bytesCompleted.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
         }
+
+    fun progressByteLabel(): String? {
+        if (bytesCompleted <= 0L && totalBytes == null) return null
+        val done = formatTransferBytes(bytesCompleted)
+        val total = totalBytes?.let { formatTransferBytes(it) }
+        return if (total != null) "$done / $total" else done
+    }
+}
+
+private fun formatTransferBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format(java.util.Locale.getDefault(), "%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return String.format(java.util.Locale.getDefault(), "%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(java.util.Locale.getDefault(), "%.2f GB", gb)
 }
 
 fun SyncMetadataEntity.queueOperation(): SyncQueueOperation? {
