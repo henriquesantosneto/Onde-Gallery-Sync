@@ -199,7 +199,9 @@ fun SettingsScreen(
                     headlineContent = { Text("Remover local logo após backup") },
                     supportingContent = {
                         Text(
-                            "Assim que o item estiver no OneDrive, apaga a cópia na galeria do aparelho.",
+                            "Assim que o item estiver no OneDrive, apaga a cópia na galeria do aparelho. " +
+                                "Se você abrir depois e o app fizer recall, volta o original até você liberar " +
+                                "de novo ou até valer a opção por dias sem abrir.",
                         )
                     },
                     trailingContent = {
@@ -218,8 +220,9 @@ fun SettingsScreen(
                     headlineContent = { Text("Remover local após dias sem abrir") },
                     supportingContent = {
                         Text(
-                            "Só libera se você não abrir a foto no app dentro do prazo (também vale " +
-                                "para original baixado para cache).",
+                            "Para fotos que ainda têm cópia no aparelho ou que você baixou de novo da " +
+                                "nuvem (recall ao abrir). Se passar o prazo sem abrir de novo, o app " +
+                                "remove essa cópia ou cache — não apaga o arquivo no OneDrive.",
                         )
                     },
                     trailingContent = {
@@ -241,8 +244,9 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.titleSmall,
                         )
                         Text(
-                            "Conta desde a última vez que você abriu a foto no app. " +
-                                "Se nunca abriu, usa a data da captura (EXIF). " +
+                            "O prazo recomeça cada vez que você abre a foto (incluindo depois de um " +
+                                "recall: ao ver o original baixado da nuvem, a contagem zera). " +
+                                "Se nunca abriu no app, usa a data da captura (EXIF). " +
                                 "Intervalo: ${SyncPreferences.MIN_LOCAL_IDLE_RELEASE_DAYS}–" +
                                 "${SyncPreferences.MAX_LOCAL_IDLE_RELEASE_DAYS} dias.",
                             style = MaterialTheme.typography.bodySmall,
