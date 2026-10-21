@@ -69,6 +69,10 @@ class OneDriveRepository(
             level = HttpLoggingInterceptor.Level.BASIC
         }
         OkHttpClient.Builder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
             .addInterceptor(logging)
             .build()
     }
