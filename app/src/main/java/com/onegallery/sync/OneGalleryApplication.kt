@@ -158,9 +158,12 @@ class OneGalleryApplication : Application() {
 
     private fun registerWifiSyncNetworkGuard() {
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        /** Ignora o primeiro `onAvailable` ao subir o processo (abrir o app ≠ pedir sync). */
+        var skipInitialNetworkAvailable = true
         connectivityManager.registerDefaultNetworkCallback(
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
+                    if (skipInitialNetworkAvailable) return
                     if (syncPreferences.shouldDeferBackgroundSyncByTime()) return
                     BackgroundSyncScheduler.enqueueSyncSoon(
                         context = this@OneGalleryApplication,
@@ -171,20 +174,11 @@ class OneGalleryApplication : Application() {
 
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                     enforceWifiOnlyDuringSync()
-                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
-                        !syncPreferences.shouldDeferBackgroundSyncByTime()
-                    ) {
-                        BackgroundSyncScheduler.enqueueSyncSoon(
-                            context = this@OneGalleryApplication,
-                            prefs = syncPreferences,
-                            delaySeconds = 25,
-                        )
-                    }
                 }
 
                 override fun onLost(network: Network) {
                     enforceWifiOnlyDuringSync()
+                    skipInitialNetworkAvailable = false
                 }
             },
         )
