@@ -14,6 +14,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -66,23 +67,11 @@ fun SyncStatusScreen(
     var clearingErrors by remember { mutableStateOf(false) }
     val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
         when {
-            coordinatorState.isRunning -> {
-                if (coordinatorState.runQueue.isNotEmpty()) {
-                    coordinatorState.runQueue
-                } else {
-                    syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
-                }
-            }
+            coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
+                coordinatorState.runQueue
+            coordinatorState.isRunning -> emptyList()
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
-    }
-    val parallelTransfers = remember(
-        coordinatorState.isRunning,
-        coordinatorState.activeItems,
-        coordinatorState.runQueue,
-        coordinatorState.progressPhase,
-    ) {
-        resolveTransferRowsForUi(coordinatorState)
     }
 
     Scaffold(
@@ -97,22 +86,6 @@ fun SyncStatusScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            if (coordinatorState.isRunning) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        ),
-                    ) {
-                        SyncParallelTransfersCard(
-                            state = coordinatorState,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
-                }
-            }
-
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -128,10 +101,25 @@ fun SyncStatusScreen(
                             fontWeight = FontWeight.Medium,
                         )
                         if (coordinatorState.isRunning) {
-                            SyncRunningHeadlineBlock(
-                                state = coordinatorState,
+                            val detail = coordinatorState.activityDetail.ifBlank {
+                                coordinatorState.lastMessage.lineSequence().drop(1).joinToString("\n")
+                            }
+                            Text(
+                                coordinatorState.activityHeadline.ifBlank {
+                                    coordinatorState.progressPhase.runningHeadlineFallback()
+                                },
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(top = 12.dp),
                             )
+                            if (detail.isNotBlank()) {
+                                Text(
+                                    detail,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
                         } else {
                             Text(
                                 coordinatorState.lastMessage,
@@ -146,7 +134,33 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        val activePaths = parallelTransfers.map { it.canonicalPath }.toSet()
+                        val activeItems = coordinatorState.activeItems
+                        if (coordinatorState.isRunning) {
+                            if (activeItems.isEmpty()) {
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp),
+                                )
+                            } else {
+                                Text(
+                                    if (activeItems.size == 1) {
+                                        "Transferência ativa"
+                                    } else {
+                                        "Transferências em paralelo (${activeItems.size})"
+                                    },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    activeItems.forEach { item ->
+                                        SyncActiveTransferRow(item)
+                                    }
+                                }
+                            }
+                        }
+                        val activePaths = activeItems.map { it.canonicalPath }.toSet()
                         val queueCap = if (coordinatorState.isRunning) 12 else 8
                         val queueWaiting = queueForUi.filter { it.canonicalPath !in activePaths }
                         val queueInStatus = queueWaiting.take(queueCap)
@@ -167,7 +181,7 @@ fun SyncStatusScreen(
                                 queueInStatus.forEach { row ->
                                     SyncQueueItemRow(
                                         row = row,
-                                        activeItems = parallelTransfers,
+                                        activeItems = coordinatorState.activeItems,
                                         isRunning = coordinatorState.isRunning,
                                     )
                                 }
@@ -318,6 +332,52 @@ private fun StatRow(label: String, value: String, emphasized: Boolean = false) {
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Normal,
             color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun SyncActiveTransferRow(activeItem: ActiveSyncItem) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            activeItem.displayName,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+        )
+        Text(
+            activeItem.operationLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        SyncTransferProgressBar(activeItem = activeItem)
+    }
+}
+
+@Composable
+private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
+    val fraction = activeItem.progressFraction
+    val byteLabel = activeItem.progressByteLabel()
+    if (fraction != null) {
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        )
+    } else {
+        LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        )
+    }
+    if (byteLabel != null) {
+        Text(
+            byteLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

@@ -550,9 +550,6 @@ class SyncCoordinator(
 
     private val activeSyncItemsLock = Any()
 
-    private fun shouldPublishActiveTransferProgress(): Boolean =
-        _state.value.isRunning || _state.value.progressPhase != SyncProgressPhase.IDLE
-
     private fun publishActiveItemsUpdate(next: List<ActiveSyncItem>) {
         val apply = {
             _state.value = _state.value.copy(activeItems = next)
@@ -1292,7 +1289,7 @@ class SyncCoordinator(
         row: SyncMetadataEntity,
         operationLabel: String,
     ): ((Long, Long?) -> Unit)? {
-        if (!shouldPublishActiveTransferProgress()) return null
+        if (!_state.value.isRunning) return null
         return { done, total ->
             upsertActiveSyncItem(
                 ActiveSyncItem(
@@ -3043,34 +3040,16 @@ class SyncCoordinator(
                 val hasLocal = row.localMediaId != null ||
                     row.localContentUri != null ||
                     row.cachedFilePath != null
-                val willProbe = (hasLocal && localProbes < maxLocalProbesPerRun) ||
-                    (row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun)
-                if (!willProbe) return@forEachIndexed
-                upsertActiveSyncItem(
-                    ActiveSyncItem(
-                        canonicalPath = row.canonicalPath,
-                        displayName = row.displayName,
-                        operationLabel = if (hasLocal && localProbes < maxLocalProbesPerRun) {
-                            "Lendo GPS no aparelho…"
-                        } else {
-                            "Lendo GPS na nuvem…"
-                        },
-                    ),
-                )
-                val resolved = try {
-                    when {
-                        hasLocal && localProbes < maxLocalProbesPerRun -> {
-                            localProbes++
-                            resolveLocationForBackfill(row)
-                        }
-                        row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
-                            cloudProbes++
-                            probeCloudExifLocation(row.oneDriveItemId, row.displayName)
-                        }
-                        else -> null
+                val resolved = when {
+                    hasLocal && localProbes < maxLocalProbesPerRun -> {
+                        localProbes++
+                        resolveLocationForBackfill(row)
                     }
-                } finally {
-                    removeActiveSyncItem(row.canonicalPath)
+                    row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
+                        cloudProbes++
+                        probeCloudExifLocation(row.oneDriveItemId, row.displayName)
+                    }
+                    else -> null
                 } ?: return@forEachIndexed
                 syncMetadataDao.upsert(
                     row.copy(
