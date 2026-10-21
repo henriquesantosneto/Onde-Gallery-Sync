@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import java.io.File
@@ -87,6 +88,10 @@ fun MediaDetailScreen(
     var activeZoomTransform by remember { mutableStateOf<ZoomTransformHolder?>(null) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showAllFilesForDelete by remember { mutableStateOf(false) }
+    var pendingDeletePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingDeleteOnRemoved by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val context = LocalContext.current
     var activePageError by remember { mutableStateOf<String?>(null) }
     /** Evita recall automático na mesma sessão após “Liberar espaço” (reabrir a foto para baixar). */
     val suppressAutoRecallPaths = remember { mutableSetOf<String>() }
@@ -540,14 +545,61 @@ fun MediaDetailScreen(
                 onDismiss = { showDeleteConfirm = false },
                 onConfirm = {
                     showDeleteConfirm = false
-                    if (state.selectionMode && state.selectedPaths.isNotEmpty()) {
-                        viewModel.deleteSelected()
-                    } else if (currentPath != null) {
-                        viewModel.deleteSingle(currentPath, onBack)
+                    val paths = when {
+                        state.selectionMode && state.selectedPaths.isNotEmpty() ->
+                            state.selectedPaths.toList()
+                        currentPath != null -> listOf(currentPath)
+                        else -> emptyList()
+                    }
+                    if (paths.isEmpty()) return@DeleteSelectionDialog
+                    val onRemoved = if (paths.size == 1 && currentPath != null) {
+                        { leaveDetail() }
+                    } else {
+                        null
+                    }
+                    if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                        if (onRemoved != null) {
+                            viewModel.deleteSingle(paths.single(), onRemoved)
+                        } else {
+                            viewModel.deleteSelected()
+                        }
+                    } else {
+                        pendingDeletePaths = paths
+                        pendingDeleteOnRemoved = onRemoved
+                        showAllFilesForDelete = true
                     }
                 },
             )
         }
+    }
+
+    if (showAllFilesForDelete && pendingDeletePaths.isNotEmpty()) {
+        AllFilesAccessForDeleteDialog(
+            count = pendingDeletePaths.size,
+            onDismiss = { showAllFilesForDelete = false },
+            onOpenSettings = {
+                showAllFilesForDelete = false
+                viewModel.queueDeleteAfterAllFilesAccess(
+                    pendingDeletePaths,
+                    pendingDeleteOnRemoved,
+                )
+                MediaStorageAccess.openAllFilesAccessSettings(context)
+                pendingDeletePaths = emptyList()
+                pendingDeleteOnRemoved = null
+            },
+            onDeleteWithSystemPrompt = {
+                showAllFilesForDelete = false
+                val paths = pendingDeletePaths
+                val onRemoved = pendingDeleteOnRemoved
+                pendingDeletePaths = emptyList()
+                pendingDeleteOnRemoved = null
+                if (paths.size == 1 && onRemoved != null) {
+                    viewModel.deleteSingle(paths.single(), onRemoved)
+                } else {
+                    viewModel.deleteSelected()
+                }
+            },
+        )
     }
 
     if (showMoveDialog) {
@@ -570,6 +622,7 @@ fun MediaDetailScreen(
     // Prioridade sobre NavHost: voltar cancela seleção / fecha detalhes, não a listagem da galeria.
     BackHandler {
         when {
+            showAllFilesForDelete -> showAllFilesForDelete = false
             showDeleteConfirm -> showDeleteConfirm = false
             showMoveDialog -> showMoveDialog = false
             state.selectionMode -> viewModel.clearSelection()

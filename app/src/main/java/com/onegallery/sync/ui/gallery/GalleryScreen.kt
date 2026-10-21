@@ -54,6 +54,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.ui.albums.formatMediaCount
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
@@ -90,6 +91,8 @@ fun GalleryScreen(
     var showMediaDetails by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showAllFilesForDelete by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     var browseFilterWasActive by remember(requiresActiveBrowseFilter) { mutableStateOf(false) }
     LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
         if (!requiresActiveBrowseFilter) return@LaunchedEffect
@@ -322,11 +325,33 @@ fun GalleryScreen(
     }
 
     if (showDeleteConfirm && state.selectedPaths.isNotEmpty()) {
+        val selectedCount = state.selectedPaths.size
         DeleteSelectionDialog(
-            count = state.selectedPaths.size,
+            count = selectedCount,
             onDismiss = { showDeleteConfirm = false },
             onConfirm = {
                 showDeleteConfirm = false
+                if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                    viewModel.deleteSelected()
+                } else {
+                    showAllFilesForDelete = true
+                }
+            },
+        )
+    }
+
+    if (showAllFilesForDelete && state.selectedPaths.isNotEmpty()) {
+        val paths = state.selectedPaths.toList()
+        AllFilesAccessForDeleteDialog(
+            count = paths.size,
+            onDismiss = { showAllFilesForDelete = false },
+            onOpenSettings = {
+                showAllFilesForDelete = false
+                viewModel.queueDeleteAfterAllFilesAccess(paths)
+                MediaStorageAccess.openAllFilesAccessSettings(context)
+            },
+            onDeleteWithSystemPrompt = {
+                showAllFilesForDelete = false
                 viewModel.deleteSelected()
             },
         )

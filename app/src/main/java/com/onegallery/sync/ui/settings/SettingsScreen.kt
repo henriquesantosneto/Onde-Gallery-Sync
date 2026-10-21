@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,11 +32,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
@@ -48,6 +53,7 @@ import com.onegallery.sync.R
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.auth.MsalBuiltInConfig
+import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
@@ -72,6 +78,17 @@ fun SettingsScreen(
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
+    var allFilesAccess by remember { mutableStateOf(MediaStorageAccess.hasAllFilesAccess(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allFilesAccess = MediaStorageAccess.hasAllFilesAccess(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     var autoFreeLocalAfterSync by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced)
     }
@@ -302,6 +319,37 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Excluir sem confirmar toda vez") },
+                    supportingContent = {
+                        Text(
+                            if (allFilesAccess) {
+                                "Acesso a todos os arquivos ativo — o Android não pede diálogo a cada exclusão."
+                            } else {
+                                "No Android 11+, conceda “Acesso a todos os arquivos” uma vez. " +
+                                    "Sem isso, o sistema exige confirmação por lote."
+                            },
+                        )
+                    },
+                    leadingContent = {
+                        Icon(Icons.Outlined.Delete, contentDescription = null)
+                    },
+                    trailingContent = {
+                        if (allFilesAccess) {
+                            Text(
+                                "Ativo",
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                        } else {
+                            Button(onClick = { MediaStorageAccess.openAllFilesAccessSettings(context) }) {
+                                Text("Conceder")
+                            }
+                        }
+                    },
+                )
             }
             item {
                 SettingsSwitchRow(

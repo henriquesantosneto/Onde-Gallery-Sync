@@ -33,6 +33,8 @@ import androidx.compose.ui.platform.LocalContext
 import com.onegallery.sync.ui.theme.OneGalleryEdgeToEdgeEffect
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -334,8 +336,12 @@ fun OneGalleryApp(
             galleryPreferences,
             mediaCacheRepository,
             appContext.userMessages,
+            appContext,
         ),
     )
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        galleryViewModel.resumePendingDeleteIfAccessGranted()
+    }
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBottomBar = showsMainBottomBar(currentRoute)

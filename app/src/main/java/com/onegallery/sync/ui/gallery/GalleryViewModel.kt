@@ -12,6 +12,8 @@ import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.matchesPlace
 import com.onegallery.sync.data.local.preferredBrowseKey
 import com.onegallery.sync.data.local.db.UserAlbumEntity
+import android.content.Context
+import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
@@ -90,7 +92,15 @@ class GalleryViewModel(
     private val galleryPreferences: GalleryPreferences,
     private val mediaCacheRepository: MediaCacheRepository,
     private val userMessages: AppUserMessages,
+    private val appContext: Context,
 ) : ViewModel() {
+
+    private data class PendingLocalDelete(
+        val paths: List<String>,
+        val onSingleRemoved: (() -> Unit)? = null,
+    )
+
+    private var pendingDeleteAfterAllFilesAccess: PendingLocalDelete? = null
 
     private val browseFilter = MutableStateFlow<GalleryBrowseFilter>(GalleryBrowseFilter.All)
     private val loading = MutableStateFlow(true)
@@ -529,28 +539,47 @@ class GalleryViewModel(
         }
     }
 
+    fun canDeleteLocallyWithoutSystemPrompt(): Boolean =
+        MediaStorageAccess.hasAllFilesAccess(appContext)
+
+    fun queueDeleteAfterAllFilesAccess(paths: List<String>, onSingleRemoved: (() -> Unit)? = null) {
+        if (paths.isEmpty()) return
+        pendingDeleteAfterAllFilesAccess = PendingLocalDelete(paths, onSingleRemoved)
+        userMessages.show(
+            "Conceda “Acesso a todos os arquivos” e volte ao app — a exclusão continua sozinha.",
+        )
+    }
+
+    fun resumePendingDeleteIfAccessGranted() {
+        val pending = pendingDeleteAfterAllFilesAccess ?: return
+        if (!MediaStorageAccess.hasAllFilesAccess(appContext)) return
+        pendingDeleteAfterAllFilesAccess = null
+        runDeleteImmediately(pending.paths, pending.onSingleRemoved)
+    }
+
     fun deleteSelected() {
         val paths = selectedPaths.value.toList()
         if (paths.isEmpty()) return
-        viewModelScope.launch {
-            syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
-                .onSuccess { count ->
-                    toast("$count item(ns) excluído(s).")
-                    clearSelection()
-                }
-                .onFailure { toast(it.message) }
-        }
+        runDeleteImmediately(paths)
     }
 
     fun deleteSingle(canonicalPath: String, onRemoved: () -> Unit = {}) {
+        runDeleteImmediately(listOf(canonicalPath), onRemoved)
+    }
+
+    private fun runDeleteImmediately(paths: List<String>, onSingleRemoved: (() -> Unit)? = null) {
         viewModelScope.launch {
-            syncCoordinator.deleteItemsImmediately(
-                listOf(canonicalPath),
-                PendingDeleteTarget.BOTH,
-            ).onSuccess {
-                toast("Item excluído.")
-                onRemoved()
-            }.onFailure { toast(it.message) }
+            syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
+                .onSuccess { count ->
+                    if (onSingleRemoved != null) {
+                        toast("Item excluído.")
+                        onSingleRemoved()
+                    } else {
+                        toast("$count item(ns) excluído(s).")
+                        clearSelection()
+                    }
+                }
+                .onFailure { toast(it.message) }
         }
     }
 
@@ -720,6 +749,7 @@ class GalleryViewModelFactory(
     private val galleryPreferences: GalleryPreferences,
     private val mediaCacheRepository: MediaCacheRepository,
     private val userMessages: AppUserMessages,
+    private val appContext: Context,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -730,6 +760,7 @@ class GalleryViewModelFactory(
                 galleryPreferences,
                 mediaCacheRepository,
                 userMessages,
+                appContext,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

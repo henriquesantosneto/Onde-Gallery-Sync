@@ -99,3 +99,39 @@ fun DeleteSelectionDialog(
         },
     )
 }
+
+/** Android 11+: sem “acesso a todos os arquivos”, o SO abre diálogo a cada lote. */
+@Composable
+fun AllFilesAccessForDeleteDialog(
+    count: Int,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onDeleteWithSystemPrompt: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Excluir sem pedir permissão toda vez") },
+        text = {
+            Column {
+                Text(
+                    "No Android 11+, o sistema só deixa o app apagar fotos e vídeos no aparelho " +
+                        "sem abrir um diálogo de permissão se você conceder “Acesso a todos os arquivos” " +
+                        "uma única vez para o One Gallery Sync.",
+                )
+                Text(
+                    "Depois de ativar, toque Excluir de novo (ou volte ao app após conceder — " +
+                        "a exclusão de $count item(ns) continua automaticamente).",
+                    modifier = Modifier.padding(top = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onOpenSettings) { Text("Conceder acesso") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDeleteWithSystemPrompt) { Text("Usar diálogo do Android") }
+        },
+    )
+}

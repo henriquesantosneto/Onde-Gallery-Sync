@@ -4,6 +4,14 @@
 
 Exclusões detectadas durante sync **não são aplicadas automaticamente** em ambos os lados. O usuário confirma na UI; até lá, `pendingDeleteTarget` marca a intenção.
 
+## Excluir no aparelho (Android 11+)
+
+Por política do Android, apps com só “fotos e vídeos” **não podem** apagar arquivos de outros apps sem um diálogo do sistema (`MediaStore.createDeleteRequest`).
+
+**Uma vez em Ajustes → “Excluir sem confirmar toda vez”:** concede `MANAGE_EXTERNAL_STORAGE` (“Acesso a todos os arquivos”). Depois disso, o app apaga via caminho + MediaStore **sem pedir permissão a cada exclusão** (`MediaStorageAccess`, `MediaDeleteRequestRouter`).
+
+Sem esse acesso, cada lote de exclusão ainda exige confirmação do Android — limitação do SO, não escolha do app.
+
 ## Fluxo de exclusão
 
 1. **Reconciliação** detecta: arquivo sumiu localmente ou remotamente, ou usuário pediu delete na UI.

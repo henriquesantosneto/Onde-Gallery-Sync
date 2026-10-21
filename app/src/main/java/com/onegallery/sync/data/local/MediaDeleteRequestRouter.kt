@@ -6,7 +6,9 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.os.Environment
 import androidx.activity.result.IntentSenderRequest
+import java.io.File
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -66,8 +68,14 @@ class MediaDeleteRequestRouter {
         if (needWork.isEmpty()) return MediaDeleteResult.Success
 
         val silentRemoved = deleteSilent(context, needWork)
-        val remaining = needWork.filter { it !in silentRemoved }
+        var remaining = needWork.filter { it !in silentRemoved }
         if (remaining.isEmpty()) return MediaDeleteResult.Success
+
+        if (MediaStorageAccess.hasAllFilesAccess(context)) {
+            deleteWithAllFilesAccess(context, remaining)
+            remaining = remaining.filter { uriExists(context, it) }
+            if (remaining.isEmpty()) return MediaDeleteResult.Success
+        }
 
         val interactiveOk = when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
@@ -147,6 +155,52 @@ class MediaDeleteRequestRouter {
     private fun deleteUrisDirect(context: Context, uris: List<Uri>): Boolean {
         uris.forEach { isRemovedOrAbsent(context, it) }
         return uris.none { uriExists(context, it) }
+    }
+
+    private fun deleteWithAllFilesAccess(context: Context, uris: List<Uri>) {
+        uris.forEach { uri ->
+            if (!uriExists(context, uri)) return@forEach
+            resolveMediaFile(context, uri)?.let { file ->
+                runCatching {
+                    if (file.isFile) file.delete()
+                    file.parentFile?.listFiles()?.isEmpty()?.let { empty ->
+                        if (empty) file.parentFile?.delete()
+                    }
+                }
+            }
+            deleteUriSilent(context, uri)
+            if (uriExists(context, uri)) {
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+        }
+    }
+
+    private fun resolveMediaFile(context: Context, uri: Uri): File? {
+        val projection = buildList {
+            add(MediaStore.MediaColumns.DISPLAY_NAME)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(MediaStore.MediaColumns.RELATIVE_PATH)
+            } else {
+                add(MediaStore.MediaColumns.DATA)
+            }
+        }.toTypedArray()
+        return runCatching {
+            context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val relIdx = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                    val nameIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                    if (relIdx < 0 || nameIdx < 0) return null
+                    val rel = cursor.getString(relIdx)?.trim('/') ?: return null
+                    val name = cursor.getString(nameIdx) ?: return null
+                    Environment.getExternalStorageDirectory().resolve("$rel/$name")
+                } else {
+                    val dataIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                    if (dataIdx < 0) return null
+                    cursor.getString(dataIdx)?.let { File(it) }
+                }
+            }
+        }.getOrNull()
     }
 
     fun mapActivityResult(resultCode: Int): Boolean = resultCode == Activity.RESULT_OK

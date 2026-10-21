@@ -20,6 +20,7 @@ import com.onegallery.sync.ui.gallery.AlbumCoverThumbnailPlanner
 import com.onegallery.sync.ui.gallery.GalleryMapper
 import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.MediaDeleteResult
+import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.data.local.db.SyncIndexStatsRow
 import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
@@ -2051,15 +2052,16 @@ class SyncCoordinator(
                 when (val outcome = deleteLocalMediaForRows(rows)) {
                     MediaDeleteResult.Success, MediaDeleteResult.NothingToDelete -> Unit
                     MediaDeleteResult.UserDenied -> error(
-                        "Exclusão cancelada. Toque em Excluir de novo e confirme no diálogo do Android.",
+                        "Exclusão cancelada. Em Ajustes, ative “Excluir sem confirmar toda vez” " +
+                            "ou confirme no diálogo do Android.",
                     )
                     is MediaDeleteResult.Failed -> {
                         if (target == PendingDeleteTarget.BOTH) {
                             localSkipped = true
                         } else {
                             error(
-                                "Não foi possível excluir no aparelho. Tente de novo com o app em primeiro plano " +
-                                    "e aceite o pedido do Android.",
+                                "Não foi possível excluir no aparelho. Em Ajustes, conceda " +
+                                    "“Excluir sem confirmar toda vez” ou aceite o diálogo do Android.",
                             )
                         }
                     }
@@ -2087,9 +2089,24 @@ class SyncCoordinator(
     }
 
     private suspend fun deleteLocalMediaForRows(rows: List<SyncMetadataEntity>): MediaDeleteResult {
+        if (MediaStorageAccess.hasAllFilesAccess(appContext)) {
+            deleteLocalFilesWithAllFilesAccess(rows)
+        }
         val uris = rows.mapNotNull { row -> localContentUri(row) }
         if (uris.isEmpty()) return MediaDeleteResult.NothingToDelete
         return mediaDeleteRequestRouter.requestDelete(appContext, uris)
+    }
+
+    private fun deleteLocalFilesWithAllFilesAccess(rows: List<SyncMetadataEntity>) {
+        rows.forEach { row ->
+            val item = row.localMediaId?.let { localMediaRepository.findById(it) } ?: return@forEach
+            val rel = item.relativePath?.trim('/') ?: return@forEach
+            val file = android.os.Environment.getExternalStorageDirectory()
+                .resolve("$rel/${item.displayName}")
+            runCatching {
+                if (file.isFile) file.delete()
+            }
+        }
     }
 
     private suspend fun deleteLocalMediaStoreCopy(row: SyncMetadataEntity): Result<Unit> {
