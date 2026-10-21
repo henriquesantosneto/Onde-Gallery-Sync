@@ -3,6 +3,8 @@
 package com.onegallery.sync.sync
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -161,6 +163,7 @@ class SyncCoordinator(
     private val foregroundGuard = SyncForegroundGuard(appContext)
     private var albumCoverRevisionJob: Job? = null
     private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
         mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
@@ -547,6 +550,16 @@ class SyncCoordinator(
 
     private val activeSyncItemsLock = Any()
 
+    private fun shouldPublishActiveTransferProgress(): Boolean =
+        _state.value.isRunning || _state.value.progressPhase != SyncProgressPhase.IDLE
+
+    private fun publishActiveItemsUpdate(next: List<ActiveSyncItem>) {
+        val apply = {
+            _state.value = _state.value.copy(activeItems = next)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
+    }
+
     private fun upsertActiveSyncItem(item: ActiveSyncItem) {
         synchronized(activeSyncItemsLock) {
             val next = _state.value.activeItems.toMutableList()
@@ -556,7 +569,7 @@ class SyncCoordinator(
             } else {
                 next.add(item)
             }
-            _state.value = _state.value.copy(activeItems = next)
+            publishActiveItemsUpdate(next)
         }
     }
 
@@ -564,7 +577,7 @@ class SyncCoordinator(
         synchronized(activeSyncItemsLock) {
             val next = _state.value.activeItems.filter { it.canonicalPath != canonicalPath }
             if (next.size != _state.value.activeItems.size) {
-                _state.value = _state.value.copy(activeItems = next)
+                publishActiveItemsUpdate(next)
             }
         }
     }
@@ -572,7 +585,7 @@ class SyncCoordinator(
     private fun clearActiveSyncItems() {
         synchronized(activeSyncItemsLock) {
             if (_state.value.activeItems.isNotEmpty()) {
-                _state.value = _state.value.copy(activeItems = emptyList())
+                publishActiveItemsUpdate(emptyList())
             }
         }
     }
@@ -1278,7 +1291,7 @@ class SyncCoordinator(
         row: SyncMetadataEntity,
         operationLabel: String,
     ): ((Long, Long?) -> Unit)? {
-        if (!_state.value.isRunning) return null
+        if (!shouldPublishActiveTransferProgress()) return null
         return { done, total ->
             upsertActiveSyncItem(
                 ActiveSyncItem(
@@ -3029,16 +3042,34 @@ class SyncCoordinator(
                 val hasLocal = row.localMediaId != null ||
                     row.localContentUri != null ||
                     row.cachedFilePath != null
-                val resolved = when {
-                    hasLocal && localProbes < maxLocalProbesPerRun -> {
-                        localProbes++
-                        resolveLocationForBackfill(row)
+                val willProbe = (hasLocal && localProbes < maxLocalProbesPerRun) ||
+                    (row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun)
+                if (!willProbe) return@forEachIndexed
+                upsertActiveSyncItem(
+                    ActiveSyncItem(
+                        canonicalPath = row.canonicalPath,
+                        displayName = row.displayName,
+                        operationLabel = if (hasLocal && localProbes < maxLocalProbesPerRun) {
+                            "Lendo GPS no aparelho…"
+                        } else {
+                            "Lendo GPS na nuvem…"
+                        },
+                    ),
+                )
+                val resolved = try {
+                    when {
+                        hasLocal && localProbes < maxLocalProbesPerRun -> {
+                            localProbes++
+                            resolveLocationForBackfill(row)
+                        }
+                        row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
+                            cloudProbes++
+                            probeCloudExifLocation(row.oneDriveItemId, row.displayName)
+                        }
+                        else -> null
                     }
-                    row.oneDriveItemId != null && cloudProbes < maxCloudProbesPerRun -> {
-                        cloudProbes++
-                        probeCloudExifLocation(row.oneDriveItemId, row.displayName)
-                    }
-                    else -> null
+                } finally {
+                    removeActiveSyncItem(row.canonicalPath)
                 } ?: return@forEachIndexed
                 syncMetadataDao.upsert(
                     row.copy(

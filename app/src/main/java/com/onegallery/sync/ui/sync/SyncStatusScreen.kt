@@ -102,25 +102,11 @@ fun SyncStatusScreen(
                             fontWeight = FontWeight.Medium,
                         )
                         if (coordinatorState.isRunning) {
-                            val detail = coordinatorState.activityDetail.ifBlank {
-                                coordinatorState.lastMessage.lineSequence().drop(1).joinToString("\n")
-                            }
-                            Text(
-                                coordinatorState.activityHeadline.ifBlank {
-                                    coordinatorState.progressPhase.runningHeadlineFallback()
-                                },
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
+                            SyncRunningProgressPanel(
+                                state = coordinatorState,
+                                runQueue = queueForUi,
                                 modifier = Modifier.padding(top = 12.dp),
                             )
-                            if (detail.isNotBlank()) {
-                                Text(
-                                    detail,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 6.dp),
-                                )
-                            }
                         } else {
                             Text(
                                 coordinatorState.lastMessage,
@@ -135,49 +121,7 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        val activeItems = coordinatorState.activeItems
-                        if (coordinatorState.isRunning) {
-                            if (activeItems.isEmpty()) {
-                                LinearProgressIndicator(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 12.dp),
-                                )
-                                Row(
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    CircularProgressIndicator(strokeWidth = 2.dp)
-                                    Text(
-                                        when {
-                                            coordinatorState.lastMessage.contains(
-                                                "Cancelando",
-                                                ignoreCase = true,
-                                            ) -> "Cancelando…"
-                                            else -> "Em andamento…"
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                }
-                            } else {
-                                Text(
-                                    if (activeItems.size == 1) {
-                                        "Transferência ativa"
-                                    } else {
-                                        "Transferências em paralelo (${activeItems.size})"
-                                    },
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
-                                )
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    activeItems.forEach { item ->
-                                        SyncQueueActiveOnlyRow(activeItem = item)
-                                    }
-                                }
-                            }
-                        }
+                        val activeItems = resolveTransferRowsForUi(coordinatorState, queueForUi)
                         val activePaths = activeItems.map { it.canonicalPath }.toSet()
                         val queueCap = if (coordinatorState.isRunning) 12 else 8
                         val queueWaiting = queueForUi.filter { it.canonicalPath !in activePaths }
@@ -350,52 +294,6 @@ private fun StatRow(label: String, value: String, emphasized: Boolean = false) {
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Normal,
             color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-@Composable
-private fun SyncQueueActiveOnlyRow(activeItem: ActiveSyncItem) {
-    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-        Text(
-            activeItem.displayName,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-        )
-        Text(
-            activeItem.operationLabel,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        SyncTransferProgressBar(activeItem = activeItem)
-    }
-}
-
-@Composable
-private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
-    val fraction = activeItem.progressFraction
-    val byteLabel = activeItem.progressByteLabel()
-    if (fraction != null) {
-        LinearProgressIndicator(
-            progress = { fraction },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-        )
-    } else {
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-        )
-    }
-    if (byteLabel != null) {
-        Text(
-            byteLabel,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }
