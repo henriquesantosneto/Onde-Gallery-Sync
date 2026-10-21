@@ -64,7 +64,12 @@ fun SettingsScreen(
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
-    var autoFreeLocal by remember { mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced) }
+    var autoFreeLocalAfterSync by remember {
+        mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced)
+    }
+    var autoFreeLocalWhenIdle by remember {
+        mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenIdle)
+    }
     var idleReleaseDays by remember {
         mutableStateOf(syncPreferences.localCopyIdleReleaseDays.toFloat())
     }
@@ -176,30 +181,63 @@ fun SettingsScreen(
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
             }
             item {
+                Text(
+                    "Liberação automática de espaço",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                )
+                Text(
+                    "Pode usar as duas opções juntas ou só uma. Miniatura no app e arquivo na nuvem " +
+                        "sempre permanecem.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+                )
+            }
+            item {
                 ListItem(
-                    headlineContent = { Text("Liberação automática de espaço") },
+                    headlineContent = { Text("Remover local logo após backup") },
                     supportingContent = {
                         Text(
-                            "Com backup no OneDrive, remove a cópia local e o original em cache " +
-                                "após o período sem abrir a foto no app; mantém miniatura e arquivo na nuvem.",
+                            "Assim que o item estiver no OneDrive, apaga a cópia na galeria do aparelho.",
                         )
                     },
                     trailingContent = {
                         Switch(
-                            checked = autoFreeLocal,
+                            checked = autoFreeLocalAfterSync,
                             onCheckedChange = {
-                                autoFreeLocal = it
+                                autoFreeLocalAfterSync = it
                                 syncPreferences.autoFreeLocalSpaceWhenSynced = it
                             },
                         )
                     },
                 )
             }
-            if (autoFreeLocal) {
+            item {
+                ListItem(
+                    headlineContent = { Text("Remover local após dias sem abrir") },
+                    supportingContent = {
+                        Text(
+                            "Só libera se você não abrir a foto no app dentro do prazo (também vale " +
+                                "para original baixado para cache).",
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = autoFreeLocalWhenIdle,
+                            onCheckedChange = {
+                                autoFreeLocalWhenIdle = it
+                                syncPreferences.autoFreeLocalSpaceWhenIdle = it
+                            },
+                        )
+                    },
+                )
+            }
+            if (autoFreeLocalWhenIdle) {
                 item {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         Text(
-                            "Remover local após ${idleReleaseDays.toInt()} dias sem abrir",
+                            "Prazo: ${idleReleaseDays.toInt()} dias sem abrir",
                             style = MaterialTheme.typography.titleSmall,
                         )
                         Text(

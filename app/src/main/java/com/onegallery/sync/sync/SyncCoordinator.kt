@@ -1065,10 +1065,12 @@ class SyncCoordinator(
 
                     val pendingCount = syncMetadataDao.countPendingOperations()
                     var freedLocal = 0
+                    val allowDialog = appForegroundState.isInForeground()
                     if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-                        freedLocal = autoReleaseIdleLocalCopies(
-                            allowSystemDialog = appForegroundState.isInForeground(),
-                        )
+                        freedLocal += autoReleaseSyncedLocalCopies(allowSystemDialog = allowDialog)
+                    }
+                    if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
+                        freedLocal += autoReleaseIdleLocalCopies(allowSystemDialog = allowDialog)
                     }
                     val freeMsg = if (freedLocal > 0) ", $freedLocal liberados (placeholder na nuvem)" else ""
                     val seenLocalIds = indexPassLocalItemsById.keys
@@ -1624,9 +1626,19 @@ class SyncCoordinator(
     }
 
     suspend fun runAutoReleaseIfNeeded() {
-        if (!syncPreferences.autoFreeLocalSpaceWhenSynced) return
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return
-        autoReleaseIdleLocalCopies(allowSystemDialog = appForegroundState.isInForeground())
+        if (!syncPreferences.autoFreeLocalSpaceWhenSynced &&
+            !syncPreferences.autoFreeLocalSpaceWhenIdle
+        ) {
+            return
+        }
+        val allowDialog = appForegroundState.isInForeground()
+        if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
+            autoReleaseSyncedLocalCopies(allowSystemDialog = allowDialog)
+        }
+        if (syncPreferences.autoFreeLocalSpaceWhenIdle) {
+            autoReleaseIdleLocalCopies(allowSystemDialog = allowDialog)
+        }
     }
 
     /** Registra abertura da foto/vídeo no detalhe (base para dias sem acesso). */
@@ -1636,6 +1648,20 @@ class SyncCoordinator(
         val previous = row.localLastAccessedAtMs
         if (previous != null && now - previous < LOCAL_ACCESS_WRITE_THROTTLE_MS) return
         syncMetadataDao.upsert(row.copy(localLastAccessedAtMs = now))
+    }
+
+    private suspend fun autoReleaseSyncedLocalCopies(allowSystemDialog: Boolean): Int {
+        ensureSyncMayContinue()
+        if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return 0
+        val rows = syncMetadataDao.getAll().filter { row ->
+            row.localMediaId != null &&
+                row.oneDriveItemId != null &&
+                row.cloudState == CloudSyncState.SYNCED &&
+                row.pendingDeleteTarget == PendingDeleteTarget.NONE &&
+                !row.localReleasedForSpace
+        }
+        if (rows.isEmpty()) return 0
+        return releaseLocalSpaceForRows(rows, allowSystemDialog = allowSystemDialog)
     }
 
     private suspend fun autoReleaseIdleLocalCopies(allowSystemDialog: Boolean): Int {

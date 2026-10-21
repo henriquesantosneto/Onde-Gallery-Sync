@@ -58,17 +58,19 @@ class SyncPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_AUTO_DELETE_REMOTE, value).apply()
 
     /**
-     * Após backup no OneDrive, remove a cópia local e mantém miniatura + placeholder na nuvem.
-     * Downloads da nuvem no sync nunca trazem o original completo — só miniatura até você abrir o item.
+     * Logo após backup no OneDrive, remove a cópia local e mantém miniatura + arquivo na nuvem.
+     * Downloads no sync continuam só com miniatura até você abrir o item.
      */
     var autoFreeLocalSpaceWhenSynced: Boolean
         get() = prefs.getBoolean(KEY_AUTO_FREE_LOCAL, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_FREE_LOCAL, value).apply()
 
-    /**
-     * Com liberação automática ativa: remove cópia local / cache do original após este many dias
-     * sem abrir a foto no app (15–180).
-     */
+    /** Remove cópia local / cache do original após [localCopyIdleReleaseDays] sem abrir no app. */
+    var autoFreeLocalSpaceWhenIdle: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_FREE_IDLE, false)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_FREE_IDLE, value).apply()
+
+    /** Dias sem abrir a foto no app antes da liberação por inatividade (15–180). */
     var localCopyIdleReleaseDays: Int
         get() = prefs.getInt(KEY_LOCAL_IDLE_RELEASE_DAYS, DEFAULT_LOCAL_IDLE_RELEASE_DAYS)
             .coerceIn(MIN_LOCAL_IDLE_RELEASE_DAYS, MAX_LOCAL_IDLE_RELEASE_DAYS)
@@ -102,6 +104,7 @@ class SyncPreferences(context: Context) {
         private const val KEY_LAST_VERSION = "last_version_code"
         private const val KEY_AUTO_DELETE_REMOTE = "auto_delete_remote"
         private const val KEY_AUTO_FREE_LOCAL = "auto_free_local"
+        private const val KEY_AUTO_FREE_IDLE = "auto_free_local_idle"
         private const val KEY_LOCAL_IDLE_RELEASE_DAYS = "local_idle_release_days"
         private const val KEY_AUTO_SYNC_PAUSED_UNTIL = "auto_sync_paused_until"
 
