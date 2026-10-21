@@ -39,9 +39,22 @@ Alternativa sem login: **Pictures/OneGallerySync** + backup de fotos no app OneD
 - **Sincronizar agora** — aba Sync ou Ajustes.
 - Exclusões detectadas na sync aparecem em **Sync → aguardando confirmação**.
 
-## Arquitetura
+## Documentação
 
-Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Documentação técnica completa (arquitetura, sync, background, OneDrive, galeria, miniaturas, exclusões, UI, constantes, desenvolvimento):
+
+**[docs/README.md](docs/README.md)** — índice de todos os documentos.
+
+Destaques:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — visão geral e diagramas
+- [docs/SYNC_PIPELINE.md](docs/SYNC_PIPELINE.md) — fases do sync e pós-sync
+- [docs/BACKGROUND_AND_TRIGGERS.md](docs/BACKGROUND_AND_TRIGGERS.md) — WorkManager, boot, MediaStore
+- [docs/ONEDRIVE_INTEGRATION.md](docs/ONEDRIVE_INTEGRATION.md) — modos Graph / SAF / espelho
+- [docs/GALLERY_AND_ALBUMS.md](docs/GALLERY_AND_ALBUMS.md) — grade, álbuns, refresh durante download
+- [docs/THUMBNAILS_CACHE_AND_DOWNLOADS.md](docs/THUMBNAILS_CACHE_AND_DOWNLOADS.md) — miniaturas e originais
+- [docs/CONFIGURATION_REFERENCE.md](docs/CONFIGURATION_REFERENCE.md) — limites e debounces
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — build e `ship-apk.sh`
 
 ## Nota importante
 
