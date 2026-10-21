@@ -21,7 +21,10 @@ import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.ui.theme.OneDriveBlue
 import android.content.Context
 
-fun cloudBadgeState(item: GalleryDisplayItem): CloudSyncState {
+fun cloudBadgeState(item: GalleryDisplayItem, context: Context? = null): CloudSyncState {
+    if (context != null && item.hasViewableLocalOriginal(context)) {
+        return CloudSyncState.SYNCED
+    }
     if (item.localReleasedForSpace && item.localUri == null && item.oneDriveItemId != null) {
         return CloudSyncState.CLOUD_ONLY
     }
@@ -35,7 +38,7 @@ fun galleryCloudOverlayState(item: GalleryDisplayItem, context: Context): CloudS
         return if (item.isDeviceOnlyBadge(context)) CloudSyncState.LOCAL_ONLY else null
     }
     if (item.hasViewableLocalOriginal(context)) return CloudSyncState.SYNCED
-    val badge = cloudBadgeState(item)
+    val badge = cloudBadgeState(item, context)
     return when (badge) {
         CloudSyncState.CLOUD_ONLY,
         CloudSyncState.PENDING_DOWNLOAD,

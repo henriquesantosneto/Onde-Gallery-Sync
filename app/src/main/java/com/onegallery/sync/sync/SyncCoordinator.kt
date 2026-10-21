@@ -1491,17 +1491,14 @@ class SyncCoordinator(
         val captureFromFile = row.capturedAtSeconds?.takeIf { it > 0L }
             ?: mediaCaptureTimeResolver.resolveFromFile(file)?.takeIf { it > 0L }
         val nextCloudState = when {
-            row.oneDriveItemId != null &&
-                (
-                    row.cloudState == CloudSyncState.CLOUD_ONLY ||
-                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD
-                    ) -> CloudSyncState.SYNCED
+            row.oneDriveItemId != null -> CloudSyncState.SYNCED
             else -> row.cloudState
         }
         val nextRow = row.copy(
             cachedFilePath = file.absolutePath,
             lastError = null,
             cloudState = nextCloudState,
+            localReleasedForSpace = false,
             capturedAtSeconds = captureFromFile ?: row.capturedAtSeconds,
         )
         if (nextRow.cachedFilePath == row.cachedFilePath &&
@@ -1674,11 +1671,7 @@ class SyncCoordinator(
         }
         val localSize = file.length()
         val nextCloudState = when {
-            row.oneDriveItemId != null &&
-                (
-                    row.cloudState == CloudSyncState.CLOUD_ONLY ||
-                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD
-                    ) -> CloudSyncState.SYNCED
+            row.oneDriveItemId != null -> CloudSyncState.SYNCED
             else -> row.cloudState
         }
         val synced = row.copy(
@@ -1690,6 +1683,7 @@ class SyncCoordinator(
             remoteModifiedAt = remote?.modifiedAtEpoch ?: row.remoteModifiedAt,
             oneDriveItemId = remote?.itemId ?: row.oneDriveItemId,
             cloudState = nextCloudState,
+            localReleasedForSpace = false,
             lastError = null,
         )
         syncMetadataDao.upsert(synced)

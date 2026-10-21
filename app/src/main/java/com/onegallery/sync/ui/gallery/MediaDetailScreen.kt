@@ -193,7 +193,10 @@ fun MediaDetailScreen(
     }
 
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
-    val currentItem = currentPath?.let { path -> itemsByPath[path] }
+    var detailItemOverrides by remember { mutableStateOf(mapOf<String, GalleryDisplayItem>()) }
+    val currentItem = currentPath?.let { path ->
+        detailItemOverrides[path] ?: itemsByPath[path]
+    }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
     val detailPaths = when {
         state.selectionMode && state.selectedPaths.isNotEmpty() -> state.selectedPaths.toList()
@@ -369,6 +372,11 @@ fun MediaDetailScreen(
                         }
                     },
                     onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
+                    onDisplayItemChanged = { updated ->
+                        if (detailItemOverrides[path] != updated) {
+                            detailItemOverrides = detailItemOverrides + (path to updated)
+                        }
+                    },
                     onRegisterZoomTransform = { activeZoomTransform = it },
                     onRecallingChanged = { recalling ->
                         if (page == pagerState.currentPage) {
@@ -739,6 +747,7 @@ private fun MediaDetailPage(
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
     onLocalOriginalCached: () -> Unit = {},
+    onDisplayItemChanged: (GalleryDisplayItem) -> Unit = {},
     onRegisterZoomTransform: (ZoomTransformHolder) -> Unit = {},
     onRecallingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -756,6 +765,12 @@ private fun MediaDetailPage(
     val viewContext = LocalContext.current
     if (isActivePage) {
         SideEffect { onRecallingChanged(loadingFull) }
+    }
+
+    LaunchedEffect(item, isActivePage) {
+        if (!isActivePage) return@LaunchedEffect
+        val display = item ?: return@LaunchedEffect
+        onDisplayItemChanged(display)
     }
 
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
