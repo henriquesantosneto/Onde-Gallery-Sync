@@ -113,6 +113,35 @@ class SyncPreferences(context: Context) {
         get() = prefs.getInt(KEY_GPS_BACKFILL_CURSOR, 0).coerceAtLeast(0)
         set(value) = prefs.edit().putInt(KEY_GPS_BACKFILL_CURSOR, value.coerceAtLeast(0)).apply()
 
+    fun thumbnailFailureCount(canonicalPath: String): Int {
+        val prefix = thumbnailFailKey(canonicalPath)
+        val set = prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()
+        return set.firstOrNull { it.startsWith(prefix) }
+            ?.substringAfter("::")
+            ?.toIntOrNull()
+            ?: 0
+    }
+
+    fun incrementThumbnailFailure(canonicalPath: String): Int {
+        val next = thumbnailFailureCount(canonicalPath) + 1
+        val prefix = thumbnailFailKey(canonicalPath)
+        val set = (prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()).toMutableSet()
+        set.removeAll { it.startsWith(prefix) }
+        set.add("$prefix$next")
+        prefs.edit().putStringSet(KEY_THUMB_FAIL_COUNTS, set).apply()
+        return next
+    }
+
+    fun clearThumbnailFailure(canonicalPath: String) {
+        val prefix = thumbnailFailKey(canonicalPath)
+        val set = (prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()).toMutableSet()
+        if (set.removeAll { it.startsWith(prefix) }) {
+            prefs.edit().putStringSet(KEY_THUMB_FAIL_COUNTS, set).apply()
+        }
+    }
+
+    private fun thumbnailFailKey(canonicalPath: String): String = "$canonicalPath::"
+
     var mediaLibraryWatchSuppressedUntilMs: Long
         get() = prefs.getLong(KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS, 0L)
         private set(value) = prefs.edit().putLong(KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS, value).apply()
@@ -168,5 +197,6 @@ class SyncPreferences(context: Context) {
         private const val KEY_LAST_BIDIR_SYNC_DONE_MS = "last_bidir_sync_done_ms"
         private const val KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS = "media_watch_suppress_until_ms"
         private const val KEY_GPS_BACKFILL_CURSOR = "gps_backfill_cursor"
+        private const val KEY_THUMB_FAIL_COUNTS = "thumb_fail_counts"
     }
 }

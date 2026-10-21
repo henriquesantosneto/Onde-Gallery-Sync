@@ -167,6 +167,7 @@ class SyncCoordinator(
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
     private val longTaskMutex = Mutex()
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
+    private val thumbnailMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
     private var albumCoverRevisionJob: Job? = null
     private var bulkGalleryDisplayRefreshJob: Job? = null
@@ -1337,8 +1338,11 @@ class SyncCoordinator(
         canonicalPath: String,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<File?> {
-        return withContext(Dispatchers.IO) {
-            ensureThumbnailCachedOnIo(canonicalPath, onProgress)
+        val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
+        return mutex.withLock {
+            withContext(Dispatchers.IO) {
+                ensureThumbnailCachedOnIo(canonicalPath, onProgress)
+            }
         }
     }
 
@@ -1367,7 +1371,10 @@ class SyncCoordinator(
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
-            ?.let { return Result.success(it) }
+            ?.let {
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(it)
+            }
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
         staging.delete()
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
@@ -1384,6 +1391,7 @@ class SyncCoordinator(
             }
             if (ok) {
                 commitIfReady()?.let { file ->
+                    syncPreferences.clearThumbnailFailure(canonicalPath)
                     onProgress?.invoke(1L, 1L)
                     return Result.success(file)
                 }
@@ -1400,6 +1408,7 @@ class SyncCoordinator(
                 }
                 if (ok) {
                     commitIfReady()?.let { file ->
+                        syncPreferences.clearThumbnailFailure(canonicalPath)
                         onProgress?.invoke(1L, 1L)
                         return Result.success(file)
                     }
@@ -1413,24 +1422,35 @@ class SyncCoordinator(
             oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
                 if (staging.length() > 0L) thumbReady = true
             }
-            if (!thumbReady && !isVideo) {
+            if (!thumbReady) {
                 val partial = File(staging.absolutePath + ".partial")
                 partial.delete()
                 oneDriveRepository.downloadImagePrefixForThumbnail(itemId, partial, onProgress = onProgress).onSuccess {
                     if (partial.isFile && partial.length() > 0L) {
-                        thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(partial), staging)
+                        thumbReady = if (isVideo) {
+                            VideoThumbnailHelper.captureToFile(partial, staging)
+                        } else {
+                            cacheImageThumbnailFromUri(Uri.fromFile(partial), staging)
+                        }
                     }
                 }
                 partial.delete()
             }
             if (thumbReady) {
                 commitIfReady()?.let {
+                    syncPreferences.clearThumbnailFailure(canonicalPath)
                     onProgress?.invoke(it.length(), it.length())
                     return Result.success(it)
                 }
             }
         }
         staging.delete()
+        if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= THUMB_MAX_FAILURE_ATTEMPTS) {
+            persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(placeholder)
+            }
+        }
         return Result.success(null)
     }
 
@@ -1686,9 +1706,8 @@ class SyncCoordinator(
         }
     }
 
-    private fun hasLocalOriginalOnDevice(row: SyncMetadataEntity): Boolean {
-        if (row.cloudState == CloudSyncState.CLOUD_ONLY || row.localReleasedForSpace) return false
-        if (row.cloudState == CloudSyncState.PENDING_DOWNLOAD) return false
+    private fun localOriginalPresent(row: SyncMetadataEntity): Boolean {
+        if (row.localReleasedForSpace) return false
         row.localMediaId?.let { id ->
             if (localMediaRepository.contentUriForMediaId(id) != null) return true
         }
@@ -1697,6 +1716,11 @@ class SyncCoordinator(
             if (mediaDeleteRequestRouter.uriExists(appContext, uri)) return true
         }
         return false
+    }
+
+    private fun hasLocalOriginalOnDevice(row: SyncMetadataEntity): Boolean {
+        if (row.cloudState == CloudSyncState.CLOUD_ONLY) return false
+        return localOriginalPresent(row)
     }
 
     private suspend fun importRecalledOriginalToGallery(
@@ -2373,21 +2397,20 @@ class SyncCoordinator(
      * Corrige [CloudSyncState.PENDING_DOWNLOAD] fantasma (hash na listagem delta incompleto,
      * fingerprint local desatualizado, miniatura já em cache).
      */
-    private suspend fun healStalePendingDownloads(remoteByPath: Map<String, RemoteDriveFile>) {
+    private suspend fun healStalePendingDownloads(remoteByPath: Map<String, RemoteDriveFile>?) {
         val pending = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
         if (pending.isEmpty()) return
+        val map = remoteByPath ?: emptyMap()
         val healed = mutableListOf<SyncMetadataEntity>()
         for (row in pending) {
-            val remote = remoteByPath[row.canonicalPath] ?: continue
-            val effective = ContentFingerprint.remoteWithIndexedFallback(row, remote)
-            var work = ensureLocalContentFingerprint(row)
-            if (ContentFingerprint.matchesIndexedLocalWithFallback(work, effective)) {
-                healed.add(
-                    syncedRowFromRemote(work, effective, CloudSyncState.SYNCED),
-                )
-                continue
-            }
-            if (!ContentFingerprint.matchesIndexedLocalWithFallback(work, effective)) {
+            val remote = map[row.canonicalPath] ?: remoteFingerprintFromIndexedRow(row)
+            val work = ensureLocalContentFingerprint(row)
+            if (remote != null) {
+                val effective = ContentFingerprint.remoteWithIndexedFallback(work, remote)
+                if (ContentFingerprint.matchesIndexedLocalWithFallback(work, effective)) {
+                    healed.add(syncedRowFromRemote(work, effective, CloudSyncState.SYNCED))
+                    continue
+                }
                 val liveHash = computeLiveLocalQuickXorHash(work)
                 if (liveHash != null &&
                     ContentFingerprint.matchesRemote(liveHash.first, liveHash.second, effective)
@@ -2405,12 +2428,17 @@ class SyncCoordinator(
                     continue
                 }
             }
-            if (work.localMediaId == null &&
-                mediaCacheRepository.thumbnailIfCached(work.canonicalPath, work.oneDriveItemId) != null
-            ) {
-                healed.add(
-                    syncedRowFromRemote(work, effective, CloudSyncState.CLOUD_ONLY),
-                )
+            if (mediaCacheRepository.thumbnailIfCached(work.canonicalPath, work.oneDriveItemId) != null) {
+                val state = if (localOriginalPresent(work)) {
+                    CloudSyncState.SYNCED
+                } else {
+                    CloudSyncState.CLOUD_ONLY
+                }
+                if (remote != null) {
+                    healed.add(syncedRowFromRemote(work, remote, state))
+                } else {
+                    healed.add(work.copy(cloudState = state, lastError = null))
+                }
             }
         }
         if (healed.isEmpty()) return
@@ -2616,8 +2644,29 @@ class SyncCoordinator(
         }
     }
 
+    /** Miniatura neutra para itens que a nuvem não consegue decodificar (evita loop infinito). */
+    private fun persistMinimalPlaceholderThumbnail(row: SyncMetadataEntity): File? {
+        val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)
+        if (existing != null) return existing
+        val staging = mediaCacheRepository.thumbStagingFile(row.canonicalPath)
+        staging.delete()
+        return runCatching {
+            val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.RGB_565)
+            try {
+                staging.parentFile?.mkdirs()
+                staging.outputStream().use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_CACHE_JPEG_QUALITY, out)
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            if (staging.length() <= 0L) return null
+            mediaCacheRepository.commitThumbnail(staging, row.canonicalPath, row.oneDriveItemId)
+        }.getOrNull()
+    }
+
     private fun cachePlaceholderThumbnail(row: SyncMetadataEntity) {
-        val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath)
+        val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)
         if (existing != null) return
         val target = mediaCacheRepository.thumbFile(row.canonicalPath)
         localContentUri(row)?.let { uri ->
@@ -2913,6 +2962,7 @@ class SyncCoordinator(
                     alsoUpdateLastMessage = false,
                 )
                 prefetchMissingThumbnails()
+                healStalePendingDownloads(remoteByPath = null)
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_GPS,
                     "Indexando localização (GPS)…",
@@ -3130,10 +3180,14 @@ class SyncCoordinator(
                                 ),
                                 force = true,
                             )
-                            val hit = ensureThumbnailCached(
+                            ensureThumbnailCached(
                                 row.canonicalPath,
                                 activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
-                            ).getOrNull() != null
+                            )
+                            val hit = mediaCacheRepository.thumbnailIfCached(
+                                row.canonicalPath,
+                                row.oneDriveItemId,
+                            ) != null
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
                             if (_state.value.isRunning &&
@@ -3692,6 +3746,7 @@ class SyncCoordinator(
         const val THUMB_PREFETCH_EXTRA_ROUNDS = 8
         const val THUMB_PREFETCH_MAX_ROUNDS = 36
         const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 2_500
+        const val THUMB_MAX_FAILURE_ATTEMPTS = 3
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
