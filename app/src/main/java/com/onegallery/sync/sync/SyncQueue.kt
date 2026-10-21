@@ -79,6 +79,20 @@ val syncQueueEntityComparator: Comparator<SyncMetadataEntity> =
         { it.canonicalPath },
     )
 
+/** Prefetch de miniaturas: prioriza itens só na nuvem (sem cópia local). */
+val missingThumbnailPrefetchComparator: Comparator<SyncMetadataEntity> =
+    compareBy<SyncMetadataEntity>(
+        { entity ->
+            val cloudOnly = entity.localMediaId == null &&
+                entity.localContentUri.isNullOrBlank() &&
+                entity.oneDriveItemId != null
+            if (cloudOnly) 0 else 1
+        },
+        { it.syncQueueSortOrder() },
+        { -(it.remoteModifiedAt ?: it.localModifiedAt ?: 0L) },
+        { it.canonicalPath },
+    )
+
 fun SyncMetadataEntity.queueDetailLabel(): String {
     if (pendingDeleteTarget != PendingDeleteTarget.NONE) {
         return when (pendingDeleteTarget) {

@@ -446,6 +446,28 @@ class OneDriveRepository(
         }
     }
 
+    /** Quando Graph não gera thumbnail, baixa prefixo da imagem e gera miniatura localmente. */
+    suspend fun downloadImagePrefixForThumbnail(
+        itemId: String,
+        destination: File,
+        maxBytes: Long = 2L * 1024L * 1024L,
+    ): Result<Unit> {
+        return runWithToken { token ->
+            destination.parentFile?.mkdirs()
+            val auth = "Bearer $token"
+            val end = (maxBytes - 1L).coerceAtLeast(0L)
+            resumableTransfer.downloadByteRange(
+                authorization = auth,
+                itemId = itemId,
+                rangeHeader = "bytes=0-$end",
+                destination = destination,
+            )
+            if (!destination.isFile || destination.length() <= 0L) {
+                error("Prefixo vazio para miniatura.")
+            }
+        }
+    }
+
     suspend fun downloadThumbnailToFile(itemId: String, destination: File): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()

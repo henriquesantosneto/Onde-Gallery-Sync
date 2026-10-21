@@ -1244,10 +1244,22 @@ class SyncCoordinator(
 
         val itemId = row.oneDriveItemId
         if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+            var thumbReady = false
             oneDriveRepository.downloadThumbnailToFile(itemId, staging).onSuccess {
-                if (staging.length() > 0L) {
-                    commitIfReady()?.let { return Result.success(it) }
+                if (staging.length() > 0L) thumbReady = true
+            }
+            if (!thumbReady && !isVideo) {
+                val partial = File(staging.absolutePath + ".partial")
+                partial.delete()
+                oneDriveRepository.downloadImagePrefixForThumbnail(itemId, partial).onSuccess {
+                    if (partial.isFile && partial.length() > 0L) {
+                        thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(partial), staging)
+                    }
                 }
+                partial.delete()
+            }
+            if (thumbReady) {
+                commitIfReady()?.let { return Result.success(it) }
             }
         }
         staging.delete()
@@ -2103,7 +2115,7 @@ class SyncCoordinator(
                 mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
                     rowCanBuildThumbnail(row)
             }
-            .sortedWith(syncQueueEntityComparator)
+            .sortedWith(missingThumbnailPrefetchComparator)
             .take(maxPerRun)
             .toList()
     }
@@ -2578,9 +2590,12 @@ class SyncCoordinator(
         val residual = syncMetadataDao.getAll().filter { row ->
             when {
                 row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
-                row.cloudState == CloudSyncState.PENDING_DOWNLOAD &&
-                    row.oneDriveItemId != null &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null -> true
+                row.oneDriveItemId != null &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
+                    (
+                        row.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
+                            row.cloudState == CloudSyncState.CLOUD_ONLY
+                        ) -> true
                 else -> false
             }
         }
@@ -2743,22 +2758,31 @@ class SyncCoordinator(
         if (pendingAtStart == 0) return
         var totalCached = 0
         var round = 0
-        val maxRounds = (pendingAtStart / batchSize) + 8
+        var consecutiveEmptyBatches = 0
+        val maxRounds = ((pendingAtStart + batchSize - 1) / batchSize) + 32
         while (round < maxRounds) {
             ensureNotCancelled()
+            val remainingNow = countIndexedMissingThumbnails()
+            if (remainingNow == 0) break
             val rows = buildMissingThumbnailEntities(batchSize)
             if (rows.isEmpty()) break
             setRunQueueFromEntities(rows)
             setSyncProgress(
                 SyncProgressPhase.PREFETCH_THUMBNAILS,
                 "Miniaturas na galeria…",
-                "${totalCached.coerceAtLeast(0)} de ~$pendingAtStart · leva ${round + 1}.",
+                "${totalCached.coerceAtLeast(0)} de ~$pendingAtStart · " +
+                    "$remainingNow pendente(s) · leva ${round + 1}.",
                 alsoUpdateLastMessage = false,
             )
             val batchCached = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
             totalCached += batchCached
             round++
-            if (batchCached == 0) break
+            if (batchCached == 0) {
+                consecutiveEmptyBatches++
+                if (consecutiveEmptyBatches >= 5) break
+            } else {
+                consecutiveEmptyBatches = 0
+            }
         }
         val remaining = countIndexedMissingThumbnails()
         if (totalCached > 0 || remaining > 0) {
@@ -2871,8 +2895,19 @@ class SyncCoordinator(
         var localProbes = 0
         var indexed = 0
         val candidates = rows.size
-        rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
-            .forEachIndexed { index, row ->
+        rows.sortedWith(
+            compareBy<SyncMetadataEntity>(
+                { entity ->
+                    val cloudOnly = entity.localMediaId == null &&
+                        entity.localContentUri.isNullOrBlank() &&
+                        entity.cachedFilePath.isNullOrBlank() &&
+                        entity.oneDriveItemId != null
+                    if (cloudOnly) 0 else 1
+                },
+                { -(it.remoteModifiedAt ?: it.localModifiedAt ?: 0L) },
+                { it.canonicalPath },
+            ),
+        ).forEachIndexed { index, row ->
                 if (index % 16 == 0) {
                     ensureNotCancelled()
                     coroutineContext.ensureActive()
@@ -3253,9 +3288,9 @@ class SyncCoordinator(
         const val THUMB_CACHE_JPEG_QUALITY = 88
         const val THUMB_PREFETCH_BATCH = 280
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
-        const val GPS_BACKFILL_ROUNDS = 4
+        const val GPS_BACKFILL_ROUNDS = 8
         const val GPS_LOCAL_BATCH = 500
-        const val GPS_CLOUD_BATCH = 250
+        const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 3
         const val PARALLEL_THUMBNAILS = 3
         const val ROOM_UPSERT_CHUNK = 64
