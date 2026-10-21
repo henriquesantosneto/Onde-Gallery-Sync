@@ -10,8 +10,6 @@ import android.graphics.Color
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
 import com.onegallery.sync.ui.OneGalleryApp
 import com.onegallery.sync.ui.theme.OneGalleryTheme
 
@@ -49,9 +47,6 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = application as OneGalleryApplication
         app.appForegroundState.setForeground(true)
-        lifecycleScope.launch {
-            app.syncCoordinator.runAutoReleaseIfNeeded()
-        }
     }
 
     override fun onStop() {

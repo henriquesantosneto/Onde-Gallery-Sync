@@ -67,14 +67,44 @@ object BackgroundSyncScheduler {
         if (!prefs.backgroundSyncAlwaysEnabled || !prefs.hasCompletedSetup) return
         if (prefs.isAutoSyncPaused()) return
         if (prefs.shouldDeferBackgroundSyncByTime()) return
-        val request = OneTimeWorkRequestBuilder<SyncWorker>()
+        enqueueSyncWork(
+            context = context,
+            prefs = prefs,
+            userInitiated = false,
+            delaySeconds = delaySeconds,
+            policy = policy,
+        )
+    }
+
+    /** Botão “Sincronizar agora” / gesto explícito — WorkManager, não a UI Compose. */
+    fun enqueueUserRequestedSync(context: Context, prefs: SyncPreferences) {
+        if (!prefs.hasCompletedSetup) return
+        enqueueSyncWork(
+            context = context,
+            prefs = prefs,
+            userInitiated = true,
+            delaySeconds = 0,
+            policy = ExistingWorkPolicy.REPLACE,
+        )
+    }
+
+    private fun enqueueSyncWork(
+        context: Context,
+        prefs: SyncPreferences,
+        userInitiated: Boolean,
+        delaySeconds: Long,
+        policy: ExistingWorkPolicy,
+    ) {
+        val builder = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInputData(SyncWorker.input(userInitiated))
             .setConstraints(syncConstraints(prefs))
-            .setInitialDelay(delaySeconds, TimeUnit.SECONDS)
-            .build()
+        if (delaySeconds > 0L) {
+            builder.setInitialDelay(delaySeconds, TimeUnit.SECONDS)
+        }
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             IMMEDIATE_UNIQUE,
             policy,
-            request,
+            builder.build(),
         )
     }
 

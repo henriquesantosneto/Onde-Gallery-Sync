@@ -2069,6 +2069,7 @@ class SyncCoordinator(
         }
     }
 
+    /** Chamado pelo [com.onegallery.sync.worker.SyncWorker] — não pelo ciclo de vida da UI. */
     suspend fun runAutoReleaseIfNeeded() {
         if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) return
         if (!syncPreferences.autoFreeLocalSpaceWhenSynced &&

@@ -15,8 +15,10 @@ import com.onegallery.sync.data.local.db.UserAlbumEntity
 import android.content.Context
 import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.PendingDeleteTarget
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
+import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.ui.AppUserMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -454,22 +456,8 @@ class GalleryViewModel(
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            coroutineContext[Job]?.let { syncCoordinator.registerManagedSyncJob(it) }
-            loading.value = true
-            errorState.value = null
-            try {
-                syncCoordinator.runBidirectionalSync(userInitiated = false)
-                    .onFailure { error ->
-                        if (error is CancellationException) return@onFailure
-                        if (errorState.value == null) {
-                            errorState.value = error.message
-                        }
-                    }
-            } finally {
-                loading.value = false
-            }
-        }
+        val app = appContext.applicationContext as? OneGalleryApplication ?: return
+        BackgroundSyncScheduler.enqueueUserRequestedSync(app, app.syncPreferences)
     }
 
     fun enterSelectionMode(initialPath: String? = null) {

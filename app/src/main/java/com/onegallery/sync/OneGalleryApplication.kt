@@ -150,7 +150,7 @@ class OneGalleryApplication : Application() {
             appForegroundState = appForegroundState,
             backgroundScope = applicationScope,
         )
-        syncTaskLauncher = SyncTaskLauncher(applicationScope, syncCoordinator)
+        syncTaskLauncher = SyncTaskLauncher(this, syncCoordinator)
         mediaLibraryChangeWatcher = MediaLibraryChangeWatcher(applicationContext, syncPreferences)
         registerWifiSyncNetworkGuard()
         rescheduleBackgroundSync()

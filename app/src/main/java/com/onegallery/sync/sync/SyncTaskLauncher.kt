@@ -1,21 +1,32 @@
 package com.onegallery.sync.sync
 
 import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.worker.BackgroundSyncScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-/** Dispara sync/index fora do ciclo de vida da Compose (continua com app minimizado). */
+/**
+ * A UI só agenda trabalho (WorkManager) ou ações pontuais de índice;
+ * sync bidirecional e liberação automática rodam no [com.onegallery.sync.worker.SyncWorker].
+ */
 class SyncTaskLauncher(
-    private val scope: CoroutineScope,
+    private val app: OneGalleryApplication,
     private val coordinator: SyncCoordinator,
 ) {
+    private val scope = app.applicationScope
+
     private fun launchManaged(block: suspend () -> Unit) {
         val job = scope.launch { block() }
         coordinator.registerManagedSyncJob(job)
     }
 
     fun runBidirectionalSync(userInitiated: Boolean = false) {
-        launchManaged { coordinator.runBidirectionalSync(userInitiated = userInitiated) }
+        val prefs = app.syncPreferences
+        if (userInitiated) {
+            BackgroundSyncScheduler.enqueueUserRequestedSync(app, prefs)
+        } else {
+            BackgroundSyncScheduler.enqueueSyncSoon(app, prefs, delaySeconds = 0L)
+        }
     }
 
     fun connectGraphSyncFolderAndSync(
@@ -26,7 +37,11 @@ class SyncTaskLauncher(
     ) {
         launchManaged {
             coordinator.connectGraphSyncFolder(itemId, driveRelativePath, label)
-            coordinator.runBidirectionalSync(userInitiated = userInitiated)
+            if (userInitiated) {
+                BackgroundSyncScheduler.enqueueUserRequestedSync(app, app.syncPreferences)
+            } else {
+                BackgroundSyncScheduler.enqueueSyncSoon(app, app.syncPreferences, delaySeconds = 0L)
+            }
         }
     }
 
@@ -48,7 +63,11 @@ class SyncTaskLauncher(
             coordinator.resetSyncIndexForFreshStart(userInitiated = userInitiated).getOrElse {
                 return@launchManaged
             }
-            coordinator.runBidirectionalSync(userInitiated = userInitiated)
+            if (userInitiated) {
+                BackgroundSyncScheduler.enqueueUserRequestedSync(app, app.syncPreferences)
+            } else {
+                BackgroundSyncScheduler.enqueueSyncSoon(app, app.syncPreferences, delaySeconds = 0L)
+            }
         }
     }
 
@@ -61,6 +80,6 @@ class SyncTaskLauncher(
 
     companion object {
         fun from(app: OneGalleryApplication): SyncTaskLauncher =
-            SyncTaskLauncher(app.applicationScope, app.syncCoordinator)
+            SyncTaskLauncher(app, app.syncCoordinator)
     }
 }
