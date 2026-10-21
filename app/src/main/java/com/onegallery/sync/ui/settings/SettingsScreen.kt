@@ -16,7 +16,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,16 +83,6 @@ fun SettingsScreen(
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var allFilesAccess by remember { mutableStateOf(MediaStorageAccess.hasAllFilesAccess(context)) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, context) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                allFilesAccess = MediaStorageAccess.hasAllFilesAccess(context)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
     var autoFreeLocalAfterSync by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced)
     }
@@ -103,10 +93,79 @@ fun SettingsScreen(
         mutableStateOf(syncPreferences.localCopyIdleReleaseDays.toFloat())
     }
     var settingsInfo by remember { mutableStateOf<SettingsInfoDialog?>(null) }
+    var showAutoReleasePermissionDialog by remember { mutableStateOf(false) }
+    var pendingAutoReleaseAfterSync by remember { mutableStateOf(false) }
+    var pendingAutoReleaseWhenIdle by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allFilesAccess = MediaStorageAccess.hasAllFilesAccess(context)
+                if (allFilesAccess) {
+                    if (pendingAutoReleaseAfterSync) {
+                        pendingAutoReleaseAfterSync = false
+                        autoFreeLocalAfterSync = true
+                        syncPreferences.autoFreeLocalSpaceWhenSynced = true
+                    }
+                    if (pendingAutoReleaseWhenIdle) {
+                        pendingAutoReleaseWhenIdle = false
+                        autoFreeLocalWhenIdle = true
+                        syncPreferences.autoFreeLocalSpaceWhenIdle = true
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun openAllFilesAccessFromSettings() {
+        if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+            app.userMessages.show(
+                "Abra Configurações → Apps → One Gallery Sync → Permissões → " +
+                    "Arquivos e mídia → Permitir gerenciamento de todos os arquivos.",
+            )
+        }
+    }
 
     val cloudFolderLabel = when (syncPreferences.syncMode) {
         SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Pasta na nuvem não escolhida"
         else -> "Conecte a conta e escolha a pasta na nuvem"
+    }
+
+    if (showAutoReleasePermissionDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAutoReleasePermissionDialog = false
+                pendingAutoReleaseAfterSync = false
+                pendingAutoReleaseWhenIdle = false
+            },
+            title = { Text("Permissão para liberar espaço") },
+            text = {
+                Text(
+                    "As opções “Após backup” e “Por inatividade” removem cópias na galeria do " +
+                        "Android. No Android 11+, isso só funciona de forma confiável com " +
+                        "“Acesso a todos os arquivos”. Toque Conceder e ative para este app.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAutoReleasePermissionDialog = false
+                    openAllFilesAccessFromSettings()
+                }) {
+                    Text("Conceder")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showAutoReleasePermissionDialog = false
+                    pendingAutoReleaseAfterSync = false
+                    pendingAutoReleaseWhenIdle = false
+                }) {
+                    Text("Cancelar")
+                }
+            },
+        )
     }
 
     settingsInfo?.let { info ->
@@ -261,6 +320,38 @@ fun SettingsScreen(
             }
             item {
                 ListItem(
+                    headlineContent = { Text("Remover cópias no aparelho") },
+                    supportingContent = {
+                        Text(
+                            if (allFilesAccess) {
+                                "Acesso ativo — liberar espaço e excluir não dependem de diálogo do Android."
+                            } else {
+                                "Necessário para liberar espaço (manual ou automático) e excluir fotos " +
+                                    "no aparelho no Android 11+. Toque Conceder."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    leadingContent = {
+                        Icon(Icons.Outlined.Storage, contentDescription = null)
+                    },
+                    trailingContent = {
+                        if (allFilesAccess) {
+                            Text(
+                                "Ativo",
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                        } else {
+                            Button(onClick = { openAllFilesAccessFromSettings() }) {
+                                Text("Conceder")
+                            }
+                        }
+                    },
+                )
+            }
+            item {
+                ListItem(
                     headlineContent = {
                         SettingsHeadlineWithInfo(
                             title = "Espaço local",
@@ -269,7 +360,8 @@ fun SettingsScreen(
                                     title = "Espaço local",
                                     body = "Você pode usar as duas opções abaixo juntas ou só uma. " +
                                         "Miniatura no app e arquivo no OneDrive sempre permanecem. " +
-                                        "Liberar espaço manualmente na foto continua imediato.",
+                                        "Liberar espaço manualmente na foto usa a mesma permissão " +
+                                        "“Remover cópias no aparelho” acima.",
                                 )
                             },
                         )
@@ -288,9 +380,19 @@ fun SettingsScreen(
                     ),
                     checked = autoFreeLocalAfterSync,
                     onInfoClick = { settingsInfo = it },
-                    onCheckedChange = {
-                        autoFreeLocalAfterSync = it
-                        syncPreferences.autoFreeLocalSpaceWhenSynced = it
+                    onCheckedChange = { enabled ->
+                        if (!enabled) {
+                            autoFreeLocalAfterSync = false
+                            syncPreferences.autoFreeLocalSpaceWhenSynced = false
+                            return@SettingsSwitchRow
+                        }
+                        if (MediaStorageAccess.hasAllFilesAccess(context)) {
+                            autoFreeLocalAfterSync = true
+                            syncPreferences.autoFreeLocalSpaceWhenSynced = true
+                        } else {
+                            pendingAutoReleaseAfterSync = true
+                            showAutoReleasePermissionDialog = true
+                        }
                     },
                 )
             }
@@ -306,9 +408,19 @@ fun SettingsScreen(
                     ),
                     checked = autoFreeLocalWhenIdle,
                     onInfoClick = { settingsInfo = it },
-                    onCheckedChange = {
-                        autoFreeLocalWhenIdle = it
-                        syncPreferences.autoFreeLocalSpaceWhenIdle = it
+                    onCheckedChange = { enabled ->
+                        if (!enabled) {
+                            autoFreeLocalWhenIdle = false
+                            syncPreferences.autoFreeLocalSpaceWhenIdle = false
+                            return@SettingsSwitchRow
+                        }
+                        if (MediaStorageAccess.hasAllFilesAccess(context)) {
+                            autoFreeLocalWhenIdle = true
+                            syncPreferences.autoFreeLocalSpaceWhenIdle = true
+                        } else {
+                            pendingAutoReleaseWhenIdle = true
+                            showAutoReleasePermissionDialog = true
+                        }
                     },
                 )
             }
@@ -347,37 +459,6 @@ fun SettingsScreen(
                         )
                     }
                 }
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text("Excluir sem confirmar toda vez") },
-                    supportingContent = {
-                        Text(
-                            if (allFilesAccess) {
-                                "Acesso a todos os arquivos ativo — o Android não pede diálogo a cada exclusão."
-                            } else {
-                                "No Android 11+, conceda “Acesso a todos os arquivos” uma vez. " +
-                                    "Sem isso, o sistema exige confirmação por lote."
-                            },
-                        )
-                    },
-                    leadingContent = {
-                        Icon(Icons.Outlined.Delete, contentDescription = null)
-                    },
-                    trailingContent = {
-                        if (allFilesAccess) {
-                            Text(
-                                "Ativo",
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(end = 8.dp),
-                            )
-                        } else {
-                            Button(onClick = { MediaStorageAccess.openAllFilesAccessSettings(context) }) {
-                                Text("Conceder")
-                            }
-                        }
-                    },
-                )
             }
             item {
                 SettingsSwitchRow(

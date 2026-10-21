@@ -3,6 +3,7 @@
 package com.onegallery.sync.sync
 
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.graphics.Bitmap
@@ -1890,10 +1891,7 @@ class SyncCoordinator(
             }
             val freed = releaseLocalSpaceForRows(rows, allowSystemDialog = true)
             if (rows.isNotEmpty() && freed == 0) {
-                error(
-                    "Não foi possível remover a cópia local. " +
-                        "Abra o app e confirme no diálogo do Android, se aparecer.",
-                )
+                error(localSpaceReleaseFailureMessage())
             }
             freed
         }
@@ -1974,11 +1972,24 @@ class SyncCoordinator(
         return System.currentTimeMillis() - lastAccess >= idleMs
     }
 
+    private fun localSpaceReleaseFailureMessage(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            !MediaStorageAccess.hasAllFilesAccess(appContext)
+        ) {
+            "Para liberar espaço no aparelho, em Ajustes → Espaço local toque Conceder em " +
+                "“Remover cópias no aparelho” e ative o acesso a todos os arquivos."
+        } else {
+            "Não foi possível remover a cópia local. Tente de novo com o app aberto ou confirme " +
+                "no diálogo do Android, se aparecer."
+        }
+    }
+
     private suspend fun releaseLocalSpaceForRows(
         rows: List<SyncMetadataEntity>,
         allowSystemDialog: Boolean,
     ): Int {
         if (rows.isEmpty()) return 0
+        val priorReleasedFlag = rows.associate { it.canonicalPath to it.localReleasedForSpace }
         rows.forEach { row ->
             ensureThumbnailCached(row.canonicalPath).getOrNull()
             markLocalSpaceReleasePending(row)
@@ -1995,14 +2006,17 @@ class SyncCoordinator(
                 is MediaDeleteResult.Success, MediaDeleteResult.NothingToDelete -> {
                     deleted = deleted + mediaDeleteRequestRouter.deleteSilent(appContext, pending)
                 }
-                else -> Unit
+                MediaDeleteResult.UserDenied -> Unit
+                is MediaDeleteResult.Failed -> Unit
             }
         }
 
         var freed = 0
+        val freedPaths = mutableSetOf<String>()
         for ((uri, row) in uriToRow) {
             if (uri !in deleted) continue
             finalizeLocalSpaceReleased(row)
+            freedPaths.add(row.canonicalPath)
             freed++
         }
         val handled = uriToRow.values.map { it.canonicalPath }.toSet()
@@ -2011,7 +2025,15 @@ class SyncCoordinator(
             if (row.localContentUri != null || row.localMediaId != null) continue
             if (row.cachedFilePath == null) continue
             finalizeLocalSpaceReleased(row)
+            freedPaths.add(row.canonicalPath)
             freed++
+        }
+        for (path in rows.map { it.canonicalPath }) {
+            if (path in freedPaths) continue
+            val current = syncMetadataDao.getByCanonicalPath(path) ?: continue
+            syncMetadataDao.upsert(
+                current.copy(localReleasedForSpace = priorReleasedFlag[path] ?: false),
+            )
         }
         return freed
     }

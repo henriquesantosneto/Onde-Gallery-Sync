@@ -340,7 +340,7 @@ fun OneGalleryApp(
         ),
     )
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        galleryViewModel.resumePendingDeleteIfAccessGranted()
+        galleryViewModel.resumePendingLocalRemovalIfAccessGranted()
     }
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route

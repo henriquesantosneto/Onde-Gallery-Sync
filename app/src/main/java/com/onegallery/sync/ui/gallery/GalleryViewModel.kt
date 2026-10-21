@@ -95,12 +95,13 @@ class GalleryViewModel(
     private val appContext: Context,
 ) : ViewModel() {
 
-    private data class PendingLocalDelete(
+    private data class PendingLocalMediaRemoval(
         val paths: List<String>,
-        val onSingleRemoved: (() -> Unit)? = null,
+        val onSingleDone: (() -> Unit)? = null,
     )
 
-    private var pendingDeleteAfterAllFilesAccess: PendingLocalDelete? = null
+    private var pendingDeleteAfterAllFilesAccess: PendingLocalMediaRemoval? = null
+    private var pendingReleaseAfterAllFilesAccess: PendingLocalMediaRemoval? = null
 
     private val browseFilter = MutableStateFlow<GalleryBrowseFilter>(GalleryBrowseFilter.All)
     private val loading = MutableStateFlow(true)
@@ -542,19 +543,36 @@ class GalleryViewModel(
     fun canDeleteLocallyWithoutSystemPrompt(): Boolean =
         MediaStorageAccess.hasAllFilesAccess(appContext)
 
+    fun showMessage(message: String) {
+        userMessages.show(message)
+    }
+
     fun queueDeleteAfterAllFilesAccess(paths: List<String>, onSingleRemoved: (() -> Unit)? = null) {
         if (paths.isEmpty()) return
-        pendingDeleteAfterAllFilesAccess = PendingLocalDelete(paths, onSingleRemoved)
+        pendingDeleteAfterAllFilesAccess = PendingLocalMediaRemoval(paths, onSingleRemoved)
         userMessages.show(
             "Conceda “Acesso a todos os arquivos” e volte ao app — a exclusão continua sozinha.",
         )
     }
 
-    fun resumePendingDeleteIfAccessGranted() {
-        val pending = pendingDeleteAfterAllFilesAccess ?: return
+    fun queueReleaseAfterAllFilesAccess(paths: List<String>, onSingleDone: (() -> Unit)? = null) {
+        if (paths.isEmpty()) return
+        pendingReleaseAfterAllFilesAccess = PendingLocalMediaRemoval(paths, onSingleDone)
+        userMessages.show(
+            "Conceda “Acesso a todos os arquivos” e volte ao app — liberar espaço continua sozinho.",
+        )
+    }
+
+    fun resumePendingLocalRemovalIfAccessGranted() {
         if (!MediaStorageAccess.hasAllFilesAccess(appContext)) return
-        pendingDeleteAfterAllFilesAccess = null
-        runDeleteImmediately(pending.paths, pending.onSingleRemoved)
+        pendingDeleteAfterAllFilesAccess?.let { pending ->
+            pendingDeleteAfterAllFilesAccess = null
+            runDeleteImmediately(pending.paths, pending.onSingleDone)
+        }
+        pendingReleaseAfterAllFilesAccess?.let { pending ->
+            pendingReleaseAfterAllFilesAccess = null
+            runReleaseImmediately(pending.paths, pending.onSingleDone)
+        }
     }
 
     fun deleteSelected() {
@@ -586,25 +604,27 @@ class GalleryViewModel(
     fun releaseLocalSpaceSelected() {
         val paths = selectedPaths.value.toList()
         if (paths.isEmpty()) return
-        viewModelScope.launch {
-            syncCoordinator.releaseLocalSpace(paths)
-                .onSuccess { count ->
-                    toast(
-                        "$count item(ns): só a cópia local foi removida; miniatura no app e " +
-                            "arquivo no OneDrive mantidos.",
-                    )
-                    clearSelection()
-                }
-                .onFailure { toast(it.message) }
-        }
+        runReleaseImmediately(paths)
     }
 
     fun releaseSingle(canonicalPath: String, onDone: () -> Unit = {}) {
+        runReleaseImmediately(listOf(canonicalPath), onDone)
+    }
+
+    private fun runReleaseImmediately(paths: List<String>, onSingleDone: (() -> Unit)? = null) {
         viewModelScope.launch {
-            syncCoordinator.releaseLocalSpace(listOf(canonicalPath))
-                .onSuccess {
-                    toast("Cópia local removida; miniatura no app e arquivo no OneDrive mantidos.")
-                    onDone()
+            syncCoordinator.releaseLocalSpace(paths)
+                .onSuccess { count ->
+                    if (onSingleDone != null) {
+                        toast("Cópia local removida; miniatura no app e arquivo no OneDrive mantidos.")
+                        onSingleDone()
+                    } else {
+                        toast(
+                            "$count item(ns): só a cópia local foi removida; miniatura no app e " +
+                                "arquivo no OneDrive mantidos.",
+                        )
+                        clearSelection()
+                    }
                 }
                 .onFailure { toast(it.message) }
         }

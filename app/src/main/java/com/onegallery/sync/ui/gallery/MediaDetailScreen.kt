@@ -89,8 +89,11 @@ fun MediaDetailScreen(
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showAllFilesForDelete by remember { mutableStateOf(false) }
+    var showAllFilesForRelease by remember { mutableStateOf(false) }
     var pendingDeletePaths by remember { mutableStateOf<List<String>>(emptyList()) }
     var pendingDeleteOnRemoved by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingReleasePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingReleaseOnDone by remember { mutableStateOf<(() -> Unit)?>(null) }
     val context = LocalContext.current
     var activePageError by remember { mutableStateOf<String?>(null) }
     /** Evita recall automático na mesma sessão após “Liberar espaço” (reabrir a foto para baixar). */
@@ -429,8 +432,15 @@ fun MediaDetailScreen(
                                     showDetails = detailPaths.isNotEmpty(),
                                     onDetails = { openDetailsToSimple() },
                                     onFreeSpace = {
-                                        markSuppressAutoRecall(state.selectedPaths)
-                                        viewModel.releaseLocalSpaceSelected()
+                                        val paths = state.selectedPaths.toList()
+                                        markSuppressAutoRecall(paths)
+                                        if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                                            viewModel.releaseLocalSpaceSelected()
+                                        } else {
+                                            pendingReleasePaths = paths
+                                            pendingReleaseOnDone = null
+                                            showAllFilesForRelease = true
+                                        }
                                     },
                                 )
                             }
@@ -471,7 +481,13 @@ fun MediaDetailScreen(
                                 onDetails = { openDetailsToSimple() },
                                 onFreeSpace = {
                                     markSuppressAutoRecall(listOf(currentPath))
-                                    viewModel.releaseSingle(currentPath)
+                                    if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                                        viewModel.releaseSingle(currentPath)
+                                    } else {
+                                        pendingReleasePaths = listOf(currentPath)
+                                        pendingReleaseOnDone = null
+                                        showAllFilesForRelease = true
+                                    }
                                 },
                             )
                         }
@@ -574,8 +590,9 @@ fun MediaDetailScreen(
     }
 
     if (showAllFilesForDelete && pendingDeletePaths.isNotEmpty()) {
-        AllFilesAccessForDeleteDialog(
+        AllFilesAccessForLocalRemovalDialog(
             count = pendingDeletePaths.size,
+            purpose = LocalMediaRemovalPrompt.DELETE,
             onDismiss = { showAllFilesForDelete = false },
             onOpenSettings = {
                 showAllFilesForDelete = false
@@ -583,11 +600,15 @@ fun MediaDetailScreen(
                     pendingDeletePaths,
                     pendingDeleteOnRemoved,
                 )
-                MediaStorageAccess.openAllFilesAccessSettings(context)
+                if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+                    viewModel.showMessage(
+                        "Abra Configurações → Apps → One Gallery Sync → Permissões → Arquivos.",
+                    )
+                }
                 pendingDeletePaths = emptyList()
                 pendingDeleteOnRemoved = null
             },
-            onDeleteWithSystemPrompt = {
+            onContinueWithSystemPrompt = {
                 showAllFilesForDelete = false
                 val paths = pendingDeletePaths
                 val onRemoved = pendingDeleteOnRemoved
@@ -597,6 +618,43 @@ fun MediaDetailScreen(
                     viewModel.deleteSingle(paths.single(), onRemoved)
                 } else {
                     viewModel.deleteSelected()
+                }
+            },
+        )
+    }
+
+    if (showAllFilesForRelease && pendingReleasePaths.isNotEmpty()) {
+        AllFilesAccessForLocalRemovalDialog(
+            count = pendingReleasePaths.size,
+            purpose = LocalMediaRemovalPrompt.RELEASE_SPACE,
+            onDismiss = { showAllFilesForRelease = false },
+            onOpenSettings = {
+                showAllFilesForRelease = false
+                viewModel.queueReleaseAfterAllFilesAccess(
+                    pendingReleasePaths,
+                    pendingReleaseOnDone,
+                )
+                if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+                    viewModel.showMessage(
+                        "Abra Configurações → Apps → One Gallery Sync → Permissões → Arquivos.",
+                    )
+                }
+                pendingReleasePaths = emptyList()
+                pendingReleaseOnDone = null
+            },
+            onContinueWithSystemPrompt = {
+                showAllFilesForRelease = false
+                val paths = pendingReleasePaths
+                val onDone = pendingReleaseOnDone
+                pendingReleasePaths = emptyList()
+                pendingReleaseOnDone = null
+                markSuppressAutoRecall(paths)
+                if (paths.size == 1 && onDone != null) {
+                    viewModel.releaseSingle(paths.single(), onDone)
+                } else if (paths.size == 1) {
+                    viewModel.releaseSingle(paths.single())
+                } else {
+                    viewModel.releaseLocalSpaceSelected()
                 }
             },
         )
@@ -622,6 +680,7 @@ fun MediaDetailScreen(
     // Prioridade sobre NavHost: voltar cancela seleção / fecha detalhes, não a listagem da galeria.
     BackHandler {
         when {
+            showAllFilesForRelease -> showAllFilesForRelease = false
             showAllFilesForDelete -> showAllFilesForDelete = false
             showDeleteConfirm -> showDeleteConfirm = false
             showMoveDialog -> showMoveDialog = false

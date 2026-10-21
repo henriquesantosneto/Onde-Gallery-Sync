@@ -9,9 +9,11 @@ import android.provider.MediaStore
 import android.os.Environment
 import androidx.activity.result.IntentSenderRequest
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 sealed class MediaDeleteResult {
@@ -111,15 +113,17 @@ class MediaDeleteRequestRouter {
     private suspend fun deleteBatchApi30Plus(context: Context, uris: List<Uri>): Boolean {
         val launch = launchIntentSender ?: return deleteUrisDirect(context, uris)
 
-        val approved = suspendCancellableCoroutine { cont ->
-            pendingResult = { cont.resume(it) }
-            cont.invokeOnCancellation {
-                if (pendingResult != null) {
-                    pendingResult = null
+        val approved = withContext(Dispatchers.Main.immediate) {
+            suspendCancellableCoroutine { cont ->
+                pendingResult = { cont.resume(it) }
+                cont.invokeOnCancellation {
+                    if (pendingResult != null) {
+                        pendingResult = null
+                    }
                 }
+                val pending = MediaStore.createDeleteRequest(context.contentResolver, uris)
+                launch(IntentSenderRequest.Builder(pending.intentSender).build())
             }
-            val pending = MediaStore.createDeleteRequest(context.contentResolver, uris)
-            launch(IntentSenderRequest.Builder(pending.intentSender).build())
         }
         if (!approved) return false
         deleteUrisDirect(context, uris)
@@ -139,16 +143,18 @@ class MediaDeleteRequestRouter {
 
     private suspend fun requestRecoverable(exception: RecoverableSecurityException): Boolean {
         val launch = launchIntentSender ?: return false
-        return suspendCancellableCoroutine { cont ->
-            pendingResult = { cont.resume(it) }
-            cont.invokeOnCancellation {
-                if (pendingResult != null) {
-                    pendingResult = null
+        return withContext(Dispatchers.Main.immediate) {
+            suspendCancellableCoroutine { cont ->
+                pendingResult = { cont.resume(it) }
+                cont.invokeOnCancellation {
+                    if (pendingResult != null) {
+                        pendingResult = null
+                    }
                 }
+                launch(
+                    IntentSenderRequest.Builder(exception.userAction.actionIntent.intentSender).build(),
+                )
             }
-            launch(
-                IntentSenderRequest.Builder(exception.userAction.actionIntent.intentSender).build(),
-            )
         }
     }
 

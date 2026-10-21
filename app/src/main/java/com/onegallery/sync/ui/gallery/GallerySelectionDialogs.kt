@@ -100,27 +100,37 @@ fun DeleteSelectionDialog(
     )
 }
 
+enum class LocalMediaRemovalPrompt {
+    DELETE,
+    RELEASE_SPACE,
+}
+
 /** Android 11+: sem “acesso a todos os arquivos”, o SO abre diálogo a cada lote. */
 @Composable
-fun AllFilesAccessForDeleteDialog(
+fun AllFilesAccessForLocalRemovalDialog(
     count: Int,
+    purpose: LocalMediaRemovalPrompt,
     onDismiss: () -> Unit,
     onOpenSettings: () -> Unit,
-    onDeleteWithSystemPrompt: () -> Unit,
+    onContinueWithSystemPrompt: () -> Unit,
 ) {
+    val actionLabel = when (purpose) {
+        LocalMediaRemovalPrompt.DELETE -> "exclusão"
+        LocalMediaRemovalPrompt.RELEASE_SPACE -> "liberação de espaço"
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Excluir sem pedir permissão toda vez") },
+        title = { Text("Permissão para remover cópias no aparelho") },
         text = {
             Column {
                 Text(
-                    "No Android 11+, o sistema só deixa o app apagar fotos e vídeos no aparelho " +
-                        "sem abrir um diálogo de permissão se você conceder “Acesso a todos os arquivos” " +
-                        "uma única vez para o One Gallery Sync.",
+                    "No Android 11+, liberar espaço e excluir fotos no aparelho exigem " +
+                        "“Acesso a todos os arquivos” uma única vez. Sem isso, o Android pode " +
+                        "não mostrar nenhum diálogo e a operação falha.",
                 )
                 Text(
-                    "Depois de ativar, toque Excluir de novo (ou volte ao app após conceder — " +
-                        "a exclusão de $count item(ns) continua automaticamente).",
+                    "Toque Conceder acesso, ative para o One Gallery Sync e volte ao app — " +
+                        "a $actionLabel de $count item(ns) continua automaticamente.",
                     modifier = Modifier.padding(top = 12.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -131,7 +141,7 @@ fun AllFilesAccessForDeleteDialog(
             TextButton(onClick = onOpenSettings) { Text("Conceder acesso") }
         },
         dismissButton = {
-            TextButton(onClick = onDeleteWithSystemPrompt) { Text("Usar diálogo do Android") }
+            TextButton(onClick = onContinueWithSystemPrompt) { Text("Tentar diálogo do Android") }
         },
     )
 }

@@ -92,6 +92,7 @@ fun GalleryScreen(
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showAllFilesForDelete by remember { mutableStateOf(false) }
+    var showAllFilesForRelease by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var browseFilterWasActive by remember(requiresActiveBrowseFilter) { mutableStateOf(false) }
     LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
@@ -168,7 +169,13 @@ fun GalleryScreen(
                                 onExpandedChange = { showSelectionOverflow = it },
                                 showDetails = true,
                                 onDetails = { showMediaDetails = true },
-                                onFreeSpace = { viewModel.releaseLocalSpaceSelected() },
+                                onFreeSpace = {
+                                    if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                                        viewModel.releaseLocalSpaceSelected()
+                                    } else {
+                                        showAllFilesForRelease = true
+                                    }
+                                },
                             )
                         }
                         TextButton(onClick = { viewModel.clearSelection() }) {
@@ -342,17 +349,44 @@ fun GalleryScreen(
 
     if (showAllFilesForDelete && state.selectedPaths.isNotEmpty()) {
         val paths = state.selectedPaths.toList()
-        AllFilesAccessForDeleteDialog(
+        AllFilesAccessForLocalRemovalDialog(
             count = paths.size,
+            purpose = LocalMediaRemovalPrompt.DELETE,
             onDismiss = { showAllFilesForDelete = false },
             onOpenSettings = {
                 showAllFilesForDelete = false
                 viewModel.queueDeleteAfterAllFilesAccess(paths)
-                MediaStorageAccess.openAllFilesAccessSettings(context)
+                if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+                    viewModel.showMessage(
+                        "Abra Configurações → Apps → One Gallery Sync → Permissões → Arquivos.",
+                    )
+                }
             },
-            onDeleteWithSystemPrompt = {
+            onContinueWithSystemPrompt = {
                 showAllFilesForDelete = false
                 viewModel.deleteSelected()
+            },
+        )
+    }
+
+    if (showAllFilesForRelease && state.selectedPaths.isNotEmpty()) {
+        val paths = state.selectedPaths.toList()
+        AllFilesAccessForLocalRemovalDialog(
+            count = paths.size,
+            purpose = LocalMediaRemovalPrompt.RELEASE_SPACE,
+            onDismiss = { showAllFilesForRelease = false },
+            onOpenSettings = {
+                showAllFilesForRelease = false
+                viewModel.queueReleaseAfterAllFilesAccess(paths)
+                if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+                    viewModel.showMessage(
+                        "Abra Configurações → Apps → One Gallery Sync → Permissões → Arquivos.",
+                    )
+                }
+            },
+            onContinueWithSystemPrompt = {
+                showAllFilesForRelease = false
+                viewModel.releaseLocalSpaceSelected()
             },
         )
     }

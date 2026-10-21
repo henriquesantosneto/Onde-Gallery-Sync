@@ -8,7 +8,7 @@ Exclusões detectadas durante sync **não são aplicadas automaticamente** em am
 
 Por política do Android, apps com só “fotos e vídeos” **não podem** apagar arquivos de outros apps sem um diálogo do sistema (`MediaStore.createDeleteRequest`).
 
-**Uma vez em Ajustes → “Excluir sem confirmar toda vez”:** concede `MANAGE_EXTERNAL_STORAGE` (“Acesso a todos os arquivos”). Depois disso, o app apaga via caminho + MediaStore **sem pedir permissão a cada exclusão** (`MediaStorageAccess`, `MediaDeleteRequestRouter`).
+**Uma vez em Ajustes → Espaço local → “Remover cópias no aparelho” → Conceder:** concede `MANAGE_EXTERNAL_STORAGE` (“Acesso a todos os arquivos”). Vale para **liberar espaço** (manual ou automático) e **excluir** no aparelho — o app remove via caminho + MediaStore **sem diálogo repetido** (`MediaStorageAccess`, `MediaDeleteRequestRouter`).
 
 Sem esse acesso, cada lote de exclusão ainda exige confirmação do Android — limitação do SO, não escolha do app.
 
