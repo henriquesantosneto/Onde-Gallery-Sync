@@ -39,8 +39,17 @@ class MediaCacheRepository(context: Context) {
         return File(thumbsDir, safeFileName(canonicalPath) + ".new")
     }
 
+    fun thumbFileByRemoteItemId(oneDriveItemId: String): File {
+        val safe = oneDriveItemId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        return File(thumbsDir, "item_$safe")
+    }
+
     /** Substitui a miniatura só quando a nova já foi gravada (evita “buraco” na grade). */
-    fun commitThumbnail(stagingFile: File, canonicalPath: String): File? {
+    fun commitThumbnail(
+        stagingFile: File,
+        canonicalPath: String,
+        oneDriveItemId: String? = null,
+    ): File? {
         if (!stagingFile.isFile || stagingFile.length() <= 0L) {
             stagingFile.delete()
             return null
@@ -63,9 +72,21 @@ class MediaCacheRepository(context: Context) {
         val committed = dest.takeIf { it.isFile && it.length() > 0L }
         if (committed != null) {
             thumbExistsCache[canonicalPath] = true
+            oneDriveItemId?.takeIf { it.isNotBlank() }?.let { itemId ->
+                mirrorThumbToRemoteItemAlias(committed, itemId)
+            }
             onThumbnailCommitted?.invoke(canonicalPath)
         }
         return committed
+    }
+
+    private fun mirrorThumbToRemoteItemAlias(source: File, oneDriveItemId: String) {
+        val alias = thumbFileByRemoteItemId(oneDriveItemId)
+        runCatching {
+            source.inputStream().buffered().use { input ->
+                alias.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+        }
     }
 
     fun hasOriginal(canonicalPath: String): Boolean {
@@ -92,10 +113,27 @@ class MediaCacheRepository(context: Context) {
         originalPartMetaFile(canonicalPath).delete()
     }
 
-    fun thumbnailIfCached(canonicalPath: String): File? {
+    fun thumbnailIfCached(canonicalPath: String, oneDriveItemId: String? = null): File? {
         val file = thumbFile(canonicalPath)
-        val ok = file.isFile && file.length() > 0L
-        if (ok) {
+        if (file.isFile && file.length() > 0L) {
+            thumbExistsCache[canonicalPath] = true
+            return file
+        }
+        val itemId = oneDriveItemId?.takeIf { it.isNotBlank() } ?: run {
+            thumbExistsCache.remove(canonicalPath)
+            return null
+        }
+        val alias = thumbFileByRemoteItemId(itemId)
+        if (!alias.isFile || alias.length() <= 0L) {
+            thumbExistsCache.remove(canonicalPath)
+            return null
+        }
+        runCatching {
+            alias.inputStream().buffered().use { input ->
+                file.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+        }
+        if (file.isFile && file.length() > 0L) {
             thumbExistsCache[canonicalPath] = true
             return file
         }

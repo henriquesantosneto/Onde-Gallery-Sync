@@ -34,6 +34,29 @@ object ContentFingerprint {
     fun matchesIndexedLocal(row: SyncMetadataEntity, remote: RemoteDriveFile): Boolean =
         matchesRemote(row.localQuickXorHash, row.localSizeBytes, remote)
 
+    /** Delta/listagem Graph às vezes omite quickXorHash; usa o já gravado no índice. */
+    fun remoteWithIndexedFallback(
+        row: SyncMetadataEntity,
+        remote: RemoteDriveFile,
+    ): RemoteDriveFile {
+        val hash = remote.quickXorHash?.takeIf { it.isNotBlank() } ?: row.remoteQuickXorHash
+        val size = remote.sizeBytes ?: row.remoteSizeBytes
+        val modified = remote.modifiedAtEpoch ?: row.remoteModifiedAt
+        if (hash == remote.quickXorHash && size == remote.sizeBytes && modified == remote.modifiedAtEpoch) {
+            return remote
+        }
+        return remote.copy(
+            quickXorHash = hash,
+            sizeBytes = size,
+            modifiedAtEpoch = modified,
+        )
+    }
+
+    fun matchesIndexedLocalWithFallback(
+        row: SyncMetadataEntity,
+        remote: RemoteDriveFile,
+    ): Boolean = matchesIndexedLocal(row, remoteWithIndexedFallback(row, remote))
+
     fun quickXorHashBase64(input: InputStream): String {
         val bytes = QuickXorHash.digest(input)
         return Base64.encodeToString(bytes, Base64.NO_WRAP)

@@ -25,7 +25,10 @@ object GalleryMapper {
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
             ?: mediaCacheRepository.originalIfCached(entity.canonicalPath)
-        val placeholderThumb = mediaCacheRepository.thumbnailIfCached(entity.canonicalPath)
+        val placeholderThumb = mediaCacheRepository.thumbnailIfCached(
+            entity.canonicalPath,
+            entity.oneDriveItemId,
+        )
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }
             ?: entity.localModifiedAt?.takeIf { it > 0L }

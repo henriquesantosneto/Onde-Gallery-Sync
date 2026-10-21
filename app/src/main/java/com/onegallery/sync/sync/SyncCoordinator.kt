@@ -1103,6 +1103,10 @@ class SyncCoordinator(
                         }
                     }
                     flushReconcileUpserts()
+                    healStalePendingDownloads(remoteByPath)
+                    pendingDownloadPlaceholders = syncMetadataDao.getAll().count {
+                        it.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                    }
 
                     setSyncProgress(
                         SyncProgressPhase.RECONCILING_LOCAL,
@@ -1361,15 +1365,16 @@ class SyncCoordinator(
         canonicalPath: String,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<File?> {
-        mediaCacheRepository.thumbnailIfCached(canonicalPath)?.let { return Result.success(it) }
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
+        mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
+            ?.let { return Result.success(it) }
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
         staging.delete()
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         onProgress?.invoke(0L, null)
 
         fun commitIfReady(): File? =
-            mediaCacheRepository.commitThumbnail(staging, canonicalPath)
+            mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
 
         localContentUri(row)?.let { uri ->
             val ok = if (isVideo) {
@@ -2295,7 +2300,7 @@ class SyncCoordinator(
                     removeFromRunQueue(path)
                 }
                 row.oneDriveItemId != null &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null -> {
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null -> {
                     thumbRows.add(row)
                 }
                 else -> removeFromRunQueue(path)
@@ -2327,7 +2332,7 @@ class SyncCoordinator(
         return syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
-                mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
+                mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
                     rowCanBuildThumbnail(row)
             }
             .sortedWith(missingThumbnailPrefetchComparator)
@@ -2337,7 +2342,7 @@ class SyncCoordinator(
 
     private suspend fun countIndexedMissingThumbnails(): Int {
         return syncMetadataDao.getAll().count { row ->
-            mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
+            mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
                 rowCanBuildThumbnail(row)
         }
     }
@@ -2364,6 +2369,87 @@ class SyncCoordinator(
         }
     }
 
+    /**
+     * Corrige [CloudSyncState.PENDING_DOWNLOAD] fantasma (hash na listagem delta incompleto,
+     * fingerprint local desatualizado, miniatura já em cache).
+     */
+    private suspend fun healStalePendingDownloads(remoteByPath: Map<String, RemoteDriveFile>) {
+        val pending = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
+        if (pending.isEmpty()) return
+        val healed = mutableListOf<SyncMetadataEntity>()
+        for (row in pending) {
+            val remote = remoteByPath[row.canonicalPath] ?: continue
+            val effective = ContentFingerprint.remoteWithIndexedFallback(row, remote)
+            var work = ensureLocalContentFingerprint(row)
+            if (ContentFingerprint.matchesIndexedLocalWithFallback(work, effective)) {
+                healed.add(
+                    syncedRowFromRemote(work, effective, CloudSyncState.SYNCED),
+                )
+                continue
+            }
+            if (!ContentFingerprint.matchesIndexedLocalWithFallback(work, effective)) {
+                val liveHash = computeLiveLocalQuickXorHash(work)
+                if (liveHash != null &&
+                    ContentFingerprint.matchesRemote(liveHash.first, liveHash.second, effective)
+                ) {
+                    healed.add(
+                        syncedRowFromRemote(
+                            work.copy(
+                                localQuickXorHash = liveHash.first,
+                                localSizeBytes = liveHash.second,
+                            ),
+                            effective,
+                            CloudSyncState.SYNCED,
+                        ),
+                    )
+                    continue
+                }
+            }
+            if (work.localMediaId == null &&
+                mediaCacheRepository.thumbnailIfCached(work.canonicalPath, work.oneDriveItemId) != null
+            ) {
+                healed.add(
+                    syncedRowFromRemote(work, effective, CloudSyncState.CLOUD_ONLY),
+                )
+            }
+        }
+        if (healed.isEmpty()) return
+        healed.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+            syncMetadataDao.upsertAll(chunk)
+        }
+    }
+
+    private fun syncedRowFromRemote(
+        row: SyncMetadataEntity,
+        remote: RemoteDriveFile,
+        cloudState: CloudSyncState,
+    ): SyncMetadataEntity {
+        return row.copy(
+            oneDriveItemId = remote.itemId,
+            remoteModifiedAt = remote.modifiedAtEpoch ?: row.remoteModifiedAt,
+            remoteQuickXorHash = remote.quickXorHash ?: row.remoteQuickXorHash,
+            remoteSizeBytes = remote.sizeBytes ?: row.remoteSizeBytes,
+            cloudState = cloudState,
+            lastError = null,
+        )
+    }
+
+    private suspend fun computeLiveLocalQuickXorHash(
+        row: SyncMetadataEntity,
+    ): Pair<String, Long>? {
+        val localId = row.localMediaId ?: return null
+        val item = indexPassLocalItemsById[localId]
+            ?: localMediaRepository.findById(localId)
+            ?: return null
+        val size = item.sizeBytes
+        val hash = withContext(Dispatchers.IO) {
+            localMediaRepository.openMediaInputStream(item)?.use { input ->
+                ContentFingerprint.quickXorHashBase64(input)
+            }
+        } ?: return null
+        return hash to size
+    }
+
     private fun reconcileWithRemote(row: SyncMetadataEntity, remote: RemoteDriveFile): SyncMetadataEntity {
         val localTs = row.localModifiedAt ?: 0L
         val remoteTs = remote.modifiedAtEpoch ?: 0L
@@ -2377,7 +2463,7 @@ class SyncCoordinator(
         if (row.localMediaId == null) {
             return base.copy(cloudState = CloudSyncState.CLOUD_ONLY)
         }
-        if (ContentFingerprint.matchesIndexedLocal(row, remote)) {
+        if (ContentFingerprint.matchesIndexedLocalWithFallback(row, remote)) {
             return base.copy(cloudState = CloudSyncState.SYNCED)
         }
         val lastKnownRemote = row.remoteModifiedAt
@@ -2387,14 +2473,14 @@ class SyncCoordinator(
         val remoteNewerThanLocal = remoteTs > localTs + SYNC_TIMESTAMP_TOLERANCE_SEC
         return when {
             localNewerThanCloud -> {
-                if (ContentFingerprint.matchesIndexedLocal(row, remote)) {
+                if (ContentFingerprint.matchesIndexedLocalWithFallback(row, remote)) {
                     base.copy(cloudState = CloudSyncState.SYNCED)
                 } else {
                     base.copy(cloudState = CloudSyncState.PENDING_UPLOAD)
                 }
             }
             remoteNewerThanLocal || (remoteChangedSinceSync && !localNewerThanCloud) -> {
-                if (ContentFingerprint.matchesIndexedLocal(row, remote)) {
+                if (ContentFingerprint.matchesIndexedLocalWithFallback(row, remote)) {
                     base.copy(cloudState = CloudSyncState.SYNCED)
                 } else {
                     base.copy(cloudState = CloudSyncState.PENDING_DOWNLOAD)
@@ -2787,7 +2873,7 @@ class SyncCoordinator(
             when {
                 row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
                 row.oneDriveItemId != null &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath) == null &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
                     (
                         row.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
                             row.cloudState == CloudSyncState.CLOUD_ONLY
