@@ -33,7 +33,9 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.ui.gallery.GalleryPreferences
+import com.onegallery.sync.ui.gallery.GalleryProcessAlbumListsCache
 import com.onegallery.sync.ui.gallery.GalleryProcessCatalogCache
+import com.onegallery.sync.ui.gallery.GallerySessionAlbumListsSpill
 import com.onegallery.sync.sync.SyncTaskLauncher
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -95,6 +97,8 @@ class OneGalleryApplication : Application() {
 
     val galleryProcessCatalogCache = GalleryProcessCatalogCache()
 
+    val galleryProcessAlbumListsCache = GalleryProcessAlbumListsCache()
+
     lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
         private set
 
@@ -132,6 +136,10 @@ class OneGalleryApplication : Application() {
                 GallerySessionCatalogSpill.hydrateProcessCache(
                     this@OneGalleryApplication,
                     galleryProcessCatalogCache,
+                )
+                GallerySessionAlbumListsSpill.hydrateProcessCache(
+                    this@OneGalleryApplication,
+                    galleryProcessAlbumListsCache,
                 )
             }
         }
@@ -217,9 +225,13 @@ class OneGalleryApplication : Application() {
 
     /** Grava catálogo da sessão ao ir para 2º plano (processo morto nos recentes ainda reabre rápido). */
     fun persistSessionCatalogForBackground() {
-        val bundle = galleryProcessCatalogCache.peek()?.toSnapshotBundle() ?: return
         applicationScope.launch(Dispatchers.IO) {
-            GallerySessionCatalogSpill.save(this@OneGalleryApplication, bundle)
+            galleryProcessCatalogCache.peek()?.toSnapshotBundle()?.let { bundle ->
+                GallerySessionCatalogSpill.save(this@OneGalleryApplication, bundle)
+            }
+            galleryProcessAlbumListsCache.peek()?.let { albums ->
+                GallerySessionAlbumListsSpill.save(this@OneGalleryApplication, albums)
+            }
         }
     }
 }

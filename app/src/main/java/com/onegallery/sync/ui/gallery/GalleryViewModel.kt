@@ -166,10 +166,66 @@ class GalleryViewModel(
         val catalogFingerprint: GalleryCatalogFingerprint? = null,
     )
 
-    private val deferredAlbumLists = MutableStateFlow(DeferredAlbumLists())
+    private val deferredAlbumLists = MutableStateFlow(restoreDeferredAlbumListsFromSession())
     private var albumListsBuildJob: Job? = null
 
     private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
+
+    private fun restoreDeferredAlbumListsFromSession(): DeferredAlbumLists {
+        val app = appContext.applicationContext as OneGalleryApplication
+        val albumEntry = app.galleryProcessAlbumListsCache.peek() ?: return DeferredAlbumLists()
+        val catalogEntry = app.galleryProcessCatalogCache.peek()
+        val bootstrap = galleryBootstrap.value
+        val fingerprint = bootstrap?.fingerprint ?: catalogEntry?.fingerprint
+        if (fingerprint == null || albumEntry.fingerprint != fingerprint) {
+            return DeferredAlbumLists()
+        }
+        if (catalogEntry != null &&
+            albumEntry.localRevision != catalogEntry.localRevision
+        ) {
+            return DeferredAlbumLists()
+        }
+        val catalogItems = bootstrap?.catalogItems ?: catalogEntry?.catalogItems.orEmpty()
+        val albumSort = galleryPreferences.albumListSort
+        val albums = sortMediaAlbums(albumEntry.albums, albumSort)
+        val placeAlbums = sortPlaceAlbums(albumEntry.placeAlbums, albumSort)
+        catalogSession.restoreAlbumCaches(
+            albums = albums,
+            placeAlbums = placeAlbums,
+            catalogItems = catalogItems,
+            userAlbumCount = bootstrap?.userAlbums?.size ?: catalogEntry?.userAlbums?.size ?: 0,
+            albumSort = albumSort,
+            deferCoverModels = catalogItems.size > 3_000,
+            coverRevisionStamp = albumEntry.coverRevisionStamp,
+        )
+        return DeferredAlbumLists(
+            albums = albums,
+            placeAlbums = placeAlbums,
+            catalogFingerprint = fingerprint,
+        )
+    }
+
+    private fun persistProcessAlbumLists(
+        albums: List<MediaAlbum>,
+        placeAlbums: List<MediaAlbum>,
+        fingerprint: GalleryCatalogFingerprint,
+        localRevision: Long,
+        albumSort: AlbumListSort,
+        coverRevisionStamp: Long,
+    ) {
+        if (albums.isEmpty() && placeAlbums.isEmpty()) return
+        val app = appContext.applicationContext as OneGalleryApplication
+        app.galleryProcessAlbumListsCache.save(
+            GalleryProcessAlbumListsCache.Entry(
+                albums = albums,
+                placeAlbums = placeAlbums,
+                fingerprint = fingerprint,
+                localRevision = localRevision,
+                albumListSort = albumSort,
+                coverRevisionStamp = coverRevisionStamp,
+            ),
+        )
+    }
 
     init {
         if (galleryBootstrap.value == null) {
@@ -439,7 +495,12 @@ class GalleryViewModel(
     ) {
         if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS) return
         val pending = deferredAlbumLists.value
-        if (pending.catalogFingerprint == fingerprint && pending.albums.isNotEmpty()) return
+        if (pending.catalogFingerprint == fingerprint &&
+            pending.albums.isNotEmpty() &&
+            albumSort == galleryPreferences.albumListSort
+        ) {
+            return
+        }
         albumListsBuildJob?.cancel()
         albumListsBuildJob = viewModelScope.launch(Dispatchers.Default) {
             val albums = buildAlbums(
@@ -463,6 +524,26 @@ class GalleryViewModel(
                 albums = albums,
                 placeAlbums = placeAlbums,
                 catalogFingerprint = fingerprint,
+            )
+            val revision = catalogSession.lastBundle?.localRevision ?: 0L
+            val coverRevisionStamp =
+                syncCoordinator.albumCoverRevisions.value.values.fold(0L) { acc, stamp -> acc xor stamp }
+            catalogSession.restoreAlbumCaches(
+                albums = albums,
+                placeAlbums = placeAlbums,
+                catalogItems = catalogItems,
+                userAlbumCount = userAlbums.size,
+                albumSort = albumSort,
+                deferCoverModels = deferCoverModels,
+                coverRevisionStamp = coverRevisionStamp,
+            )
+            persistProcessAlbumLists(
+                albums = albums,
+                placeAlbums = placeAlbums,
+                fingerprint = fingerprint,
+                localRevision = revision,
+                albumSort = albumSort,
+                coverRevisionStamp = coverRevisionStamp,
             )
         }
     }
@@ -511,10 +592,15 @@ class GalleryViewModel(
             snap.visibleItems,
             galleryPreferences.sortOrder,
         )
+        val restoredAlbums = deferredAlbumLists.value
         return GalleryUiState(
             isLoading = false,
             libraryItems = libraryItems,
             items = libraryItems,
+            albums = restoredAlbums.albums,
+            placeAlbums = restoredAlbums.placeAlbums,
+            userAlbums = snap.userAlbums,
+            albumListSort = galleryPreferences.albumListSort,
             indexHydrated = true,
             gridWindowLimit = GalleryGridPagination.initialLimit,
         )

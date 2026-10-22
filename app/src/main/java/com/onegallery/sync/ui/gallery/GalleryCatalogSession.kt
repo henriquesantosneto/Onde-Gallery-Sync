@@ -232,6 +232,31 @@ class GalleryCatalogSession {
         return cachedPlaceAlbums
     }
 
+    /** Repõe listas de álbuns após spill / RAM de sessão (evita remontar milhares de pastas). */
+    fun restoreAlbumCaches(
+        albums: List<MediaAlbum>,
+        placeAlbums: List<MediaAlbum>,
+        catalogItems: List<GalleryDisplayItem>,
+        userAlbumCount: Int,
+        albumSort: AlbumListSort,
+        deferCoverModels: Boolean,
+        coverRevisionStamp: Long,
+    ) {
+        val key = AlbumsCacheKey(
+            catalogSize = catalogItems.size,
+            userAlbumCount = userAlbumCount,
+            albumSort = albumSort,
+            deferCovers = deferCoverModels,
+            coverRevisionStamp = coverRevisionStamp,
+            catalogHead = catalogItems.firstOrNull()?.canonicalPath,
+            catalogTail = catalogItems.lastOrNull()?.canonicalPath,
+        )
+        cachedAlbums = albums
+        folderAlbumsCacheKey = key
+        cachedPlaceAlbums = placeAlbums
+        placeAlbumsCacheKey = key.copy(userAlbumCount = 0)
+    }
+
     private data class BrowseFilterCacheKey(
         val visibleSize: Int,
         val visibleHead: String?,
