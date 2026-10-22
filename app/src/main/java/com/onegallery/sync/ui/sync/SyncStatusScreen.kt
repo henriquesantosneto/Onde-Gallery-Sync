@@ -331,7 +331,7 @@ fun SyncStatusScreen(
 private val SyncQueueRowStride = 34.dp
 private val SyncQueueRowGap = 4.dp
 /** Linhas visíveis no quadro; o restante rola com a barrinha à direita. */
-private const val SyncQueueVisibleRowCount = 5
+private const val SyncQueueVisibleRowCount = 10
 private val SyncQueueEmptyHeight = 56.dp
 
 @Composable
