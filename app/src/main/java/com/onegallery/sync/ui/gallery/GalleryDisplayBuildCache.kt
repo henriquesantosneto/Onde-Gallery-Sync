@@ -16,17 +16,20 @@ class GalleryDisplayBuildCache(
 
     fun mapIndexed(metadata: List<SyncMetadataEntity>): List<GalleryDisplayItem> {
         if (metadata.isEmpty()) return emptyList()
-        return metadata.map { entity ->
+        val out = ArrayList<GalleryDisplayItem>(metadata.size)
+        for (entity in metadata) {
             val sig = entity.displaySignature()
             val cached = byPath[entity.canonicalPath]
             if (cached != null && cached.signature == sig) {
-                cached.item
+                out.add(cached.item)
             } else {
                 GalleryMapper.toDisplayItem(entity, mediaCacheRepository).also { item ->
                     byPath[entity.canonicalPath] = Entry(sig, item)
+                    out.add(item)
                 }
             }
         }
+        return out
     }
 
     fun clear() {

@@ -628,16 +628,18 @@ class SyncCoordinator(
 
     private val galleryMetadataSource = syncMetadataDao.observeAll()
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = run {
-        val roomFlow = merge(
-            galleryMetadataSource.take(1),
-            galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
-        )
         val bootstrap = (appContext.applicationContext as? com.onegallery.sync.OneGalleryApplication)
             ?.galleryMetadataBootstrap
         if (bootstrap == null) {
-            roomFlow
+            merge(
+                galleryMetadataSource.take(1),
+                galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
+            )
         } else {
-            merge(bootstrap.initialMetadataFlow(), roomFlow)
+            merge(
+                bootstrap.initialMetadataFlow(),
+                galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
+            )
         }
     }
     val syncIndexStats: Flow<SyncIndexStatsRow> = syncMetadataDao.observeIndexStats()

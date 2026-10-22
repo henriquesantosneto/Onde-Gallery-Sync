@@ -31,8 +31,17 @@ class GalleryMetadataBootstrap(
         }
     }
 
-    /** Uma emissão inicial — aguarda [getAll] até [INITIAL_WAIT_MS] para não pintar galeria vazia. */
+    /** Emite o índice em memória (espera curta); evita 2ª leitura completa do Room no cold start. */
     fun initialMetadataFlow(): Flow<List<SyncMetadataEntity>> = flow {
+        snapshot?.let { ready ->
+            mutex.withLock {
+                if (!initialEmitDone) {
+                    initialEmitDone = true
+                    emit(ready)
+                }
+            }
+            return@flow
+        }
         val cached = withContext(Dispatchers.IO) {
             var waitedMs = 0L
             while (snapshot == null && waitedMs < INITIAL_WAIT_MS) {
@@ -59,7 +68,7 @@ class GalleryMetadataBootstrap(
     }
 
     companion object {
-        private const val INITIAL_WAIT_MS = 8_000
-        private const val POLL_MS = 40L
+        private const val INITIAL_WAIT_MS = 1_200
+        private const val POLL_MS = 25L
     }
 }
