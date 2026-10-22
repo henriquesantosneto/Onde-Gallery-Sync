@@ -2,9 +2,12 @@ package com.onegallery.sync.ui.sync
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -197,14 +200,10 @@ fun SyncStatusScreen(
                             }
                         }
                         val activePaths = activeItems.map { it.canonicalPath }.toSet()
-                        val queueCap = if (coordinatorState.isRunning) 12 else 8
                         val queueWaiting = queueForUi.filter { it.canonicalPath !in activePaths }
-                        val queueInStatus = queueWaiting.take(queueCap)
-                        if (queueInStatus.isNotEmpty()) {
+                        if (queueWaiting.isNotEmpty()) {
                             Text(
-                                if (queueWaiting.size > queueInStatus.size) {
-                                    "Aguardando na fila (${queueInStatus.size} de ${queueWaiting.size})"
-                                } else if (queueWaiting.size > 1) {
+                                if (queueWaiting.size > 1) {
                                     "Aguardando na fila (${queueWaiting.size})"
                                 } else {
                                     "Aguardando na fila"
@@ -213,8 +212,14 @@ fun SyncStatusScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
                             )
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                queueInStatus.forEach { row ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                queueWaiting.forEach { row ->
                                     SyncQueueItemRow(
                                         row = row,
                                         activeItems = coordinatorState.activeItems,
@@ -240,21 +245,24 @@ fun SyncStatusScreen(
                                 )
                             }
                         }
-                        Button(
-                            onClick = { syncTasks.runBidirectionalSync(userInitiated = true) },
-                            enabled = !coordinatorState.isRunning,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp),
-                        ) { Text("Sincronizar agora") }
-                        if (coordinatorState.isRunning) {
-                            OutlinedButton(
-                                onClick = { syncCoordinator.requestCancelSync() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                            ) { Text("Parar sincronismo") }
-                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { syncTasks.runBidirectionalSync(userInitiated = true) },
+                        enabled = !coordinatorState.isRunning,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Sincronizar agora") }
+                    if (coordinatorState.isRunning) {
+                        OutlinedButton(
+                            onClick = { syncCoordinator.requestCancelSync() },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Parar sincronismo") }
                     }
                 }
             }
