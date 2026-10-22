@@ -1,5 +1,7 @@
 package com.onegallery.sync.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,9 +18,14 @@ import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
+import android.os.Build
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -63,7 +70,9 @@ import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.runningHeadlineFallback
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncTaskLauncher
+import com.onegallery.sync.system.AppStartupPermissions
 import com.onegallery.sync.system.BatteryOptimization
+import com.onegallery.sync.data.local.MediaAccessPermissions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +94,14 @@ fun SettingsScreen(
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
+    var mediaReadGranted by remember { mutableStateOf(AppStartupPermissions.hasMediaReadAccess(context)) }
+    var mediaLocationGranted by remember {
+        mutableStateOf(MediaAccessPermissions.hasMediaLocationAccess(context))
+    }
+    var notificationsGranted by remember { mutableStateOf(AppStartupPermissions.hasNotificationAccess(context)) }
+    var deviceLocationGranted by remember {
+        mutableStateOf(MediaAccessPermissions.hasDeviceLocationAccess(context))
+    }
     var allFilesAccess by remember { mutableStateOf(MediaStorageAccess.hasAllFilesAccess(context)) }
     var batteryOptimizationExempt by remember { mutableStateOf(BatteryOptimization.isExempt(context)) }
     var autoFreeLocalAfterSync by remember {
@@ -98,13 +115,27 @@ fun SettingsScreen(
     }
     var settingsInfo by remember { mutableStateOf<SettingsInfoDialog?>(null) }
     var showResetIndexConfirm by remember { mutableStateOf(false) }
-    var showAutoReleasePermissionDialog by remember { mutableStateOf(false) }
     var pendingAutoReleaseAfterSync by remember { mutableStateOf(false) }
     var pendingAutoReleaseWhenIdle by remember { mutableStateOf(false) }
+    val grantLabel = stringResource(R.string.settings_permission_grant)
+    val activeLabel = stringResource(R.string.settings_permission_active)
+    val runtimePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { _ ->
+        mediaReadGranted = AppStartupPermissions.hasMediaReadAccess(context)
+        mediaLocationGranted = MediaAccessPermissions.hasMediaLocationAccess(context)
+        notificationsGranted = AppStartupPermissions.hasNotificationAccess(context)
+        deviceLocationGranted = MediaAccessPermissions.hasDeviceLocationAccess(context)
+        app.localMediaRepository.invalidateLocalGallerySnapshot()
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                mediaReadGranted = AppStartupPermissions.hasMediaReadAccess(context)
+                mediaLocationGranted = MediaAccessPermissions.hasMediaLocationAccess(context)
+                notificationsGranted = AppStartupPermissions.hasNotificationAccess(context)
+                deviceLocationGranted = MediaAccessPermissions.hasDeviceLocationAccess(context)
                 allFilesAccess = MediaStorageAccess.hasAllFilesAccess(context)
                 batteryOptimizationExempt = BatteryOptimization.isExempt(context)
                 if (allFilesAccess) {
@@ -137,41 +168,6 @@ fun SettingsScreen(
     val cloudFolderLabel = when (syncPreferences.syncMode) {
         SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Pasta na nuvem não escolhida"
         else -> "Conecte a conta e escolha a pasta na nuvem"
-    }
-
-    if (showAutoReleasePermissionDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showAutoReleasePermissionDialog = false
-                pendingAutoReleaseAfterSync = false
-                pendingAutoReleaseWhenIdle = false
-            },
-            title = { Text("Permissão para liberar espaço") },
-            text = {
-                Text(
-                    "As opções “Após backup” e “Por inatividade” removem cópias na galeria do " +
-                        "aparelho. No Android 11+, ative “Acesso a todos os arquivos” uma vez " +
-                        "(Remover cópias no aparelho → Conceder).",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showAutoReleasePermissionDialog = false
-                    openAllFilesAccessFromSettings()
-                }) {
-                    Text("Conceder")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showAutoReleasePermissionDialog = false
-                    pendingAutoReleaseAfterSync = false
-                    pendingAutoReleaseWhenIdle = false
-                }) {
-                    Text("Cancelar")
-                }
-            },
-        )
     }
 
     settingsInfo?.let { info ->
@@ -298,6 +294,147 @@ fun SettingsScreen(
             item { HorizontalDivider(modifier = Modifier.padding(top = 8.dp)) }
 
             item {
+                SettingsSectionTitle(
+                    stringResource(R.string.settings_permissions_section),
+                    Icons.Outlined.Security,
+                )
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_media_read_title),
+                    summaryGranted = stringResource(R.string.settings_permission_media_read_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_media_read_summary_missing),
+                    granted = mediaReadGranted,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.PhotoLibrary,
+                    onGrant = {
+                        val missing = AppStartupPermissions.missingMediaRead(context)
+                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                    },
+                )
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_media_location_title),
+                    summaryGranted = stringResource(R.string.settings_permission_media_location_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_media_location_summary_missing),
+                    granted = mediaLocationGranted,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.LocationOn,
+                    onGrant = {
+                        val missing = AppStartupPermissions.missingMediaLocation(context)
+                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                    },
+                )
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                item {
+                    SettingsPermissionRow(
+                        title = stringResource(R.string.settings_permission_notifications_title),
+                        summaryGranted = stringResource(R.string.settings_permission_notifications_summary_granted),
+                        summaryMissing = stringResource(R.string.settings_permission_notifications_summary_missing),
+                        granted = notificationsGranted,
+                        grantLabel = grantLabel,
+                        activeLabel = activeLabel,
+                        leadingIcon = Icons.Outlined.Notifications,
+                        onGrant = {
+                            val missing = AppStartupPermissions.missingNotifications(context)
+                            if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                        },
+                    )
+                }
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_all_files_title),
+                    summaryGranted = stringResource(R.string.settings_permission_all_files_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_all_files_summary_missing),
+                    granted = allFilesAccess,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.Storage,
+                    onGrant = { openAllFilesAccessFromSettings() },
+                )
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_device_location_title),
+                    summaryGranted = stringResource(R.string.settings_permission_device_location_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_device_location_summary_missing),
+                    granted = deviceLocationGranted,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.LocationOn,
+                    onGrant = {
+                        val missing = AppStartupPermissions.missingDeviceLocation(context)
+                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                    },
+                )
+            }
+            item {
+                val batteryInfoTitle = stringResource(R.string.settings_battery_optimization_info_title)
+                val batteryInfoBody = stringResource(R.string.settings_battery_optimization_info_body) +
+                    if (BatteryOptimization.isSamsungDevice()) {
+                        "\n\n" + stringResource(R.string.settings_battery_optimization_samsung_hint)
+                    } else {
+                        ""
+                    }
+                ListItem(
+                    headlineContent = {
+                        SettingsHeadlineWithInfo(
+                            title = stringResource(R.string.settings_battery_optimization_title),
+                            onInfoClick = {
+                                settingsInfo = SettingsInfoDialog(
+                                    title = batteryInfoTitle,
+                                    body = batteryInfoBody,
+                                )
+                            },
+                        )
+                    },
+                    supportingContent = {
+                        Column {
+                            Text(
+                                text = if (batteryOptimizationExempt) {
+                                    stringResource(R.string.settings_battery_optimization_summary_exempt)
+                                } else {
+                                    stringResource(R.string.settings_battery_optimization_summary_restricted)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (!batteryOptimizationExempt && BatteryOptimization.isSamsungDevice()) {
+                                Text(
+                                    text = stringResource(R.string.settings_battery_optimization_samsung_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
+                        }
+                    },
+                    leadingContent = {
+                        Icon(Icons.Outlined.BatteryChargingFull, contentDescription = null)
+                    },
+                    trailingContent = {
+                        if (batteryOptimizationExempt) {
+                            Text(
+                                activeLabel,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                        } else {
+                            Button(onClick = { BatteryOptimization.launchExemptionRequest(context) }) {
+                                Text(grantLabel)
+                            }
+                        }
+                    },
+                )
+            }
+
+            item { HorizontalDivider(modifier = Modifier.padding(top = 8.dp)) }
+
+            item {
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
             }
             item {
@@ -350,38 +487,6 @@ fun SettingsScreen(
             }
             item {
                 ListItem(
-                    headlineContent = { Text("Remover cópias no aparelho") },
-                    supportingContent = {
-                        Text(
-                            if (allFilesAccess) {
-                                "Acesso ativo — liberar espaço e excluir não dependem de diálogo do Android."
-                            } else {
-                                "Necessário para liberar espaço (manual ou automático) e excluir fotos " +
-                                    "no aparelho no Android 11+. Toque Conceder."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    },
-                    leadingContent = {
-                        Icon(Icons.Outlined.Storage, contentDescription = null)
-                    },
-                    trailingContent = {
-                        if (allFilesAccess) {
-                            Text(
-                                "Ativo",
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(end = 8.dp),
-                            )
-                        } else {
-                            Button(onClick = { openAllFilesAccessFromSettings() }) {
-                                Text("Conceder")
-                            }
-                        }
-                    },
-                )
-            }
-            item {
-                ListItem(
                     headlineContent = {
                         SettingsHeadlineWithInfo(
                             title = "Espaço local",
@@ -390,8 +495,8 @@ fun SettingsScreen(
                                     title = "Espaço local",
                                     body = "Você pode usar as duas opções abaixo juntas ou só uma. " +
                                         "Miniatura no app e arquivo no OneDrive sempre permanecem. " +
-                                        "Liberar espaço manualmente na foto usa a mesma permissão " +
-                                        "“Remover cópias no aparelho” acima.",
+                                        "Liberar espaço no aparelho exige “Acesso a todos os arquivos” " +
+                                        "na seção Permissões.",
                                 )
                             },
                         )
@@ -421,7 +526,7 @@ fun SettingsScreen(
                             syncPreferences.autoFreeLocalSpaceWhenSynced = true
                         } else {
                             pendingAutoReleaseAfterSync = true
-                            showAutoReleasePermissionDialog = true
+                            openAllFilesAccessFromSettings()
                         }
                     },
                 )
@@ -449,7 +554,7 @@ fun SettingsScreen(
                             syncPreferences.autoFreeLocalSpaceWhenIdle = true
                         } else {
                             pendingAutoReleaseWhenIdle = true
-                            showAutoReleasePermissionDialog = true
+                            openAllFilesAccessFromSettings()
                         }
                     },
                 )
@@ -523,64 +628,6 @@ fun SettingsScreen(
                         backgroundAlways = enabled
                         syncPreferences.backgroundSyncAlwaysEnabled = enabled
                         app.rescheduleBackgroundSync()
-                    },
-                )
-            }
-            item {
-                val batteryInfoTitle = stringResource(R.string.settings_battery_optimization_info_title)
-                val batteryInfoBody = stringResource(R.string.settings_battery_optimization_info_body) +
-                    if (BatteryOptimization.isSamsungDevice()) {
-                        "\n\n" + stringResource(R.string.settings_battery_optimization_samsung_hint)
-                    } else {
-                        ""
-                    }
-                ListItem(
-                    headlineContent = {
-                        SettingsHeadlineWithInfo(
-                            title = stringResource(R.string.settings_battery_optimization_title),
-                            onInfoClick = {
-                                settingsInfo = SettingsInfoDialog(
-                                    title = batteryInfoTitle,
-                                    body = batteryInfoBody,
-                                )
-                            },
-                        )
-                    },
-                    supportingContent = {
-                        Column {
-                            Text(
-                                text = if (batteryOptimizationExempt) {
-                                    stringResource(R.string.settings_battery_optimization_summary_exempt)
-                                } else {
-                                    stringResource(R.string.settings_battery_optimization_summary_restricted)
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            if (!batteryOptimizationExempt && BatteryOptimization.isSamsungDevice()) {
-                                Text(
-                                    text = stringResource(R.string.settings_battery_optimization_samsung_hint),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 6.dp),
-                                )
-                            }
-                        }
-                    },
-                    leadingContent = {
-                        Icon(Icons.Outlined.BatteryChargingFull, contentDescription = null)
-                    },
-                    trailingContent = {
-                        if (batteryOptimizationExempt) {
-                            Text(
-                                stringResource(R.string.settings_battery_optimization_active),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(end = 8.dp),
-                            )
-                        } else {
-                            Button(onClick = { BatteryOptimization.launchExemptionRequest(context) }) {
-                                Text(stringResource(R.string.settings_battery_optimization_grant))
-                            }
-                        }
                     },
                 )
             }
@@ -787,6 +834,44 @@ private fun SettingsSectionTitle(title: String, icon: androidx.compose.ui.graphi
         },
         leadingContent = {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        },
+    )
+}
+
+@Composable
+private fun SettingsPermissionRow(
+    title: String,
+    summaryGranted: String,
+    summaryMissing: String,
+    granted: Boolean,
+    grantLabel: String,
+    activeLabel: String,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    onGrant: () -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = {
+            Text(
+                if (granted) summaryGranted else summaryMissing,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        },
+        leadingContent = {
+            Icon(leadingIcon, contentDescription = null)
+        },
+        trailingContent = {
+            if (granted) {
+                Text(
+                    activeLabel,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            } else {
+                Button(onClick = onGrant) {
+                    Text(grantLabel)
+                }
+            }
         },
     )
 }

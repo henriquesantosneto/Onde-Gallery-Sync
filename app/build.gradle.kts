@@ -60,9 +60,6 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-/** App registration Azure (OneGallery) — override via msal.properties ou MSAL_CLIENT_ID no build. */
-private const val DEFAULT_MSAL_CLIENT_ID = "9aeb2dd3-6edb-4bdf-ab02-6b9399112aa3"
-
 fun readMsalClientId(): String {
     System.getenv("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     val props = Properties()
@@ -70,7 +67,8 @@ fun readMsalClientId(): String {
     props.getProperty("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
     props.getProperty("MSAL_CLIENT_ID")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-    return DEFAULT_MSAL_CLIENT_ID
+    // App registration Azure (OneGallery) — override via msal.properties ou MSAL_CLIENT_ID no build.
+    return "9aeb2dd3-6edb-4bdf-ab02-6b9399112aa3"
 }
 
 val embeddedMsalClientId: String = readMsalClientId()
@@ -83,8 +81,8 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 340
-        versionName = "0.8.288"
+        versionCode = 341
+        versionName = "0.8.289"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

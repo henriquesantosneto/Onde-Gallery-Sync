@@ -1,7 +1,5 @@
 package com.onegallery.sync.ui
 
-import android.Manifest
-import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -65,6 +63,7 @@ import com.onegallery.sync.ui.gallery.MediaDetailScreen
 import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
 import com.onegallery.sync.ui.sync.SyncStatusScreen
+import com.onegallery.sync.system.AppStartupPermissions
 import com.onegallery.sync.ui.welcome.WelcomeScreen
 import com.onegallery.sync.ui.navigation.decodeBrowseNavKey
 import com.onegallery.sync.ui.navigation.encodeBrowseNavKey
@@ -205,18 +204,10 @@ fun OneGalleryApp(
     }
 
     LaunchedEffect(Unit) {
-        val permissions = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.READ_MEDIA_IMAGES)
-                add(Manifest.permission.READ_MEDIA_VIDEO)
-            } else {
-                add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                add(Manifest.permission.ACCESS_MEDIA_LOCATION)
-            }
+        val missing = AppStartupPermissions.missingAtStartup(app)
+        if (missing.isNotEmpty()) {
+            permissionLauncher.launch(missing)
         }
-        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     LaunchedEffect(authState.isSignedIn, cloudSetupStep, setupDone) {
