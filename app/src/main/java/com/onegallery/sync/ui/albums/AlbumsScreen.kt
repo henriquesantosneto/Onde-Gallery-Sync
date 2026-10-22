@@ -237,8 +237,11 @@ fun AlbumsScreen(
                 AlbumsBrowseTab.PLACES -> buildPlaceGridEntries(state.placeAlbums)
             }
         }
+        val awaitingLocalAlbumIndex = state.indexHydrated &&
+            gridEntries.isEmpty() &&
+            state.libraryItems.isNotEmpty()
         when {
-            gridEntries.isEmpty() && !state.indexHydrated -> {
+            gridEntries.isEmpty() && (!state.indexHydrated || awaitingLocalAlbumIndex) -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

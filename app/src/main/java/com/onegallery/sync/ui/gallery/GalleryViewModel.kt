@@ -258,6 +258,20 @@ class GalleryViewModel(
                     scheduleAlbumListsFromMetadata(metadata, userAlbums, sort)
                 }
         }
+        galleryBootstrap.value?.takeIf { it.catalogItems.isNotEmpty() }?.let { snap ->
+            val fingerprint = snap.fingerprint
+                ?: GalleryCatalogFingerprint.fromDisplayPaths(snap.catalogItems.map { it.canonicalPath })
+            if (deferredAlbumLists.value.albums.isEmpty()) {
+                scheduleAlbumListsFromLocalCatalog(
+                    catalogItems = snap.catalogItems,
+                    fingerprint = fingerprint,
+                    userAlbums = snap.userAlbums,
+                    albumSort = galleryPreferences.albumListSort,
+                    localRevision = catalogSession.lastBundle?.localRevision
+                        ?: localMediaRepository.localGalleryRevision.value,
+                )
+            }
+        }
     }
 
     /** RAM do processo ou spill da última sessão — exibe a grade antes do rebuild completo. */
@@ -464,6 +478,43 @@ class GalleryViewModel(
                     gridWindowLimit.value = GalleryGridPagination.initialLimit
                 }
         }
+        viewModelScope.launch {
+            combine(
+                effectiveLibrarySnapshot,
+                albumListSort,
+                syncCoordinator.galleryMetadata,
+            ) { snapshot, sort, metadata ->
+                Triple(snapshot, sort, metadata)
+            }
+                .distinctUntilChanged { previous, next ->
+                    val prevFp = previous.first.fingerprint
+                    val nextFp = next.first.fingerprint
+                    prevFp == nextFp &&
+                        previous.first.catalogItems.size == next.first.catalogItems.size &&
+                        previous.second == next.second &&
+                        previous.third.size == next.third.size
+                }
+                .collect { (snapshot, sort, metadata) ->
+                    if (metadata.isNotEmpty()) return@collect
+                    val catalogItems = snapshot.catalogItems
+                    if (catalogItems.isEmpty()) return@collect
+                    val fingerprint = snapshot.fingerprint ?: return@collect
+                    val pending = deferredAlbumLists.value
+                    if (pending.albums.isNotEmpty() &&
+                        pending.catalogFingerprint?.matchesIndex(fingerprint) == true
+                    ) {
+                        return@collect
+                    }
+                    scheduleAlbumListsFromLocalCatalog(
+                        catalogItems = catalogItems,
+                        fingerprint = fingerprint,
+                        userAlbums = snapshot.userAlbums,
+                        albumSort = sort,
+                        localRevision = catalogSession.lastBundle?.localRevision
+                            ?: localMediaRepository.localGalleryRevision.value,
+                    )
+                }
+        }
     }
 
     private fun GalleryCatalogSession.SnapshotBundle.toLibrarySnapshot(): LibrarySnapshot =
@@ -584,60 +635,40 @@ class GalleryViewModel(
         return true
     }
 
-    /** Álbuns vêm do índice Room em paralelo ao catálogo da grade — spill/RAM só aceleram reabertura. */
-    private fun scheduleAlbumListsFromMetadata(
-        metadata: List<SyncMetadataEntity>,
+    /** Monta pastas/locais a partir do catálogo local (MediaStore/bootstrap) — sem Room, mesmo caminho rápido da grade Fotos. */
+    private fun scheduleAlbumListsFromLocalCatalog(
+        catalogItems: List<GalleryDisplayItem>,
+        fingerprint: GalleryCatalogFingerprint,
         userAlbums: List<UserAlbumEntity>,
         albumSort: AlbumListSort,
+        localRevision: Long,
     ) {
-        val app = appContext.applicationContext as OneGalleryApplication
-        if (metadata.isEmpty()) {
-            val spillFingerprint = GalleryAlbumLibrarySession.resolveWhenMetadataEmpty(
-                app.galleryProcessAlbumListsCache,
-                app.galleryProcessCatalogCache,
-            )
-            if (spillFingerprint != null) {
-                applySessionAlbumListsIfCurrent(
-                    fingerprint = spillFingerprint,
-                    metadataRowCount = spillFingerprint.rowCount,
-                    userAlbums = userAlbums,
-                    albumSort = albumSort,
-                )
-                return
-            }
-            viewModelScope.launch(Dispatchers.Default) {
-                val localBundle = GalleryLocalBootstrap.buildSnapshotBundle(
-                    localMediaRepository = localMediaRepository,
-                    mediaCacheRepository = mediaCacheRepository,
-                    userAlbums = userAlbums,
-                    localRevision = localMediaRepository.localGalleryRevision.value,
-                ) ?: return@launch
-                val fingerprint = localBundle.fingerprint
-                val resolveCovers = localBundle.catalogItems.size <= 3_000
-                val albums = buildAlbums(
-                    localBundle.catalogItems,
-                    userAlbums,
-                    albumSort,
-                    albumCoverLocalIndex,
-                    mediaCacheRepository,
-                    resolveCoverModels = resolveCovers,
-                )
-                val placeAlbums = sortPlaceAlbums(
-                    buildPlaceAlbums(
-                        localBundle.catalogItems,
-                        albumCoverLocalIndex,
-                        mediaCacheRepository,
-                        resolveCoverModels = resolveCovers,
-                    ),
-                    albumSort,
-                )
-                if (albums.isEmpty() && placeAlbums.isEmpty()) return@launch
+        if (catalogItems.isEmpty()) return
+        val pending = deferredAlbumLists.value
+        if (pending.albums.isNotEmpty() &&
+            pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
+            pending.albumSort == albumSort
+        ) {
+            return
+        }
+        albumListsBuildJob?.cancel()
+        albumListsBuildJob = viewModelScope.launch(Dispatchers.Default) {
+            val deferCovers = catalogItems.size > 3_000
+            val app = appContext.applicationContext as OneGalleryApplication
+            val skipHeavyCoverPass = deferCovers &&
+                app.appForegroundState.isInForeground() &&
+                !syncCoordinator.state.value.isRunning
+            fun publish(
+                albums: List<MediaAlbum>,
+                placeAlbums: List<MediaAlbum>,
+            ) {
+                if (albums.isEmpty() && placeAlbums.isEmpty()) return
                 applySessionAlbumListsFromEntry(
                     GalleryProcessAlbumListsCache.Entry(
                         albums = albums,
                         placeAlbums = placeAlbums,
                         fingerprint = fingerprint,
-                        localRevision = localBundle.localRevision,
+                        localRevision = localRevision,
                         albumListSort = albumSort,
                         coverRevisionStamp = 0L,
                     ),
@@ -650,9 +681,120 @@ class GalleryViewModel(
                     albums = albums,
                     placeAlbums = placeAlbums,
                     fingerprint = fingerprint,
-                    localRevision = localBundle.localRevision,
+                    localRevision = localRevision,
                     albumSort = albumSort,
                     coverRevisionStamp = 0L,
+                )
+            }
+            val skeletonAlbums = buildAlbums(
+                catalogItems,
+                userAlbums,
+                albumSort,
+                albumCoverLocalIndex,
+                mediaCacheRepository,
+                resolveCoverModels = false,
+            )
+            val skeletonPlaces = sortPlaceAlbums(
+                buildPlaceAlbums(
+                    catalogItems,
+                    albumCoverLocalIndex,
+                    mediaCacheRepository,
+                    resolveCoverModels = false,
+                ),
+                albumSort,
+            )
+            if (deferCovers) {
+                publish(skeletonAlbums, skeletonPlaces)
+            }
+            if (skipHeavyCoverPass) return@launch
+            val resolveCovers = !deferCovers
+            publish(
+                buildAlbums(
+                    catalogItems,
+                    userAlbums,
+                    albumSort,
+                    albumCoverLocalIndex,
+                    mediaCacheRepository,
+                    resolveCoverModels = resolveCovers,
+                ),
+                sortPlaceAlbums(
+                    buildPlaceAlbums(
+                        catalogItems,
+                        albumCoverLocalIndex,
+                        mediaCacheRepository,
+                        resolveCoverModels = resolveCovers,
+                    ),
+                    albumSort,
+                ),
+            )
+        }
+    }
+
+    /** Álbuns vêm do índice Room em paralelo ao catálogo da grade — spill/RAM só aceleram reabertura. */
+    private fun scheduleAlbumListsFromMetadata(
+        metadata: List<SyncMetadataEntity>,
+        userAlbums: List<UserAlbumEntity>,
+        albumSort: AlbumListSort,
+    ) {
+        val app = appContext.applicationContext as OneGalleryApplication
+        if (metadata.isEmpty()) {
+            val spillFingerprint = GalleryAlbumLibrarySession.resolveWhenMetadataEmpty(
+                app.galleryProcessAlbumListsCache,
+                app.galleryProcessCatalogCache,
+            )
+            if (spillFingerprint != null &&
+                applySessionAlbumListsIfCurrent(
+                    fingerprint = spillFingerprint,
+                    metadataRowCount = spillFingerprint.rowCount,
+                    userAlbums = userAlbums,
+                    albumSort = albumSort,
+                )
+            ) {
+                return
+            }
+            val bootstrapSnap = galleryBootstrap.value
+            if (bootstrapSnap != null && bootstrapSnap.catalogItems.isNotEmpty()) {
+                val fingerprint = bootstrapSnap.fingerprint
+                    ?: GalleryCatalogFingerprint.fromDisplayPaths(
+                        bootstrapSnap.catalogItems.map { it.canonicalPath },
+                    )
+                scheduleAlbumListsFromLocalCatalog(
+                    catalogItems = bootstrapSnap.catalogItems,
+                    fingerprint = fingerprint,
+                    userAlbums = userAlbums,
+                    albumSort = albumSort,
+                    localRevision = catalogSession.lastBundle?.localRevision
+                        ?: localMediaRepository.localGalleryRevision.value,
+                )
+                app.syncCoordinator.warmLocalIndexIfEmpty()
+                return
+            }
+            val catalogEntry = app.galleryProcessCatalogCache.peek()?.takeIf { it.isRestorable() }
+            if (catalogEntry != null && catalogEntry.catalogItems.isNotEmpty()) {
+                scheduleAlbumListsFromLocalCatalog(
+                    catalogItems = catalogEntry.catalogItems,
+                    fingerprint = catalogEntry.fingerprint,
+                    userAlbums = userAlbums,
+                    albumSort = albumSort,
+                    localRevision = catalogEntry.localRevision,
+                )
+                app.syncCoordinator.warmLocalIndexIfEmpty()
+                return
+            }
+            albumListsBuildJob?.cancel()
+            albumListsBuildJob = viewModelScope.launch(Dispatchers.IO) {
+                val localBundle = GalleryLocalBootstrap.buildSnapshotBundle(
+                    localMediaRepository = localMediaRepository,
+                    mediaCacheRepository = mediaCacheRepository,
+                    userAlbums = userAlbums,
+                    localRevision = localMediaRepository.localGalleryRevision.value,
+                ) ?: return@launch
+                scheduleAlbumListsFromLocalCatalog(
+                    catalogItems = localBundle.catalogItems,
+                    fingerprint = localBundle.fingerprint,
+                    userAlbums = userAlbums,
+                    albumSort = albumSort,
+                    localRevision = localBundle.localRevision,
                 )
             }
             app.syncCoordinator.warmLocalIndexIfEmpty()
