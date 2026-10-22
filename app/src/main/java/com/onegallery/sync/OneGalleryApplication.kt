@@ -136,7 +136,7 @@ class OneGalleryApplication : Application() {
         galleryPreferences = GalleryPreferences(this)
         mediaCacheRepository = MediaCacheRepository(this)
         galleryCatalogDiskCache = GalleryCatalogDiskCache(this, applicationScope)
-        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+        applicationScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             mediaCacheRepository.warmThumbnailExistsCache()
             warmGalleryCatalog = galleryCatalogDiskCache.loadWarmSnapshot()
             runCatching { localMediaRepository.loadLocalGallerySnapshot() }

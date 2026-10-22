@@ -37,6 +37,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.coroutineContext
@@ -172,6 +174,9 @@ class GalleryViewModel(
     private val deferredAlbumLists = MutableStateFlow(DeferredAlbumLists())
     private var albumListsBuildJob: Job? = null
 
+    private val deferredFullCatalog = MutableStateFlow<LibrarySnapshot?>(null)
+    private var deferredFullCatalogJob: Job? = null
+
     private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
 
     init {
@@ -190,7 +195,9 @@ class GalleryViewModel(
 
     private fun createInitialWarmBootstrapSnapshot(): LibrarySnapshot? {
         val app = appContext.applicationContext as OneGalleryApplication
-        val warm = app.warmGalleryCatalog ?: return null
+        val warm = app.warmGalleryCatalog ?: runBlocking(Dispatchers.IO) {
+            galleryCatalogDiskCache.loadWarmSnapshot()?.also { app.warmGalleryCatalog = it }
+        } ?: return null
         if (warm.catalogItems.isEmpty()) return null
         publishWarmSnapshot(warm, userAlbums = emptyList(), activeSort = galleryPreferences.sortOrder)
         return LibrarySnapshot(
@@ -274,14 +281,37 @@ class GalleryViewModel(
                 val localRevision = inputs.localRevision
                 val fingerprint = GalleryCatalogFingerprint.from(metadata)
                 val cached = catalogSession.lastBundle
-                if (cached != null &&
+                val cacheMatches = cached != null &&
                     cached.fingerprint == fingerprint &&
                     cached.localRevision == localRevision &&
                     cached.userAlbums == userAlbums
-                ) {
-                    emit(cached.toLibrarySnapshot())
+                val matchedBundle = if (cacheMatches) cached else null
+                val catalogComplete = matchedBundle != null &&
+                    matchedBundle.catalogItems.size >= metadata.size
+
+                if (catalogComplete) {
+                    deferredFullCatalog.value = null
+                    emit(matchedBundle!!.toLibrarySnapshot())
                     return@flow
                 }
+
+                if (matchedBundle != null && matchedBundle.catalogItems.isNotEmpty()) {
+                    emit(matchedBundle.toLibrarySnapshot())
+                    if (metadata.size >= DEFER_FULL_CATALOG_MIN_ROWS &&
+                        matchedBundle.catalogItems.size < metadata.size
+                    ) {
+                        scheduleDeferredFullCatalogBuild(
+                            metadata = metadata,
+                            userAlbums = userAlbums,
+                            localRevision = localRevision,
+                            fingerprint = fingerprint,
+                        )
+                        return@flow
+                    }
+                }
+
+                deferredFullCatalogJob?.cancel()
+                deferredFullCatalog.value = null
                 val snapshot = runCatching {
                     buildLibrarySnapshot(metadata, userAlbums, localRevision, fingerprint)
                 }.getOrElse { error ->
@@ -333,12 +363,42 @@ class GalleryViewModel(
     private val effectiveLibrarySnapshot = combine(
         galleryBootstrap,
         librarySnapshotLive,
-    ) { bootstrap, live ->
+        deferredFullCatalog,
+    ) { bootstrap, live, deferredFull ->
         when {
+            deferredFull?.catalogItems?.isNotEmpty() == true -> deferredFull
             live.catalogItems.isNotEmpty() -> live
             live.visibleItems.isNotEmpty() -> live
             bootstrap != null && bootstrap.catalogItems.isNotEmpty() -> bootstrap
             else -> live
+        }
+    }
+
+    private fun scheduleDeferredFullCatalogBuild(
+        metadata: List<SyncMetadataEntity>,
+        userAlbums: List<UserAlbumEntity>,
+        localRevision: Long,
+        fingerprint: GalleryCatalogFingerprint,
+    ) {
+        deferredFullCatalogJob?.cancel()
+        deferredFullCatalogJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(DEFER_FULL_CATALOG_BUILD_MS)
+            val bundle = catalogSession.lastBundle ?: return@launch
+            if (bundle.fingerprint != fingerprint ||
+                bundle.localRevision != localRevision ||
+                bundle.userAlbums != userAlbums
+            ) {
+                return@launch
+            }
+            if (bundle.catalogItems.size >= metadata.size) {
+                deferredFullCatalog.value = bundle.toLibrarySnapshot()
+                return@launch
+            }
+            val snapshot = runCatching {
+                buildLibrarySnapshot(metadata, userAlbums, localRevision, fingerprint)
+            }.getOrElse { return@launch }
+            deferredFullCatalog.value = snapshot
+            galleryBootstrap.value = null
         }
     }
 
@@ -390,12 +450,16 @@ class GalleryViewModel(
         fingerprint: GalleryCatalogFingerprint,
     ): LibrarySnapshot {
         val indexed = dedupeGalleryDisplayItems(displayBuildCache.mapIndexed(metadata))
-        val overlay = localOverlayCache.overlayItems(
-            indexed = indexed,
-            localRevision = localRevision,
-            localMediaRepository = localMediaRepository,
-            mediaCacheRepository = mediaCacheRepository,
-        )
+        val overlay = if (metadata.size >= 1_500) {
+            emptyList()
+        } else {
+            localOverlayCache.overlayItems(
+                indexed = indexed,
+                localRevision = localRevision,
+                localMediaRepository = localMediaRepository,
+                mediaCacheRepository = mediaCacheRepository,
+            )
+        }
         val catalog = if (overlay.isEmpty()) {
             indexed
         } else {
@@ -508,7 +572,7 @@ class GalleryViewModel(
         .stateIn(
             viewModelScope,
             SharingStarted.Eagerly,
-            GalleryUiState(),
+            initialGalleryUiState(),
         )
 
     val state: StateFlow<GalleryUiState> = combine(
@@ -519,8 +583,23 @@ class GalleryViewModel(
     }.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        GalleryUiState(),
+        initialGalleryUiState(),
     )
+
+    private fun initialGalleryUiState(): GalleryUiState {
+        val snap = galleryBootstrap.value ?: return GalleryUiState(isLoading = true)
+        val libraryItems = catalogSession.sortedLibraryItems(
+            snap.visibleItems,
+            galleryPreferences.sortOrder,
+        )
+        return GalleryUiState(
+            isLoading = false,
+            libraryItems = libraryItems,
+            items = libraryItems,
+            indexHydrated = true,
+            gridWindowLimit = GalleryGridPagination.initialLimit,
+        )
+    }
 
     private fun buildGalleryUiState(
         inputs: GalleryStateInputs,
@@ -557,7 +636,9 @@ class GalleryViewModel(
                 tailPath = catalogItems.lastOrNull()?.canonicalPath,
                 maxModifiedSeconds = 0L,
             )
-        val coverKeysToRefresh = if (catalogItems.size <= 5_000) {
+        val partialCatalog = fingerprint != null &&
+            fingerprint.rowCount > catalogItems.size
+        val coverKeysToRefresh = if (!partialCatalog && catalogItems.size <= 5_000) {
             detectAlbumCoverSignatureChanges(catalogItems)
         } else {
             emptySet()
@@ -821,6 +902,9 @@ class GalleryViewModel(
         const val GRID_THUMB_PREFETCH_PARALLEL = 8
         const val GRID_THUMB_PREFETCH_BATCH = 72
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
+        /** Mantém catálogo warm na tela antes de remontar o índice completo (~21k). */
+        const val DEFER_FULL_CATALOG_BUILD_MS = 8_000L
+        const val DEFER_FULL_CATALOG_MIN_ROWS = 4_000
     }
 
     private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {
