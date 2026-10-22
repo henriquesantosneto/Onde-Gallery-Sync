@@ -2,6 +2,7 @@ package com.onegallery.sync.data.local
 
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.ui.gallery.GalleryDisplayItem
+import com.onegallery.sync.ui.gallery.galleryDedupeKey
 
 /** Pontuação do endereço resolvido — preferir bairro/cidade completos ao agrupar duplicatas. */
 internal fun PlaceComponents.locationSpecificityScore(): Int {
@@ -91,25 +92,52 @@ private fun SyncMetadataEntity.sortTimestamp(): Long =
         ?: localModifiedAt?.takeIf { it > 0L }
         ?: 0L
 
-/** Uma foto por captura geográfica antes de montar álbuns de local. */
-internal fun collapseItemsForPlaceAlbums(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+internal fun SyncMetadataEntity.placeMediaDedupeKey(): String {
+    localMediaId?.let { return "localId:$it" }
+    oneDriveItemId?.let { return "cloudId:$it" }
+    return "path:$canonicalPath"
+}
+
+private fun <T> collapsePlaceCandidatesByKey(
+    items: List<T>,
+    keyFor: (T) -> String,
+    pickBetter: (T, T) -> T,
+): List<T> {
     if (items.size <= 1) return items
-    val best = LinkedHashMap<String, GalleryDisplayItem>(items.size)
+    val best = LinkedHashMap<String, T>(items.size)
     for (item in items) {
-        val key = item.placeGeoDedupeKey() ?: "path:${item.canonicalPath}"
+        val key = keyFor(item)
         val existing = best[key]
-        best[key] = if (existing == null) item else pickBetterForPlaceGrouping(item, existing)
+        best[key] = if (existing == null) item else pickBetter(item, existing)
     }
     return best.values.toList()
 }
 
+/**
+ * Uma foto por mídia e por captura geográfica antes de montar álbuns de local.
+ * Sem colapso por [galleryDedupeKey], a mesma câmera pode gerar duas linhas (GPS parcial vs
+ * endereço completo) e aparecer em álbum de cidade e de bairro ao mesmo tempo.
+ */
+internal fun collapseItemsForPlaceAlbums(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+    if (items.size <= 1) return items
+    val afterMedia = collapsePlaceCandidatesByKey(items, { it.galleryDedupeKey() }, ::pickBetterForPlaceGrouping)
+    return collapsePlaceCandidatesByKey(
+        afterMedia,
+        { it.placeGeoDedupeKey() ?: "path:${it.canonicalPath}" },
+        ::pickBetterForPlaceGrouping,
+    )
+}
+
 internal fun collapseMetadataForPlaceAlbums(metadata: List<SyncMetadataEntity>): List<SyncMetadataEntity> {
     if (metadata.size <= 1) return metadata
-    val best = LinkedHashMap<String, SyncMetadataEntity>(metadata.size)
-    for (entity in metadata) {
-        val key = entity.placeGeoDedupeKey() ?: "path:${entity.canonicalPath}"
-        val existing = best[key]
-        best[key] = if (existing == null) entity else pickBetterForPlaceGroupingEntity(entity, existing)
-    }
-    return best.values.toList()
+    val afterMedia = collapsePlaceCandidatesByKey(
+        metadata,
+        { it.placeMediaDedupeKey() },
+        ::pickBetterForPlaceGroupingEntity,
+    )
+    return collapsePlaceCandidatesByKey(
+        afterMedia,
+        { it.placeGeoDedupeKey() ?: "path:${it.canonicalPath}" },
+        ::pickBetterForPlaceGroupingEntity,
+    )
 }
