@@ -24,6 +24,8 @@ data class GalleryDisplayItem(
     val longitude: Double? = null,
     val videoDurationMs: Long? = null,
     val localReleasedForSpace: Boolean = false,
+    /** Calculado ao mapear o índice — evita 21k checagens de visibilidade na montagem. */
+    val showInBrowseGrid: Boolean = true,
 ) {
     val thumbnailModel: Any?
         get() = when (cloudState) {

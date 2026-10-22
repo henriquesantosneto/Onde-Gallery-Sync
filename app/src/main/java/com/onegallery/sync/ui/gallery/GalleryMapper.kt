@@ -51,10 +51,18 @@ object GalleryMapper {
         val localUri = entity.localContentUri?.let { Uri.parse(it) }
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
-        val placeholderThumb = mediaCacheRepository.displayableThumbnailIfCached(
+        val thumbCachedFast = mediaCacheRepository.isThumbnailCachedFast(
             entity.canonicalPath,
             entity.oneDriveItemId,
         )
+        val placeholderThumb = if (thumbCachedFast) {
+            mediaCacheRepository.displayableThumbnailIfCached(
+                entity.canonicalPath,
+                entity.oneDriveItemId,
+            )
+        } else {
+            null
+        }
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }
             ?: entity.localModifiedAt?.takeIf { it > 0L }
@@ -77,7 +85,33 @@ object GalleryMapper {
             longitude = entity.longitude,
             videoDurationMs = entity.videoDurationMs,
             localReleasedForSpace = entity.localReleasedForSpace,
+            showInBrowseGrid = computeShowInBrowseGrid(
+                localUri = localUri,
+                cachedOriginal = cached,
+                localMediaId = entity.localMediaId,
+                localReleasedForSpace = entity.localReleasedForSpace,
+                oneDriveItemId = entity.oneDriveItemId,
+                cloudState = entity.cloudState,
+                hasThumb = placeholderThumb != null || thumbCachedFast,
+            ),
         )
+    }
+
+    private fun computeShowInBrowseGrid(
+        localUri: Uri?,
+        cachedOriginal: File?,
+        localMediaId: Long?,
+        localReleasedForSpace: Boolean,
+        oneDriveItemId: String?,
+        cloudState: CloudSyncState,
+        hasThumb: Boolean,
+    ): Boolean {
+        if (localUri != null) return true
+        if (cachedOriginal != null) return true
+        if (localMediaId != null && !localReleasedForSpace) return true
+        if (!oneDriveItemId.isNullOrBlank()) return true
+        if (hasThumb) return true
+        return cloudState != CloudSyncState.LOCAL_ONLY
     }
 
     private fun resolveDisplayAlbumName(entity: SyncMetadataEntity): String {
@@ -118,6 +152,7 @@ object GalleryMapper {
             longitude = item.longitude,
             videoDurationMs = item.durationMs,
             localReleasedForSpace = false,
+            showInBrowseGrid = true,
         )
     }
 }

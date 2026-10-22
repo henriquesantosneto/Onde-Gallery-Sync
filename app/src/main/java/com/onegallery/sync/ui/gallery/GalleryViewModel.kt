@@ -174,10 +174,15 @@ class GalleryViewModel(
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val warm = loadWarmLibrarySnapshot(emptyList())
-            if (warm.catalogItems.isNotEmpty()) {
-                galleryBootstrap.value = warm
-            }
+            seedWarmBootstrapIfAvailable()
+        }
+    }
+
+    private suspend fun seedWarmBootstrapIfAvailable() {
+        val warm = loadWarmLibrarySnapshot(emptyList())
+        if (warm.catalogItems.isNotEmpty()) {
+            galleryBootstrap.value = warm
+            loading.value = false
         }
     }
 
@@ -335,7 +340,9 @@ class GalleryViewModel(
                 localRevision = localRevision,
             ),
         )
-        galleryCatalogDiskCache.scheduleSave(catalog, fingerprint, localRevision)
+        if (catalog.size <= 6_000) {
+            galleryCatalogDiskCache.scheduleSave(catalog, fingerprint, localRevision)
+        }
         return LibrarySnapshot(
             catalogItems = catalog,
             visibleItems = visible,

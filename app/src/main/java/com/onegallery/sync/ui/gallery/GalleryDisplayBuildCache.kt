@@ -3,6 +3,11 @@ package com.onegallery.sync.ui.gallery
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 /**
  * Reutiliza [GalleryDisplayItem] por linha do índice quando os campos relevantes não mudaram.
@@ -12,10 +17,24 @@ class GalleryDisplayBuildCache(
 ) {
     private data class Entry(val signature: Long, val item: GalleryDisplayItem)
 
-    private val byPath = ConcurrentHashMap<String, Entry>(4096)
+    private val byPath = ConcurrentHashMap<String, Entry>(8192)
 
-    fun mapIndexed(metadata: List<SyncMetadataEntity>): List<GalleryDisplayItem> {
+    suspend fun mapIndexed(metadata: List<SyncMetadataEntity>): List<GalleryDisplayItem> {
         if (metadata.isEmpty()) return emptyList()
+        return withContext(Dispatchers.Default) {
+            if (metadata.size < 2_500) {
+                mapSequential(metadata)
+            } else {
+                coroutineScope {
+                    metadata.chunked(2_000).map { chunk ->
+                        async { mapSequential(chunk) }
+                    }.awaitAll().flatten()
+                }
+            }
+        }
+    }
+
+    private fun mapSequential(metadata: List<SyncMetadataEntity>): List<GalleryDisplayItem> {
         val out = ArrayList<GalleryDisplayItem>(metadata.size)
         for (entity in metadata) {
             val sig = entity.displaySignature()

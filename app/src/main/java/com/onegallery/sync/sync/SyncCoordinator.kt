@@ -626,7 +626,7 @@ class SyncCoordinator(
         return foregroundGuard.runWithForeground { block() }
     }
 
-    private val galleryMetadataSource = syncMetadataDao.observeAll()
+    private val galleryMetadataSource = syncMetadataDao.observeGalleryIndex()
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = run {
         val bootstrap = (appContext.applicationContext as? com.onegallery.sync.OneGalleryApplication)
             ?.galleryMetadataBootstrap

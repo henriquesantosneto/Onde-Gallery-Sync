@@ -3,12 +3,15 @@ package com.onegallery.sync.ui.gallery
 /** Uma célula por mídia (local, nuvem ou caminho), mesmo com linhas duplicadas no índice. */
 fun dedupeGalleryDisplayItems(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
     if (items.size <= 1) return items
-    val sorted = items.sortedWith(
-        compareByDescending<GalleryDisplayItem> { it.oneDriveItemId != null }
-            .thenByDescending { it.localUri != null }
-            .thenByDescending { it.cachedOriginal?.isFile == true }
-            .thenByDescending { it.sortTimestamp },
-    )
+    return if (items.size >= 1_500) {
+        dedupeGalleryDisplayItemsFast(items)
+    } else {
+        dedupeGalleryDisplayItemsSorted(items)
+    }
+}
+
+private fun dedupeGalleryDisplayItemsSorted(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+    val sorted = items.sortedWith(galleryDisplayItemDedupeComparator())
     val keptKeys = mutableSetOf<String>()
     return sorted.filter { item ->
         val key = item.galleryDedupeKey()
@@ -18,7 +21,26 @@ fun dedupeGalleryDisplayItems(items: List<GalleryDisplayItem>): List<GalleryDisp
     }
 }
 
-private fun GalleryDisplayItem.galleryDedupeKey(): String {
+/** O(n) — sem sort global em bibliotecas grandes. */
+private fun dedupeGalleryDisplayItemsFast(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+    val best = LinkedHashMap<String, GalleryDisplayItem>(items.size)
+    for (item in items) {
+        val key = item.galleryDedupeKey()
+        val existing = best[key]
+        if (existing == null || galleryDisplayItemDedupeComparator().compare(item, existing) < 0) {
+            best[key] = item
+        }
+    }
+    return best.values.toList()
+}
+
+private fun galleryDisplayItemDedupeComparator() =
+    compareByDescending<GalleryDisplayItem> { it.oneDriveItemId != null }
+        .thenByDescending { it.localUri != null }
+        .thenByDescending { it.cachedOriginal?.isFile == true }
+        .thenByDescending { it.sortTimestamp }
+
+internal fun GalleryDisplayItem.galleryDedupeKey(): String {
     localMediaId?.let { return "localId:$it" }
     oneDriveItemId?.let { return "cloudId:$it" }
     localUri?.toString()?.takeIf { it.isNotBlank() }?.let { return "uri:$it" }

@@ -12,6 +12,10 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata ORDER BY COALESCE(localModifiedAt, remoteModifiedAt) DESC")
     fun observeAll(): Flow<List<SyncMetadataEntity>>
 
+    /** Índice da galeria — sem ORDER BY (ordenação fica na UI por [GalleryDisplayItem.sortTimestamp]). */
+    @Query("SELECT * FROM sync_metadata")
+    fun observeGalleryIndex(): Flow<List<SyncMetadataEntity>>
+
     @Query("SELECT * FROM sync_metadata")
     suspend fun getAll(): List<SyncMetadataEntity>
 
