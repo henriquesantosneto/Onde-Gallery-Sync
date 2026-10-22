@@ -228,6 +228,7 @@ class GalleryViewModel(
                 coverRevisionStamp = coverRevisionStamp,
             ),
         )
+        app.scheduleSessionSpillPersistDebounced()
     }
 
     init {
