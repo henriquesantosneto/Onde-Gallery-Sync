@@ -32,9 +32,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -157,10 +155,9 @@ class GalleryViewModel(
     private val catalogSession = GalleryCatalogSession()
     private val displayBuildCache = GalleryDisplayBuildCache(mediaCacheRepository)
     private val localOverlayCache = GalleryLocalOverlayCache()
-    private val galleryCatalogDiskCache =
-        (appContext.applicationContext as OneGalleryApplication).galleryCatalogDiskCache
 
-    private val galleryBootstrap = MutableStateFlow(createInitialWarmBootstrapSnapshot())
+    /** Só catálogo completo já montado neste processo (RAM); sem disco warm. */
+    private val galleryBootstrap = MutableStateFlow(restoreProcessCatalogSnapshot())
     private val indexHydrated = MutableStateFlow(galleryBootstrap.value != null)
 
     private data class DeferredAlbumLists(
@@ -183,17 +180,6 @@ class GalleryViewModel(
                 indexHydrated.value = true
             }
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            seedWarmBootstrapIfAvailable()
-        }
-    }
-
-    private fun createInitialWarmBootstrapSnapshot(): LibrarySnapshot? {
-        restoreProcessCatalogSnapshot()?.let { return it }
-        val app = appContext.applicationContext as OneGalleryApplication
-        val warm = app.warmGalleryCatalog ?: return null
-        if (warm.catalogItems.isEmpty()) return null
-        return publishDiskWarmSnapshot(warm, userAlbums = emptyList())
     }
 
     /** Mesmo processo após Home — catálogo completo já montado, sem Room map de novo. */
@@ -220,23 +206,6 @@ class GalleryViewModel(
         app.galleryProcessCatalogCache.save(bundle)
     }
 
-    private fun publishDiskWarmSnapshot(
-        warm: GalleryCatalogDiskCache.GalleryWarmCatalog,
-        userAlbums: List<UserAlbumEntity>,
-        activeSort: GallerySortOrder = galleryPreferences.sortOrder,
-    ): LibrarySnapshot {
-        val bundle = GalleryCatalogSession.SnapshotBundle(
-            catalogItems = warm.catalogItems,
-            visibleItems = warm.catalogItems,
-            userAlbums = userAlbums,
-            fingerprint = warm.fingerprint,
-            localRevision = warm.localRevision,
-        )
-        catalogSession.publish(bundle, activeSort = activeSort)
-        persistProcessCatalog(bundle)
-        return bundle.toLibrarySnapshot()
-    }
-
     fun onReturningToForeground() {
         loading.value = false
     }
@@ -244,14 +213,6 @@ class GalleryViewModel(
     fun loadMoreGridItems() {
         gridWindowLimit.update { current ->
             current + GalleryGridPagination.pageSize
-        }
-    }
-
-    private suspend fun seedWarmBootstrapIfAvailable() {
-        val warm = loadWarmLibrarySnapshot(emptyList())
-        if (warm.catalogItems.isNotEmpty()) {
-            galleryBootstrap.value = warm
-            loading.value = false
         }
     }
 
@@ -288,10 +249,16 @@ class GalleryViewModel(
         }
         .flatMapLatest { inputs ->
             flow {
-                var metadata = inputs.metadata
+                val metadata = inputs.metadata
                 if (metadata.isEmpty()) {
-                    val app = appContext.applicationContext as OneGalleryApplication
-                    metadata = app.galleryMetadataBootstrap.peekSnapshot().orEmpty()
+                    emit(
+                        LibrarySnapshot(
+                            catalogItems = emptyList(),
+                            visibleItems = emptyList(),
+                            userAlbums = inputs.userAlbums,
+                        ),
+                    )
+                    return@flow
                 }
                 val userAlbums = inputs.userAlbums
                 val localRevision = inputs.localRevision
@@ -347,21 +314,8 @@ class GalleryViewModel(
             }.flowOn(Dispatchers.IO)
         }
 
-    private val emptyLibrarySnapshot = LibrarySnapshot(
-        catalogItems = emptyList(),
-        visibleItems = emptyList(),
-        userAlbums = emptyList(),
-        fingerprint = null,
-    )
-
-    /** Emite vazio logo para [effectiveLibrarySnapshot] usar [galleryBootstrap] sem esperar o map de 21k. */
-    private val librarySnapshotCoreSeeded = merge(
-        flowOf(emptyLibrarySnapshot),
-        librarySnapshotCore,
-    )
-
     private val librarySnapshotLive = combine(
-        librarySnapshotCoreSeeded,
+        librarySnapshotCore,
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
     ) { snapshot, _ ->
         if (snapshot.catalogItems.size > 8_000) {
@@ -404,17 +358,6 @@ class GalleryViewModel(
         }
     }
 
-    private suspend fun loadWarmLibrarySnapshot(userAlbums: List<UserAlbumEntity>): LibrarySnapshot {
-        val app = appContext.applicationContext as OneGalleryApplication
-        val warm = runCatching {
-            app.warmGalleryCatalog ?: galleryCatalogDiskCache.loadWarmSnapshot()
-        }.getOrNull() ?: return LibrarySnapshot(emptyList(), emptyList(), userAlbums)
-        if (warm.catalogItems.isEmpty()) {
-            return LibrarySnapshot(emptyList(), emptyList(), userAlbums)
-        }
-        return publishDiskWarmSnapshot(warm, userAlbums, activeSort = sortOrder.value)
-    }
-
     private fun GalleryCatalogSession.SnapshotBundle.toLibrarySnapshot(): LibrarySnapshot =
         LibrarySnapshot(
             catalogItems = catalogItems,
@@ -455,9 +398,6 @@ class GalleryViewModel(
         )
         catalogSession.publish(bundle, activeSort = sortOrder.value)
         persistProcessCatalog(bundle)
-        if (catalog.size <= 6_000) {
-            galleryCatalogDiskCache.scheduleSave(catalog, fingerprint, localRevision)
-        }
         return LibrarySnapshot(
             catalogItems = catalog,
             visibleItems = visible,

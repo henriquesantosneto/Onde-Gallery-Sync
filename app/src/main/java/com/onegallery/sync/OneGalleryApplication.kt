@@ -14,7 +14,6 @@ import com.onegallery.sync.auth.AuthPreferences
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
-import com.onegallery.sync.data.local.db.GalleryMetadataBootstrap
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
@@ -33,7 +32,6 @@ import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.AppUserMessages
-import com.onegallery.sync.ui.gallery.GalleryCatalogDiskCache
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryProcessCatalogCache
 import com.onegallery.sync.sync.SyncTaskLauncher
@@ -92,15 +90,6 @@ class OneGalleryApplication : Application() {
     lateinit var mediaCacheRepository: MediaCacheRepository
         private set
 
-    lateinit var galleryCatalogDiskCache: GalleryCatalogDiskCache
-        private set
-
-    lateinit var galleryMetadataBootstrap: GalleryMetadataBootstrap
-        private set
-
-    @Volatile
-    var warmGalleryCatalog: GalleryCatalogDiskCache.GalleryWarmCatalog? = null
-
     val galleryProcessCatalogCache = GalleryProcessCatalogCache()
 
     lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
@@ -121,8 +110,6 @@ class OneGalleryApplication : Application() {
         )
         authManager = MsalAuthManager(this, AuthPreferences(this))
         database = AppDatabase.create(this)
-        galleryMetadataBootstrap = GalleryMetadataBootstrap(applicationScope)
-        galleryMetadataBootstrap.startLoading(database.syncMetadataDao())
         localMediaRepository = LocalMediaRepository(this)
         val mediaLocationResolver = MediaLocationResolver(this)
         val mediaCaptureTimeResolver = MediaCaptureTimeResolver(this)
@@ -138,10 +125,8 @@ class OneGalleryApplication : Application() {
         )
         galleryPreferences = GalleryPreferences(this)
         mediaCacheRepository = MediaCacheRepository(this)
-        galleryCatalogDiskCache = GalleryCatalogDiskCache(this, applicationScope)
         applicationScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             mediaCacheRepository.warmThumbnailExistsCache()
-            warmGalleryCatalog = galleryCatalogDiskCache.loadWarmSnapshot()
             runCatching { localMediaRepository.loadLocalGallerySnapshot() }
         }
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
