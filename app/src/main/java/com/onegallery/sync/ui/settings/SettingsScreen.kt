@@ -294,147 +294,6 @@ fun SettingsScreen(
             item { HorizontalDivider(modifier = Modifier.padding(top = 8.dp)) }
 
             item {
-                SettingsSectionTitle(
-                    stringResource(R.string.settings_permissions_section),
-                    Icons.Outlined.Security,
-                )
-            }
-            item {
-                SettingsPermissionRow(
-                    title = stringResource(R.string.settings_permission_media_read_title),
-                    summaryGranted = stringResource(R.string.settings_permission_media_read_summary_granted),
-                    summaryMissing = stringResource(R.string.settings_permission_media_read_summary_missing),
-                    granted = mediaReadGranted,
-                    grantLabel = grantLabel,
-                    activeLabel = activeLabel,
-                    leadingIcon = Icons.Outlined.PhotoLibrary,
-                    onGrant = {
-                        val missing = AppStartupPermissions.missingMediaRead(context)
-                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
-                    },
-                )
-            }
-            item {
-                SettingsPermissionRow(
-                    title = stringResource(R.string.settings_permission_media_location_title),
-                    summaryGranted = stringResource(R.string.settings_permission_media_location_summary_granted),
-                    summaryMissing = stringResource(R.string.settings_permission_media_location_summary_missing),
-                    granted = mediaLocationGranted,
-                    grantLabel = grantLabel,
-                    activeLabel = activeLabel,
-                    leadingIcon = Icons.Outlined.LocationOn,
-                    onGrant = {
-                        val missing = AppStartupPermissions.missingMediaLocation(context)
-                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
-                    },
-                )
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                item {
-                    SettingsPermissionRow(
-                        title = stringResource(R.string.settings_permission_notifications_title),
-                        summaryGranted = stringResource(R.string.settings_permission_notifications_summary_granted),
-                        summaryMissing = stringResource(R.string.settings_permission_notifications_summary_missing),
-                        granted = notificationsGranted,
-                        grantLabel = grantLabel,
-                        activeLabel = activeLabel,
-                        leadingIcon = Icons.Outlined.Notifications,
-                        onGrant = {
-                            val missing = AppStartupPermissions.missingNotifications(context)
-                            if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
-                        },
-                    )
-                }
-            }
-            item {
-                SettingsPermissionRow(
-                    title = stringResource(R.string.settings_permission_all_files_title),
-                    summaryGranted = stringResource(R.string.settings_permission_all_files_summary_granted),
-                    summaryMissing = stringResource(R.string.settings_permission_all_files_summary_missing),
-                    granted = allFilesAccess,
-                    grantLabel = grantLabel,
-                    activeLabel = activeLabel,
-                    leadingIcon = Icons.Outlined.Storage,
-                    onGrant = { openAllFilesAccessFromSettings() },
-                )
-            }
-            item {
-                SettingsPermissionRow(
-                    title = stringResource(R.string.settings_permission_device_location_title),
-                    summaryGranted = stringResource(R.string.settings_permission_device_location_summary_granted),
-                    summaryMissing = stringResource(R.string.settings_permission_device_location_summary_missing),
-                    granted = deviceLocationGranted,
-                    grantLabel = grantLabel,
-                    activeLabel = activeLabel,
-                    leadingIcon = Icons.Outlined.LocationOn,
-                    onGrant = {
-                        val missing = AppStartupPermissions.missingDeviceLocation(context)
-                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
-                    },
-                )
-            }
-            item {
-                val batteryInfoTitle = stringResource(R.string.settings_battery_optimization_info_title)
-                val batteryInfoBody = stringResource(R.string.settings_battery_optimization_info_body) +
-                    if (BatteryOptimization.isSamsungDevice()) {
-                        "\n\n" + stringResource(R.string.settings_battery_optimization_samsung_hint)
-                    } else {
-                        ""
-                    }
-                ListItem(
-                    headlineContent = {
-                        SettingsHeadlineWithInfo(
-                            title = stringResource(R.string.settings_battery_optimization_title),
-                            onInfoClick = {
-                                settingsInfo = SettingsInfoDialog(
-                                    title = batteryInfoTitle,
-                                    body = batteryInfoBody,
-                                )
-                            },
-                        )
-                    },
-                    supportingContent = {
-                        Column {
-                            Text(
-                                text = if (batteryOptimizationExempt) {
-                                    stringResource(R.string.settings_battery_optimization_summary_exempt)
-                                } else {
-                                    stringResource(R.string.settings_battery_optimization_summary_restricted)
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            if (!batteryOptimizationExempt && BatteryOptimization.isSamsungDevice()) {
-                                Text(
-                                    text = stringResource(R.string.settings_battery_optimization_samsung_hint),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 6.dp),
-                                )
-                            }
-                        }
-                    },
-                    leadingContent = {
-                        Icon(Icons.Outlined.BatteryChargingFull, contentDescription = null)
-                    },
-                    trailingContent = {
-                        if (batteryOptimizationExempt) {
-                            Text(
-                                activeLabel,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(end = 8.dp),
-                            )
-                        } else {
-                            Button(onClick = { BatteryOptimization.launchExemptionRequest(context) }) {
-                                Text(grantLabel)
-                            }
-                        }
-                    },
-                )
-            }
-
-            item { HorizontalDivider(modifier = Modifier.padding(top = 8.dp)) }
-
-            item {
                 SettingsSectionTitle("Sincronização", Icons.Outlined.Sync)
             }
             item {
@@ -713,6 +572,148 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            item { HorizontalDivider(modifier = Modifier.padding(top = 8.dp)) }
+
+            item {
+                SettingsSectionTitle(
+                    stringResource(R.string.settings_permissions_section),
+                    Icons.Outlined.Security,
+                )
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_media_read_title),
+                    summaryGranted = stringResource(R.string.settings_permission_media_read_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_media_read_summary_missing),
+                    granted = mediaReadGranted,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.PhotoLibrary,
+                    onGrant = {
+                        val missing = AppStartupPermissions.missingMediaRead(context)
+                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                    },
+                )
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_media_location_title),
+                    summaryGranted = stringResource(R.string.settings_permission_media_location_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_media_location_summary_missing),
+                    granted = mediaLocationGranted,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.LocationOn,
+                    onGrant = {
+                        val missing = AppStartupPermissions.missingMediaLocation(context)
+                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                    },
+                )
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                item {
+                    SettingsPermissionRow(
+                        title = stringResource(R.string.settings_permission_notifications_title),
+                        summaryGranted = stringResource(R.string.settings_permission_notifications_summary_granted),
+                        summaryMissing = stringResource(R.string.settings_permission_notifications_summary_missing),
+                        granted = notificationsGranted,
+                        grantLabel = grantLabel,
+                        activeLabel = activeLabel,
+                        leadingIcon = Icons.Outlined.Notifications,
+                        onGrant = {
+                            val missing = AppStartupPermissions.missingNotifications(context)
+                            if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                        },
+                    )
+                }
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_all_files_title),
+                    summaryGranted = stringResource(R.string.settings_permission_all_files_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_all_files_summary_missing),
+                    granted = allFilesAccess,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.Storage,
+                    onGrant = { openAllFilesAccessFromSettings() },
+                )
+            }
+            item {
+                SettingsPermissionRow(
+                    title = stringResource(R.string.settings_permission_device_location_title),
+                    summaryGranted = stringResource(R.string.settings_permission_device_location_summary_granted),
+                    summaryMissing = stringResource(R.string.settings_permission_device_location_summary_missing),
+                    granted = deviceLocationGranted,
+                    grantLabel = grantLabel,
+                    activeLabel = activeLabel,
+                    leadingIcon = Icons.Outlined.LocationOn,
+                    onGrant = {
+                        val missing = AppStartupPermissions.missingDeviceLocation(context)
+                        if (missing.isNotEmpty()) runtimePermissionLauncher.launch(missing)
+                    },
+                )
+            }
+            item {
+                val batteryInfoTitle = stringResource(R.string.settings_battery_optimization_info_title)
+                val batteryInfoBody = stringResource(R.string.settings_battery_optimization_info_body) +
+                    if (BatteryOptimization.isSamsungDevice()) {
+                        "\n\n" + stringResource(R.string.settings_battery_optimization_samsung_hint)
+                    } else {
+                        ""
+                    }
+                ListItem(
+                    headlineContent = {
+                        SettingsHeadlineWithInfo(
+                            title = stringResource(R.string.settings_battery_optimization_title),
+                            onInfoClick = {
+                                settingsInfo = SettingsInfoDialog(
+                                    title = batteryInfoTitle,
+                                    body = batteryInfoBody,
+                                )
+                            },
+                        )
+                    },
+                    supportingContent = {
+                        Column {
+                            Text(
+                                text = if (batteryOptimizationExempt) {
+                                    stringResource(R.string.settings_battery_optimization_summary_exempt)
+                                } else {
+                                    stringResource(R.string.settings_battery_optimization_summary_restricted)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (!batteryOptimizationExempt && BatteryOptimization.isSamsungDevice()) {
+                                Text(
+                                    text = stringResource(R.string.settings_battery_optimization_samsung_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
+                        }
+                    },
+                    leadingContent = {
+                        Icon(Icons.Outlined.BatteryChargingFull, contentDescription = null)
+                    },
+                    trailingContent = {
+                        if (batteryOptimizationExempt) {
+                            Text(
+                                activeLabel,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                        } else {
+                            Button(onClick = { BatteryOptimization.launchExemptionRequest(context) }) {
+                                Text(grantLabel)
+                            }
+                        }
+                    },
+                )
+            }
+
             item {
                 Box(
                     modifier = Modifier
