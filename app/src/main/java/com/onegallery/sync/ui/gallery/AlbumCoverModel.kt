@@ -53,8 +53,11 @@ fun hasCachedThumbnailFile(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (mediaCacheRepository.isThumbnailCachedFast(item.canonicalPath, item.oneDriveItemId)) return true
-    return item.cachedPlaceholderThumb?.isFile == true && item.cachedPlaceholderThumb.length() > 0L
+    if (mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId) != null) {
+        return true
+    }
+    val stub = item.cachedPlaceholderThumb
+    return stub != null && mediaCacheRepository.isDisplayableGalleryThumbFile(stub)
 }
 
 fun resolveAlbumCoverModel(
@@ -77,9 +80,12 @@ fun resolveGalleryCoverModel(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository? = null,
 ): Any? {
-    val cachedThumb = mediaCacheRepository?.thumbnailIfCached(item.canonicalPath)
-        ?.takeIf { it.isFile && it.length() > 0L }
-        ?: item.cachedPlaceholderThumb?.takeIf { it.isFile && it.length() > 0L }
+    val cachedThumb = mediaCacheRepository?.displayableThumbnailIfCached(
+        item.canonicalPath,
+        item.oneDriveItemId,
+    ) ?: item.cachedPlaceholderThumb?.takeIf { thumb ->
+        mediaCacheRepository?.isDisplayableGalleryThumbFile(thumb) == true
+    }
     if (item.kind == MediaKind.VIDEO) {
         cachedThumb?.let { return it }
         item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }

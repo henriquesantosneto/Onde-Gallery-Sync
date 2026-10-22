@@ -32,9 +32,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.coroutineContext
@@ -153,29 +151,6 @@ class GalleryViewModel(
     private val galleryCatalogDiskCache =
         (appContext.applicationContext as OneGalleryApplication).galleryCatalogDiskCache
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val warmLibrarySnapshotOnce = flow {
-        val app = appContext.applicationContext as OneGalleryApplication
-        val warm = app.warmGalleryCatalog ?: galleryCatalogDiskCache.loadWarmSnapshot() ?: return@flow
-        val visible = warm.catalogItems.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
-        catalogSession.publish(
-            GalleryCatalogSession.SnapshotBundle(
-                catalogItems = warm.catalogItems,
-                visibleItems = visible,
-                userAlbums = emptyList(),
-                fingerprint = warm.fingerprint,
-                localRevision = warm.localRevision,
-            ),
-        )
-        emit(
-            LibrarySnapshot(
-                catalogItems = warm.catalogItems,
-                visibleItems = visible,
-                userAlbums = emptyList(),
-            ),
-        )
-    }.take(1).flowOn(Dispatchers.IO)
-
     private data class LibrarySnapshot(
         /** Índice completo (contagens, capas, locais). */
         val catalogItems: List<GalleryDisplayItem>,
@@ -194,6 +169,10 @@ class GalleryViewModel(
     }.conflate()
         .flatMapLatest { (metadata, userAlbums, localRevision) ->
             flow {
+                if (metadata.isEmpty()) {
+                    emit(loadWarmLibrarySnapshot(userAlbums))
+                    return@flow
+                }
                 val fingerprint = GalleryCatalogFingerprint.from(metadata)
                 val cached = catalogSession.lastBundle
                 if (cached != null &&
@@ -230,7 +209,28 @@ class GalleryViewModel(
         catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
     }.flowOn(Dispatchers.Default)
 
-    private val librarySnapshot = merge(warmLibrarySnapshotOnce, librarySnapshotLive)
+    private val librarySnapshot = librarySnapshotLive
+
+    private suspend fun loadWarmLibrarySnapshot(userAlbums: List<UserAlbumEntity>): LibrarySnapshot {
+        val app = appContext.applicationContext as OneGalleryApplication
+        val warm = runCatching {
+            app.warmGalleryCatalog ?: galleryCatalogDiskCache.loadWarmSnapshot()
+        }.getOrNull() ?: return LibrarySnapshot(emptyList(), emptyList(), userAlbums)
+        if (warm.catalogItems.isEmpty()) {
+            return LibrarySnapshot(emptyList(), emptyList(), userAlbums)
+        }
+        val visible = warm.catalogItems.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
+        catalogSession.publish(
+            GalleryCatalogSession.SnapshotBundle(
+                catalogItems = warm.catalogItems,
+                visibleItems = visible,
+                userAlbums = userAlbums,
+                fingerprint = warm.fingerprint,
+                localRevision = warm.localRevision,
+            ),
+        )
+        return LibrarySnapshot(warm.catalogItems, visible, userAlbums)
+    }
 
     private fun GalleryCatalogSession.SnapshotBundle.toLibrarySnapshot(): LibrarySnapshot =
         LibrarySnapshot(
@@ -528,7 +528,7 @@ class GalleryViewModel(
         val paths = canonicalPaths
             .asSequence()
             .filter { it.isNotBlank() }
-            .filter { path -> mediaCacheRepository.thumbnailIfCached(path) == null }
+            .filter { path -> mediaCacheRepository.displayableThumbnailIfCached(path) == null }
             .filter { path -> gridThumbnailPrefetchQueued.add(path) }
             .take(GRID_THUMB_PREFETCH_BATCH)
             .toList()
@@ -552,7 +552,7 @@ class GalleryViewModel(
                 async {
                     semaphore.withPermit {
                         syncCoordinator.ensureThumbnailCached(path).getOrNull()
-                        val hit = mediaCacheRepository.thumbnailIfCached(path) != null
+                        val hit = mediaCacheRepository.displayableThumbnailIfCached(path) != null
                         if (hit) cachedAny = true
                     }
                 }
@@ -570,7 +570,9 @@ class GalleryViewModel(
 
     private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {
         if (!GalleryMapper.supportsGeneratedThumbnail(item.displayName)) return false
-        if (mediaCacheRepository.thumbnailIfCached(item.canonicalPath) != null) return false
+        if (mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath) != null) {
+            return false
+        }
         if (item.oneDriveItemId != null) return true
         if (item.localMediaId != null) return true
         if (item.localUri != null) return true

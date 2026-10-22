@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.ui.theme.OneDriveBlue
@@ -42,8 +43,11 @@ fun GalleryThumbnailImage(
     onContentAspectRatio: ((Float) -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val mediaCacheRepository = remember(context) {
+        (context.applicationContext as OneGalleryApplication).mediaCacheRepository
+    }
     var displayData by remember(item.canonicalPath, sizePx) {
-        mutableStateOf<Any?>(item.thumbnailModel ?: item.localUri)
+        mutableStateOf<Any?>(initialThumbnailDisplayData(item, mediaCacheRepository))
     }
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
@@ -57,9 +61,9 @@ fun GalleryThumbnailImage(
             item.thumbnailModel?.let { displayData = it }
         }
         val coordinator = syncCoordinator ?: return@LaunchedEffect
-        coordinator.ensureThumbnailCached(item.canonicalPath).getOrNull()?.let { cached ->
-            displayData = cached
-        }
+        coordinator.ensureThumbnailCached(item.canonicalPath).getOrNull()
+            ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
+            ?.let { cached -> displayData = cached }
     }
 
     if (displayData != null) {
@@ -68,7 +72,7 @@ fun GalleryThumbnailImage(
                 .data(displayData)
                 .size(sizePx)
                 .crossfade(style == GalleryThumbnailStyle.Detail)
-                .allowHardware(style == GalleryThumbnailStyle.Grid)
+                .allowHardware(false)
                 .memoryCacheKey("${item.canonicalPath}:$sizePx:${style.name}")
                 .diskCacheKey("${item.canonicalPath}:$sizePx")
                 .build()
@@ -92,6 +96,19 @@ fun GalleryThumbnailImage(
             item.cloudState != CloudSyncState.PENDING_DOWNLOAD
         MediaThumbnailPlaceholder(modifier = modifier, showCloudIcon = showCenterCloud)
     }
+}
+
+private fun initialThumbnailDisplayData(
+    item: GalleryDisplayItem,
+    mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
+): Any? {
+    item.localUri?.let { return it }
+    val thumb = item.cachedPlaceholderThumb
+    if (thumb != null && mediaCacheRepository.isDisplayableGalleryThumbFile(thumb)) {
+        return thumb
+    }
+    item.cachedOriginal?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
+    return null
 }
 
 @Composable

@@ -51,13 +51,10 @@ object GalleryMapper {
         val localUri = entity.localContentUri?.let { Uri.parse(it) }
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
-        val placeholderThumb = if (
-            mediaCacheRepository.isThumbnailCachedFast(entity.canonicalPath, entity.oneDriveItemId)
-        ) {
-            mediaCacheRepository.thumbFile(entity.canonicalPath).takeIf { it.isFile && it.length() > 0L }
-        } else {
-            null
-        }
+        val placeholderThumb = mediaCacheRepository.displayableThumbnailIfCached(
+            entity.canonicalPath,
+            entity.oneDriveItemId,
+        )
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }
             ?: entity.localModifiedAt?.takeIf { it > 0L }
@@ -94,11 +91,7 @@ object GalleryMapper {
     ): GalleryDisplayItem {
         val canonical = SyncPaths.canonicalFromLocal(item)
         val kind = if (isVideoFileName(item.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
-        val placeholderThumb = if (mediaCacheRepository.isThumbnailCachedFast(canonical, null)) {
-            mediaCacheRepository.thumbFile(canonical).takeIf { it.isFile && it.length() > 0L }
-        } else {
-            null
-        }
+        val placeholderThumb = mediaCacheRepository.displayableThumbnailIfCached(canonical, null)
         val sort = item.dateTakenSeconds?.takeIf { it > 0L }
             ?: item.dateAddedSeconds.takeIf { it > 0L }
             ?: item.dateModifiedSeconds.takeIf { it > 0L }

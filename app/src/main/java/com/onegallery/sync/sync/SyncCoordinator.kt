@@ -2910,8 +2910,10 @@ class SyncCoordinator(
         val staging = mediaCacheRepository.thumbStagingFile(row.canonicalPath)
         staging.delete()
         return runCatching {
-            val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.RGB_565)
+            val edge = MediaCacheRepository.MIN_DISPLAYABLE_THUMB_EDGE_PX
+            val bitmap = Bitmap.createBitmap(edge, edge, Bitmap.Config.RGB_565)
             try {
+                bitmap.eraseColor(MediaCacheRepository.SYNC_STUB_PLACEHOLDER_COLOR)
                 staging.parentFile?.mkdirs()
                 staging.outputStream().use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_CACHE_JPEG_QUALITY, out)

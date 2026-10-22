@@ -31,7 +31,10 @@ class GalleryCatalogDiskCache(
     private var lastSavedKey: String? = null
 
     suspend fun loadWarmSnapshot(): GalleryWarmCatalog? = withContext(Dispatchers.IO) {
-        runCatching { readFile() }.getOrNull()
+        runCatching { readFile() }.getOrElse { error ->
+            runCatching { cacheFile.delete() }
+            null
+        }
     }
 
     fun scheduleSave(
@@ -44,7 +47,14 @@ class GalleryCatalogDiskCache(
         if (key == lastSavedKey) return
         scope.launch(Dispatchers.IO) {
             runCatching {
-                writeFile(catalogItems, fingerprint, localRevision)
+                val toPersist = if (catalogItems.size <= MAX_PERSISTED_ITEMS) {
+                    catalogItems
+                } else {
+                    catalogItems
+                        .sortedByDescending { it.sortTimestamp }
+                        .take(MAX_PERSISTED_ITEMS)
+                }
+                writeFile(toPersist, fingerprint, localRevision)
                 lastSavedKey = key
             }
         }
@@ -82,6 +92,10 @@ class GalleryCatalogDiskCache(
 
     private fun readFile(): GalleryWarmCatalog? {
         if (!cacheFile.isFile || cacheFile.length() <= 0L) return null
+        if (cacheFile.length() > MAX_CACHE_BYTES) {
+            cacheFile.delete()
+            return null
+        }
         return GZIPInputStream(FileInputStream(cacheFile)).use { gzip ->
             DataInputStream(gzip).use { input ->
                 if (input.readInt() != FORMAT_MAGIC) return null
@@ -93,7 +107,9 @@ class GalleryCatalogDiskCache(
                 val head = readNullableUtf(input)
                 val tail = readNullableUtf(input)
                 val count = input.readInt()
-                if (count <= 0 || count > 500_000) return null
+                if (count <= 0 || count > MAX_PERSISTED_ITEMS) {
+                    return null
+                }
                 val items = ArrayList<GalleryDisplayItem>(count)
                 repeat(count) {
                     items.add(readItem(input))
@@ -131,11 +147,14 @@ class GalleryCatalogDiskCache(
         val canonical = input.readUTF()
         val displayName = input.readUTF()
         val albumName = input.readUTF()
-        val kind = MediaKind.entries[input.readInt()]
-        val cloudState = CloudSyncState.entries[input.readInt()]
+        val kind = MediaKind.entries.getOrNull(input.readInt())
+            ?: throw IllegalStateException("kind inválido no cache: $canonical")
+        val cloudState = CloudSyncState.entries.getOrNull(input.readInt())
+            ?: throw IllegalStateException("cloudState inválido no cache: $canonical")
         val localMediaId = readNullableLong(input)
         val oneDriveItemId = readNullableUtf(input)
-        val pendingDelete = PendingDeleteTarget.entries[input.readInt()]
+        val pendingDelete = PendingDeleteTarget.entries.getOrNull(input.readInt())
+            ?: PendingDeleteTarget.NONE
         val localUri = readNullableUtf(input)?.let { Uri.parse(it) }
         val cachedOriginal = readNullableUtf(input)?.let { path ->
             File(path).takeIf { it.isFile && it.length() > 0L }
@@ -215,5 +234,8 @@ class GalleryCatalogDiskCache(
     companion object {
         private const val FORMAT_MAGIC = 0x4F474C52 // OGLR
         private const val FORMAT_VERSION = 1
+        /** Evita OOM ao reabrir com biblioteca enorme — só as mais recentes. */
+        const val MAX_PERSISTED_ITEMS = 4_000
+        private const val MAX_CACHE_BYTES = 16L * 1024L * 1024L
     }
 }

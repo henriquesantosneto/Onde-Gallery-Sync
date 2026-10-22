@@ -37,10 +37,12 @@ class GalleryCatalogSession {
         val current = lastBundle ?: return null
         var changed = false
         val updated = current.catalogItems.map { item ->
-            if (mediaCacheRepository.isThumbnailCachedFast(item.canonicalPath, item.oneDriveItemId)) {
-                val thumb = mediaCacheRepository.thumbFile(item.canonicalPath)
-                    .takeIf { it.isFile && it.length() > 0L }
-                if (thumb != null && item.cachedPlaceholderThumb?.absolutePath != thumb.absolutePath) {
+            val thumb = mediaCacheRepository.displayableThumbnailIfCached(
+                item.canonicalPath,
+                item.oneDriveItemId,
+            )
+            if (thumb != null) {
+                if (item.cachedPlaceholderThumb?.absolutePath != thumb.absolutePath) {
                     changed = true
                     item.copy(cachedPlaceholderThumb = thumb)
                 } else {

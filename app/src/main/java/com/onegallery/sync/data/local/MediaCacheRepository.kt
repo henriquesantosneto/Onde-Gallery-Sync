@@ -2,6 +2,7 @@ package com.onegallery.sync.data.local
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -96,22 +97,17 @@ class MediaCacheRepository(context: Context) {
     /**
      * Checagem O(1)/stat para montar a galeria — **sem** BitmapFactory nem cópia de alias.
      */
+    /** Grade/capas: ignora stubs mínimos (8×8) que pintam preto ao ampliar. */
     fun isThumbnailCachedFast(canonicalPath: String, oneDriveItemId: String? = null): Boolean {
-        if (thumbExistsCache[canonicalPath] == true) return true
-        val safe = safeFileName(canonicalPath)
-        if (thumbOnDiskBySafeName[safe] == true) {
-            thumbExistsCache[canonicalPath] = true
-            return true
-        }
-        val file = thumbFile(canonicalPath)
-        if (file.isFile && file.length() > 24L) {
-            rememberThumbOnDisk(canonicalPath, file)
-            return true
-        }
-        val itemId = oneDriveItemId?.takeIf { it.isNotBlank() } ?: return false
-        val alias = thumbFileByRemoteItemId(itemId)
-        if (alias.isFile && alias.length() > 24L) return true
-        return false
+        return displayableThumbnailIfCached(canonicalPath, oneDriveItemId) != null
+    }
+
+    fun displayableThumbnailIfCached(
+        canonicalPath: String,
+        oneDriveItemId: String? = null,
+    ): File? {
+        val file = thumbnailIfCached(canonicalPath, oneDriveItemId) ?: return null
+        return file.takeIf { isDisplayableGalleryThumb(it) }
     }
 
     private fun rememberThumbOnDisk(canonicalPath: String, file: File) {
@@ -195,11 +191,23 @@ class MediaCacheRepository(context: Context) {
 
     private fun isReadableThumbnailFile(file: File): Boolean {
         if (file.length() < 24L) return false
+        return decodeBounds(file)?.let { (w, h) -> w > 0 && h > 0 } == true
+    }
+
+    fun isDisplayableGalleryThumbFile(file: File): Boolean = isDisplayableGalleryThumb(file)
+
+    private fun isDisplayableGalleryThumb(file: File): Boolean {
+        if (file.length() < 128L) return false
+        val (w, h) = decodeBounds(file) ?: return false
+        return w >= MIN_DISPLAYABLE_THUMB_EDGE_PX && h >= MIN_DISPLAYABLE_THUMB_EDGE_PX
+    }
+
+    private fun decodeBounds(file: File): Pair<Int, Int>? {
         return runCatching {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, opts)
-            opts.outWidth > 0 && opts.outHeight > 0
-        }.getOrDefault(false)
+            opts.outWidth to opts.outHeight
+        }.getOrNull()
     }
 
     /** Miniaturas commitadas no disco (exclui `.new` / staging). */
@@ -220,5 +228,11 @@ class MediaCacheRepository(context: Context) {
         thumbsDir.listFiles()?.forEach { it.delete() }
         thumbExistsCache.clear()
         thumbOnDiskBySafeName.clear()
+    }
+
+    companion object {
+        const val MIN_DISPLAYABLE_THUMB_EDGE_PX = 32
+        /** Cor neutra para placeholder de sync (evita célula totalmente preta). */
+        val SYNC_STUB_PLACEHOLDER_COLOR: Int = Color.rgb(0xC4, 0xC4, 0xC4)
     }
 }
