@@ -1,8 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.MediaCacheRepository
-import com.onegallery.sync.data.local.PlaceComponents
-import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.groupDisplayItemsForPlaceAlbums
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 /** Sync: no máximo um item por álbum ainda sem capa (prioridade); demais miniaturas no prefetch geral. */
 object AlbumCoverThumbnailPlanner {
@@ -23,20 +22,8 @@ object AlbumCoverThumbnailPlanner {
         return paths.toList()
     }
 
-    private fun placeGroups(items: List<GalleryDisplayItem>): Map<String, List<GalleryDisplayItem>> {
-        val located = items.mapNotNull { item ->
-            val label = item.locationLabel?.trim().orEmpty()
-            val components = PlaceComponents.forItem(item)
-                ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
-            val key = when {
-                components != null -> PlaceMatchKey.forComponents(components, item.locationLabel).encode()
-                label.isNotEmpty() -> PlaceMatchKey.legacyLabel(label).encode()
-                else -> null
-            }
-            key?.let { it to item }
-        }
-        return located.groupBy({ it.first }, { it.second })
-    }
+    private fun placeGroups(items: List<GalleryDisplayItem>): Map<String, List<GalleryDisplayItem>> =
+        groupDisplayItemsForPlaceAlbums(items)
 
     private fun addCoverPathIfNeeded(
         group: List<GalleryDisplayItem>,

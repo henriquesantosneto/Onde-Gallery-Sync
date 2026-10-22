@@ -1,7 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
-import com.onegallery.sync.data.local.PlaceComponents
-import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.placeAlbumBucketEncodedKey
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.SyncPaths
 
@@ -10,31 +9,18 @@ object AlbumCoverBucketKeys {
     fun forEntity(entity: SyncMetadataEntity): Set<String> {
         val keys = linkedSetOf<String>()
         keys.add("album:${albumGroupKey(entity)}")
-        appendPlaceKeys(keys, entity.locationLabel)
+        placeAlbumBucketEncodedKey(entity)?.let { keys.add("place:$it") }
         return keys
     }
 
     fun forDisplayItem(item: GalleryDisplayItem): Set<String> {
         val keys = linkedSetOf<String>()
         keys.add("album:${item.albumName}")
-        appendPlaceKeys(keys, item.locationLabel)
+        placeAlbumBucketEncodedKey(item)?.let { keys.add("place:$it") }
         return keys
     }
 
     fun albumGroupKey(entity: SyncMetadataEntity): String {
         return com.onegallery.sync.sync.AlbumGroupKeys.fromEntity(entity)
-    }
-
-    private fun appendPlaceKeys(keys: MutableSet<String>, locationLabel: String?) {
-        val label = locationLabel?.trim().orEmpty()
-        val components = label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
-        when {
-            components != null -> {
-                keys.add("place:${PlaceMatchKey.forComponents(components, label).encode()}")
-            }
-            label.isNotEmpty() -> {
-                keys.add("place:${PlaceMatchKey.legacyLabel(label).encode()}")
-            }
-        }
     }
 }

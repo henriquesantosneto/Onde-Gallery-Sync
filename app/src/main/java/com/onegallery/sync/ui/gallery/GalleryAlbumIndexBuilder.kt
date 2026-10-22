@@ -3,9 +3,9 @@ package com.onegallery.sync.ui.gallery
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
-import com.onegallery.sync.data.local.PlaceComponents
-import com.onegallery.sync.data.local.PlaceMatchKey
-import com.onegallery.sync.data.local.collapseMetadataForPlaceAlbums
+import com.onegallery.sync.data.local.groupMetadataForPlaceAlbums
+import com.onegallery.sync.data.local.placeAlbumTitleForGroup
+import com.onegallery.sync.data.local.placeAlbumTitleForMetadataGroup
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.SyncPaths
@@ -69,59 +69,41 @@ object GalleryAlbumIndexBuilder {
         mediaCacheRepository: MediaCacheRepository,
         resolveCoverModels: Boolean,
     ): List<MediaAlbum> {
-        val located = collapseMetadataForPlaceAlbums(metadata).mapNotNull { entity ->
-            val label = entity.locationLabel?.trim().orEmpty()
-            val components = placeComponentsForEntity(entity)
-            when {
-                components != null -> {
-                    val matchKey = PlaceMatchKey.forComponents(components, entity.locationLabel)
-                    Triple(components, matchKey, entity)
-                }
-                label.isNotEmpty() -> Triple(null, PlaceMatchKey.legacyLabel(label), entity)
-                else -> null
+        val albums = groupMetadataForPlaceAlbums(metadata).map { (encodedKey, group) ->
+            val displayGroup = group.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) }
+            val coverItem = if (resolveCoverModels) {
+                resolveAlbumCoverItem(displayGroup, mediaCacheRepository)
+            } else {
+                null
             }
-        }
-        val albums = located
-            .groupBy({ it.second.encode() }, { it.third })
-            .map { (encodedKey, group) ->
-                val sample = group.first()
-                val sampleComponents = placeComponentsForEntity(sample)
-                    ?: sample.locationLabel?.let { PlaceComponents.fromGeocoderLabel(it) }
-                val title = sampleComponents?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
-                    ?: sample.locationLabel.orEmpty()
-                val latest = group.maxOfOrNull { it.sortTimestamp() } ?: 0L
-                val photoCount = group.count { !GalleryMapper.isVideoFileName(it.displayName) }
-                val videoCount = group.size - photoCount
-                val coverItems = if (resolveCoverModels && group.isNotEmpty()) {
-                    listOf(GalleryMapper.toDisplayItem(group.maxBy { it.sortTimestamp() }, mediaCacheRepository))
+            val title = if (coverItem != null) {
+                placeAlbumTitleForGroup(displayGroup, coverItem)
+            } else {
+                placeAlbumTitleForMetadataGroup(group)
+            }
+            val latest = group.maxOfOrNull { it.sortTimestamp() } ?: 0L
+            val photoCount = group.count { !GalleryMapper.isVideoFileName(it.displayName) }
+            val videoCount = group.size - photoCount
+            val coverItems = coverItem?.let { listOf(it) }.orEmpty()
+            MediaAlbum(
+                bucketId = "place:$encodedKey",
+                title = title,
+                itemCount = group.size,
+                photoCount = photoCount,
+                videoCount = videoCount,
+                coverModel = if (resolveCoverModels && coverItems.isNotEmpty()) {
+                    albumCoverLocalIndex.coverModelForKey(
+                        cacheKey = "place:$encodedKey",
+                        items = coverItems,
+                        mediaCacheRepository = mediaCacheRepository,
+                    )
                 } else {
-                    emptyList()
-                }
-                MediaAlbum(
-                    bucketId = "place:$encodedKey",
-                    title = title,
-                    itemCount = group.size,
-                    photoCount = photoCount,
-                    videoCount = videoCount,
-                    coverModel = if (resolveCoverModels && coverItems.isNotEmpty()) {
-                        albumCoverLocalIndex.coverModelForKey(
-                            cacheKey = "place:$encodedKey",
-                            items = coverItems,
-                            mediaCacheRepository = mediaCacheRepository,
-                        )
-                    } else {
-                        null
-                    },
-                    sortTimestamp = latest,
-                )
-            }
+                    null
+                },
+                sortTimestamp = latest,
+            )
+        }
         return sortPlaceAlbums(albums, sort)
-    }
-
-    private fun placeComponentsForEntity(entity: SyncMetadataEntity): PlaceComponents? {
-        val label = entity.locationLabel?.trim().orEmpty()
-        if (label.isEmpty()) return null
-        return PlaceComponents.fromGeocoderLabel(label)
     }
 
     private fun SyncMetadataEntity.sortTimestamp(): Long =

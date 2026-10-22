@@ -7,7 +7,9 @@ import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceComponents
-import com.onegallery.sync.data.local.collapseItemsForPlaceAlbums
+import com.onegallery.sync.data.local.groupDisplayItemsForPlaceAlbums
+import com.onegallery.sync.data.local.placeAlbumTitleForGroup
+import com.onegallery.sync.data.local.preferredPlaceBrowseEncodedKey
 import com.onegallery.sync.data.local.PlaceLevel
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.matchesPlace
@@ -1131,6 +1133,17 @@ class GalleryViewModel(
         }
     }
 
+    /** Abre o álbum de local da célula ~3 km quando a foto tem GPS. */
+    fun setPlaceFilterFromItem(item: GalleryDisplayItem) {
+        val geoKey = item.preferredPlaceBrowseEncodedKey()
+        if (geoKey != null) {
+            setPlaceFilter(placeAlbumTitleForGroup(listOf(item), coverItem = item), geoKey)
+            return
+        }
+        val label = item.locationLabel?.trim().orEmpty()
+        if (label.isNotEmpty()) setPlaceFilterFromLocationLabel(label)
+    }
+
     fun setSortOrder(order: GallerySortOrder) {
         sortOrder.value = order
         galleryPreferences.sortOrder = order
@@ -1166,17 +1179,7 @@ class GalleryViewModel(
                 changed.add(key)
             }
         }
-        val placeLocated = collapseItemsForPlaceAlbums(catalogItems).mapNotNull { item ->
-            val label = item.locationLabel?.trim().orEmpty()
-            val components = PlaceComponents.forItem(item)
-                ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
-            when {
-                components != null -> PlaceMatchKey.forComponents(components, item.locationLabel).encode() to item
-                label.isNotEmpty() -> PlaceMatchKey.legacyLabel(label).encode() to item
-                else -> null
-            }
-        }
-        placeLocated.groupBy({ it.first }, { it.second }).forEach { (encoded, group) ->
+        groupDisplayItemsForPlaceAlbums(catalogItems).forEach { (encoded, group) ->
             val key = "place:$encoded"
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
             val previous = placeAlbumLatestSort.put(key, latest)
@@ -1550,47 +1553,34 @@ internal fun buildPlaceAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    val located = collapseItemsForPlaceAlbums(items).mapNotNull { item ->
-        val label = item.locationLabel?.trim().orEmpty()
-        val components = PlaceComponents.forItem(item)
-            ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
-        when {
-            components != null -> {
-                val matchKey = PlaceMatchKey.forComponents(components, item.locationLabel)
-                Triple(components, matchKey, item)
-            }
-            label.isNotEmpty() -> Triple(null, PlaceMatchKey.legacyLabel(label), item)
-            else -> null
+    return groupDisplayItemsForPlaceAlbums(items).map { (encodedKey, group) ->
+        val coverItem = if (resolveCoverModels) {
+            resolveAlbumCoverItem(group, mediaCacheRepository)
+        } else {
+            null
         }
+        val title = placeAlbumTitleForGroup(group, coverItem)
+        val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
+        val photoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
+        val videoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
+        MediaAlbum(
+            bucketId = "place:$encodedKey",
+            title = title,
+            itemCount = group.size,
+            photoCount = photoCount,
+            videoCount = videoCount,
+            coverModel = if (resolveCoverModels) {
+                albumCoverLocalIndex.coverModelForKey(
+                    cacheKey = "place:$encodedKey",
+                    items = group,
+                    mediaCacheRepository = mediaCacheRepository,
+                )
+            } else {
+                null
+            },
+            sortTimestamp = latest,
+        )
     }
-    return located
-        .groupBy({ it.second.encode() }, { it.third })
-        .map { (encodedKey, group) ->
-            val sampleComponents = PlaceComponents.forItem(group.first())
-                ?: group.first().locationLabel?.let { PlaceComponents.fromGeocoderLabel(it) }
-            val title = sampleComponents?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
-                ?: group.first().locationLabel.orEmpty()
-            val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
-            val photoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
-            val videoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
-            MediaAlbum(
-                bucketId = "place:$encodedKey",
-                title = title,
-                itemCount = group.size,
-                photoCount = photoCount,
-                videoCount = videoCount,
-                coverModel = if (resolveCoverModels) {
-                    albumCoverLocalIndex.coverModelForKey(
-                        cacheKey = "place:$encodedKey",
-                        items = group,
-                        mediaCacheRepository = mediaCacheRepository,
-                    )
-                } else {
-                    null
-                },
-                sortTimestamp = latest,
-            )
-        }
 }
 
 internal fun sortPlaceAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
@@ -1599,6 +1589,7 @@ internal fun sortPlaceAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): Lis
         val match = PlaceMatchKey.decode(raw)
         if (match != null && match.level != PlaceLevel.LEGACY_LABEL) {
             return when (match.level) {
+                PlaceLevel.GEO_CELL -> listOf(album.title.lowercase())
                 PlaceLevel.COUNTRY -> listOf(match.parts.getOrElse(0) { "" }, "", "", "")
                 PlaceLevel.ADMIN_AREA -> listOf(
                     match.parts.getOrElse(0) { "" },

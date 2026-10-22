@@ -44,7 +44,7 @@ Ao terminar uma leva de prefetch, refresh final + `flushPendingAlbumCoverRevisio
 
 ## Álbuns de lugar
 
-- Agrupamento por `PlaceComponents` / `PlaceMatchKey` (label de geocoder ou GPS).
+- Agrupamento por célula geográfica (~3 km, `PLACE_CLUSTER_RADIUS_KM`) quando há GPS; sem GPS, rótulo legado. Título do álbum = endereço mais completo do grupo (capa incluída na escolha).
 - Mesma mecânica de capa com prefixo `place:` no `bucketId`.
 
 ## Álbuns do usuário

@@ -6,6 +6,8 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 enum class PlaceLevel {
+    /** Agrupamento por célula geográfica (~[PLACE_CLUSTER_RADIUS_KM] km). */
+    GEO_CELL,
     COUNTRY,
     ADMIN_AREA,
     LOCALITY,
@@ -26,6 +28,17 @@ data class PlaceMatchKey(
 
     companion object {
         fun legacyLabel(label: String) = PlaceMatchKey(PlaceLevel.LEGACY_LABEL, listOf(label))
+
+        fun geoCell(cellId: String): PlaceMatchKey {
+            val parts = cellId.split(':')
+            return PlaceMatchKey(
+                PlaceLevel.GEO_CELL,
+                listOf(
+                    parts.getOrElse(0) { "0" },
+                    parts.getOrElse(1) { "0" },
+                ),
+            )
+        }
 
         fun decode(raw: String): PlaceMatchKey? {
             val colon = raw.indexOf(':')
@@ -81,6 +94,13 @@ fun GalleryDisplayItem.matchesPlace(key: PlaceMatchKey): Boolean {
         val legacy = key.parts.firstOrNull().orEmpty()
         return locationLabel == legacy
     }
+    if (key.level == PlaceLevel.GEO_CELL) {
+        val coords = validPlaceCoordinates(latitude, longitude) ?: return false
+        val cell = geographicCellKey(coords.first, coords.second)
+        val cellParts = cell.split(':')
+        return cellParts.getOrElse(0) { "" } == key.parts.getOrElse(0) { "" } &&
+            cellParts.getOrElse(1) { "" } == key.parts.getOrElse(1) { "" }
+    }
     val components = PlaceComponents.forItem(this) ?: return false
     fun eq(a: String?, b: String): Boolean =
         a?.trim()?.equals(b.trim(), ignoreCase = true) == true
@@ -99,7 +119,9 @@ fun GalleryDisplayItem.matchesPlace(key: PlaceMatchKey): Boolean {
                 eq(components.adminArea, key.parts.getOrElse(1) { "" }) &&
                 eq(components.locality, key.parts.getOrElse(2) { "" }) &&
                 eq(components.subLocality, key.parts.getOrElse(3) { "" })
-        PlaceLevel.LEGACY_LABEL -> locationLabel == key.parts.firstOrNull()
+        PlaceLevel.GEO_CELL,
+        PlaceLevel.LEGACY_LABEL,
+        -> false
     }
 }
 
