@@ -177,6 +177,7 @@ class GalleryViewModel(
     private fun restoreDeferredAlbumListsFromSession(): DeferredAlbumLists {
         val app = appContext.applicationContext as OneGalleryApplication
         val albumEntry = app.galleryProcessAlbumListsCache.peek() ?: return DeferredAlbumLists()
+        if (!albumEntry.isRestorable()) return DeferredAlbumLists()
         val catalogEntry = app.galleryProcessCatalogCache.peek()
         val bootstrap = galleryBootstrap.value
         val fingerprint = bootstrap?.fingerprint
@@ -521,14 +522,64 @@ class GalleryViewModel(
         )
     }
 
+    /** Mesma regra da grade Fotos: RAM/spill por fingerprint, rebuild só se o índice mudou. */
+    private fun applySessionAlbumListsIfCurrent(
+        fingerprint: GalleryCatalogFingerprint,
+        metadataRowCount: Int,
+        userAlbums: List<UserAlbumEntity>,
+        albumSort: AlbumListSort,
+    ): Boolean {
+        val app = appContext.applicationContext as OneGalleryApplication
+        val entry = app.galleryProcessAlbumListsCache.peek() ?: return false
+        if (entry.fingerprint != fingerprint || !entry.isRestorable()) return false
+        val albums = sortMediaAlbums(entry.albums, albumSort)
+        val placeAlbums = sortPlaceAlbums(entry.placeAlbums, albumSort)
+        val catalogItems = latestCatalogItems.ifEmpty {
+            galleryBootstrap.value?.catalogItems
+                ?: app.galleryProcessCatalogCache.peek()?.catalogItems.orEmpty()
+        }
+        deferredAlbumLists.value = DeferredAlbumLists(
+            albums = albums,
+            placeAlbums = placeAlbums,
+            catalogFingerprint = fingerprint,
+            metadataRowCount = metadataRowCount,
+            albumSort = albumSort,
+        )
+        catalogSession.restoreAlbumCaches(
+            albums = albums,
+            placeAlbums = placeAlbums,
+            catalogItems = catalogItems,
+            userAlbumCount = userAlbums.size,
+            albumSort = albumSort,
+            deferCoverModels = metadataRowCount > 3_000,
+            coverRevisionStamp = entry.coverRevisionStamp,
+        )
+        return true
+    }
+
     /** Álbuns vêm do índice Room em paralelo ao catálogo da grade — spill/RAM só aceleram reabertura. */
     private fun scheduleAlbumListsFromMetadata(
         metadata: List<SyncMetadataEntity>,
         userAlbums: List<UserAlbumEntity>,
         albumSort: AlbumListSort,
     ) {
-        if (metadata.isEmpty()) return
+        val app = appContext.applicationContext as OneGalleryApplication
+        if (metadata.isEmpty()) {
+            val spillFingerprint = app.galleryProcessAlbumListsCache.peek()?.fingerprint
+                ?: app.galleryProcessCatalogCache.peek()?.fingerprint
+                ?: return
+            applySessionAlbumListsIfCurrent(
+                fingerprint = spillFingerprint,
+                metadataRowCount = spillFingerprint.rowCount,
+                userAlbums = userAlbums,
+                albumSort = albumSort,
+            )
+            return
+        }
         val fingerprint = GalleryCatalogFingerprint.from(metadata)
+        if (applySessionAlbumListsIfCurrent(fingerprint, metadata.size, userAlbums, albumSort)) {
+            return
+        }
         val pending = deferredAlbumLists.value
         if (pending.catalogFingerprint == fingerprint &&
             pending.metadataRowCount == metadata.size &&
