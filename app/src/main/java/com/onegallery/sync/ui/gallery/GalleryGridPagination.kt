@@ -2,7 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 /** Janela inicial da grade (timeline + células) para não montar dezenas de milhares de entradas de uma vez. */
 object GalleryGridPagination {
-    const val initialLimit: Int = 120
+    const val initialLimit: Int = 72
     const val pageSize: Int = 160
 
     /** Quantos itens visíveis antes do fim da janela carregada disparam [GalleryViewModel.loadMoreGridItems]. */

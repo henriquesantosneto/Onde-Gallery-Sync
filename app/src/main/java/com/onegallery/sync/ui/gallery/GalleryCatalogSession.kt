@@ -38,7 +38,7 @@ class GalleryCatalogSession {
     private var placeAlbumsCacheKey: AlbumsCacheKey? = null
     private var cachedPlaceAlbums: List<MediaAlbum> = emptyList()
 
-    fun publish(bundle: SnapshotBundle) {
+    fun publish(bundle: SnapshotBundle, activeSort: GallerySortOrder = GallerySortOrder.DATE_NEWEST) {
         lastBundle = bundle
         sortedLibraryCache = null
         folderAlbumsCacheKey = null
@@ -47,12 +47,19 @@ class GalleryCatalogSession {
         if (bundle.visibleItems !== preSortVisibleRef) {
             preSortVisibleRef = bundle.visibleItems
             val visible = bundle.visibleItems
-            if (visible.size >= 400) {
-                preSortedDateNewest = visible.sortedByDescending { it.sortTimestamp }
-                preSortedDateOldest = visible.sortedBy { it.sortTimestamp }
-            } else {
+            if (visible.size < 400) {
                 preSortedDateNewest = visible
                 preSortedDateOldest = visible
+            } else {
+                when (activeSort) {
+                    GallerySortOrder.DATE_NEWEST -> {
+                        preSortedDateNewest = visible.sortedByDescending { it.sortTimestamp }
+                    }
+                    GallerySortOrder.DATE_OLDEST -> {
+                        preSortedDateOldest = visible.sortedBy { it.sortTimestamp }
+                    }
+                    else -> Unit
+                }
             }
         }
         if (bundle.catalogItems !== geoCatalogRef) {

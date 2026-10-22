@@ -136,10 +136,10 @@ class OneGalleryApplication : Application() {
         galleryPreferences = GalleryPreferences(this)
         mediaCacheRepository = MediaCacheRepository(this)
         galleryCatalogDiskCache = GalleryCatalogDiskCache(this, applicationScope)
-        applicationScope.launch(Dispatchers.IO) {
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
             mediaCacheRepository.warmThumbnailExistsCache()
-            runCatching { localMediaRepository.loadLocalGallerySnapshot() }
             warmGalleryCatalog = galleryCatalogDiskCache.loadWarmSnapshot()
+            runCatching { localMediaRepository.loadLocalGallerySnapshot() }
         }
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)

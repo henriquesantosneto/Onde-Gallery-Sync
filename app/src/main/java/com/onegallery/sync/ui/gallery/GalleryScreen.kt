@@ -265,13 +265,13 @@ fun GalleryScreen(
         },
     ) { padding ->
         when {
-            gridItems.isEmpty() && !state.indexHydrated -> {
+            gridItems.isEmpty() && state.libraryItems.isEmpty() && !state.indexHydrated -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
             }
-            state.isLoading && gridItems.isEmpty() && state.indexHydrated -> {
+            state.isLoading && gridItems.isEmpty() && state.libraryItems.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,

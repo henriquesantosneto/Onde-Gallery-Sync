@@ -32,7 +32,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.update
@@ -124,7 +127,7 @@ class GalleryViewModel(
     private var pendingReleaseAfterAllFilesAccess: PendingLocalMediaRemoval? = null
 
     private val browseFilter = MutableStateFlow<GalleryBrowseFilter>(GalleryBrowseFilter.All)
-    private val loading = MutableStateFlow(true)
+    private val loading = MutableStateFlow(false)
     private val errorState = MutableStateFlow<String?>(null)
     private val selectionMode = MutableStateFlow(false)
     private val selectedPaths = MutableStateFlow<Set<String>>(emptySet())
@@ -157,8 +160,8 @@ class GalleryViewModel(
     private val galleryCatalogDiskCache =
         (appContext.applicationContext as OneGalleryApplication).galleryCatalogDiskCache
 
-    private val galleryBootstrap = MutableStateFlow<LibrarySnapshot?>(null)
-    private val indexHydrated = MutableStateFlow(false)
+    private val galleryBootstrap = MutableStateFlow(createInitialWarmBootstrapSnapshot())
+    private val indexHydrated = MutableStateFlow(galleryBootstrap.value != null)
 
     private data class DeferredAlbumLists(
         val albums: List<MediaAlbum> = emptyList(),
@@ -172,6 +175,9 @@ class GalleryViewModel(
     private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
 
     init {
+        if (galleryBootstrap.value == null) {
+            loading.value = true
+        }
         viewModelScope.launch {
             syncCoordinator.galleryMetadata.collect {
                 indexHydrated.value = true
@@ -180,6 +186,36 @@ class GalleryViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             seedWarmBootstrapIfAvailable()
         }
+    }
+
+    private fun createInitialWarmBootstrapSnapshot(): LibrarySnapshot? {
+        val app = appContext.applicationContext as OneGalleryApplication
+        val warm = app.warmGalleryCatalog ?: return null
+        if (warm.catalogItems.isEmpty()) return null
+        publishWarmSnapshot(warm, userAlbums = emptyList(), activeSort = galleryPreferences.sortOrder)
+        return LibrarySnapshot(
+            catalogItems = warm.catalogItems,
+            visibleItems = warm.catalogItems,
+            userAlbums = emptyList(),
+            fingerprint = warm.fingerprint,
+        )
+    }
+
+    private fun publishWarmSnapshot(
+        warm: GalleryCatalogDiskCache.GalleryWarmCatalog,
+        userAlbums: List<UserAlbumEntity>,
+        activeSort: GallerySortOrder = sortOrder.value,
+    ) {
+        catalogSession.publish(
+            GalleryCatalogSession.SnapshotBundle(
+                catalogItems = warm.catalogItems,
+                visibleItems = warm.catalogItems,
+                userAlbums = userAlbums,
+                fingerprint = warm.fingerprint,
+                localRevision = warm.localRevision,
+            ),
+            activeSort = activeSort,
+        )
     }
 
     fun loadMoreGridItems() {
@@ -265,9 +301,22 @@ class GalleryViewModel(
             }.flowOn(Dispatchers.IO)
         }
 
-    private val librarySnapshotLive = combine(
+    private val emptyLibrarySnapshot = LibrarySnapshot(
+        catalogItems = emptyList(),
+        visibleItems = emptyList(),
+        userAlbums = emptyList(),
+        fingerprint = null,
+    )
+
+    /** Emite vazio logo para [effectiveLibrarySnapshot] usar [galleryBootstrap] sem esperar o map de 21k. */
+    private val librarySnapshotCoreSeeded = merge(
+        flowOf(emptyLibrarySnapshot),
         librarySnapshotCore,
-        syncCoordinator.galleryDisplayRefreshEpoch,
+    )
+
+    private val librarySnapshotLive = combine(
+        librarySnapshotCoreSeeded,
+        syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
     ) { snapshot, _ ->
         if (snapshot.catalogItems.size > 8_000) {
             snapshot
@@ -317,19 +366,10 @@ class GalleryViewModel(
         if (warm.catalogItems.isEmpty()) {
             return LibrarySnapshot(emptyList(), emptyList(), userAlbums)
         }
-        val visible = filterVisibleForGalleryBrowse(warm.catalogItems, mediaCacheRepository)
-        catalogSession.publish(
-            GalleryCatalogSession.SnapshotBundle(
-                catalogItems = warm.catalogItems,
-                visibleItems = visible,
-                userAlbums = userAlbums,
-                fingerprint = warm.fingerprint,
-                localRevision = warm.localRevision,
-            ),
-        )
+        publishWarmSnapshot(warm, userAlbums, activeSort = sortOrder.value)
         return LibrarySnapshot(
             catalogItems = warm.catalogItems,
-            visibleItems = visible,
+            visibleItems = warm.catalogItems,
             userAlbums = userAlbums,
             fingerprint = warm.fingerprint,
         )
@@ -370,6 +410,7 @@ class GalleryViewModel(
                 fingerprint = fingerprint,
                 localRevision = localRevision,
             ),
+            activeSort = sortOrder.value,
         )
         if (catalog.size <= 6_000) {
             galleryCatalogDiskCache.scheduleSave(catalog, fingerprint, localRevision)
