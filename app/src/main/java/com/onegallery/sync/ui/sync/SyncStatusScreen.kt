@@ -103,8 +103,6 @@ fun SyncStatusScreen(
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
     }
-    val queueIsThumbnailBatch = coordinatorState.runQueue.isNotEmpty() &&
-        coordinatorState.progressPhase == SyncProgressPhase.PREFETCH_THUMBNAILS
     val activeItems = coordinatorState.activeItems
     val activePaths = remember(activeItems) {
         activeItems.map { it.canonicalPath }.toSet()
@@ -243,8 +241,6 @@ fun SyncStatusScreen(
                     queueWaiting = queueWaiting,
                     activeItems = activeItems,
                     isRunning = coordinatorState.isRunning,
-                    queueIsThumbnailBatch = queueIsThumbnailBatch,
-                    thumbnailPendingTotal = coordinatorState.thumbnailStats?.indexedPending ?: 0,
                 )
             }
 
@@ -355,90 +351,55 @@ private fun SyncQueueScrollPanel(
     queueWaiting: List<SyncQueueDisplayRow>,
     activeItems: List<ActiveSyncItem>,
     isRunning: Boolean,
-    queueIsThumbnailBatch: Boolean,
-    thumbnailPendingTotal: Int,
 ) {
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
-    val activeCount = activeItems.size
-    val waitingCount = queueWaiting.size
-    val listCount = activeCount + waitingCount
-    Column(modifier = Modifier.fillMaxWidth()) {
-        val title = when {
-            queueIsThumbnailBatch && thumbnailPendingTotal > 0 ->
-                "Miniaturas · $activeCount em andamento · $waitingCount na fila " +
-                    "(~$thumbnailPendingTotal no índice)"
-            queueIsThumbnailBatch ->
-                "Miniaturas · $activeCount em andamento · $waitingCount na fila"
-            listCount > 0 ->
-                "Transferências · $activeCount em andamento · $waitingCount na fila"
-            else ->
-                "Transferências e fila"
-        }
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 6.dp),
-        )
-        if (!queueIsThumbnailBatch && thumbnailPendingTotal > 0 && listCount == 0) {
-            Text(
-                "~$thumbnailPendingTotal miniatura(s) ainda sem cache — aparecem aqui ao processar.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 6.dp),
-            )
-        }
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(viewportHeight)
-                .border(1.dp, outline, MaterialTheme.shapes.medium),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            if (listCount == 0) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        when {
-                            thumbnailPendingTotal > 0 ->
-                                "~$thumbnailPendingTotal miniatura(s) pendentes — iniciando leva…"
-                            isRunning ->
-                                "Nenhum item aguardando na fila."
-                            else ->
-                                "Nenhuma operação de sync — toque em Sincronizar agora."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+    val listCount = activeItems.size + queueWaiting.size
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(viewportHeight)
+            .border(1.dp, outline, MaterialTheme.shapes.medium),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        if (listCount == 0) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    when {
+                        isRunning -> "Aguardando itens…"
+                        else -> "Nada pendente"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
+            ) {
+                items(
+                    activeItems,
+                    key = { "active-${it.canonicalPath}" },
+                ) { item ->
+                    SyncActiveTransferRow(item)
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
-                ) {
-                    items(
-                        activeItems,
-                        key = { "active-${it.canonicalPath}" },
-                    ) { item ->
-                        SyncActiveTransferRow(item)
-                    }
-                    items(
-                        queueWaiting,
-                        key = { "queue-${it.canonicalPath}" },
-                    ) { row ->
-                        SyncQueueItemRow(
-                            row = row,
-                            activeItems = emptyList(),
-                            isRunning = isRunning,
-                        )
-                    }
+                items(
+                    queueWaiting,
+                    key = { "queue-${it.canonicalPath}" },
+                ) { row ->
+                    SyncQueueItemRow(
+                        row = row,
+                        activeItems = emptyList(),
+                        isRunning = isRunning,
+                    )
                 }
             }
         }
