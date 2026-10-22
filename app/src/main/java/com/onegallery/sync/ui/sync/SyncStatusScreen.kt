@@ -1,17 +1,25 @@
 package com.onegallery.sync.ui.sync
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Button
@@ -37,7 +45,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -322,14 +329,14 @@ fun SyncStatusScreen(
 
 private val SyncQueueRowStride = 52.dp
 private val SyncQueueRowGap = 8.dp
-private const val SyncQueueVisibleRowCount = 20
+private const val SyncQueueVisibleRowCount = 10
 
 @Composable
 private fun syncQueueListViewportHeight(): Dp {
-    val screenCap = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
-    val twentyRows = SyncQueueRowStride * SyncQueueVisibleRowCount +
-        SyncQueueRowGap * (SyncQueueVisibleRowCount - 1)
-    return minOf(twentyRows, screenCap)
+    val fixedViewport = SyncQueueRowStride * SyncQueueVisibleRowCount +
+        SyncQueueRowGap * (SyncQueueVisibleRowCount - 1) +
+        16.dp
+    return fixedViewport
 }
 
 @Composable
@@ -366,29 +373,77 @@ private fun SyncQueueScrollPanel(
                 )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
-            ) {
-                items(
-                    activeItems,
-                    key = { "active-${it.canonicalPath}" },
-                ) { item ->
-                    SyncActiveTransferRow(item)
+            val listState = rememberLazyListState()
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
+                ) {
+                    items(
+                        activeItems,
+                        key = { "active-${it.canonicalPath}" },
+                    ) { item ->
+                        SyncActiveTransferRow(item)
+                    }
+                    items(
+                        queueWaiting,
+                        key = { "queue-${it.canonicalPath}" },
+                    ) { row ->
+                        SyncQueueItemRow(
+                            row = row,
+                            activeItems = emptyList(),
+                            isRunning = isRunning,
+                        )
+                    }
                 }
-                items(
-                    queueWaiting,
-                    key = { "queue-${it.canonicalPath}" },
-                ) { row ->
-                    SyncQueueItemRow(
-                        row = row,
-                        activeItems = emptyList(),
-                        isRunning = isRunning,
-                    )
-                }
+                SyncQueueScrollbar(
+                    listState = listState,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .padding(end = 4.dp, top = 8.dp, bottom = 8.dp),
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun SyncQueueScrollbar(
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val layoutInfo = listState.layoutInfo
+    val totalItems = layoutInfo.totalItemsCount
+    val visibleCount = layoutInfo.visibleItemsInfo.size
+    if (totalItems <= visibleCount || visibleCount == 0) return
+    val scrollRange = (totalItems - visibleCount).coerceAtLeast(1)
+    val scrollIndex = listState.firstVisibleItemIndex.coerceIn(0, scrollRange)
+    val thumbFraction = visibleCount.toFloat() / totalItems.toFloat()
+    val thumbOffsetFraction = scrollIndex.toFloat() / scrollRange.toFloat()
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    val thumbColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.85f)
+    BoxWithConstraints(
+        modifier = modifier.width(5.dp),
+    ) {
+        val trackHeight = maxHeight
+        val thumbHeight = trackHeight * thumbFraction.coerceIn(0.12f, 1f)
+        val maxTravel = (trackHeight - thumbHeight).coerceAtLeast(0.dp)
+        val thumbTop = maxTravel * thumbOffsetFraction
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(trackColor, RoundedCornerShape(3.dp)),
+        )
+        Box(
+            modifier = Modifier
+                .width(5.dp)
+                .height(thumbHeight)
+                .offset(y = thumbTop)
+                .background(thumbColor, RoundedCornerShape(3.dp)),
+        )
     }
 }
 
