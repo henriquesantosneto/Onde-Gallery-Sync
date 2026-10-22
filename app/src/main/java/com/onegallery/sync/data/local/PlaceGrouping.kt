@@ -95,6 +95,7 @@ private fun SyncMetadataEntity.sortTimestamp(): Long =
 internal fun SyncMetadataEntity.placeMediaDedupeKey(): String {
     localMediaId?.let { return "localId:$it" }
     oneDriveItemId?.let { return "cloudId:$it" }
+    placeGeoDedupeKey()?.let { return "geoCap:$it" }
     return "path:$canonicalPath"
 }
 
@@ -118,9 +119,18 @@ private fun <T> collapsePlaceCandidatesByKey(
  * Sem colapso por [galleryDedupeKey], a mesma câmera pode gerar duas linhas (GPS parcial vs
  * endereço completo) e aparecer em álbum de cidade e de bairro ao mesmo tempo.
  */
+internal fun GalleryDisplayItem.placeAlbumCollapseKey(): String {
+    localMediaId?.let { return "localId:$it" }
+    oneDriveItemId?.let { return "cloudId:$it" }
+    placeGeoDedupeKey()?.let { return "geoCap:$it" }
+    val path = canonicalPath.trim()
+    if (path.isNotEmpty()) return "path:$path"
+    return galleryDedupeKey()
+}
+
 internal fun collapseItemsForPlaceAlbums(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
     if (items.size <= 1) return items
-    val afterMedia = collapsePlaceCandidatesByKey(items, { it.galleryDedupeKey() }, ::pickBetterForPlaceGrouping)
+    val afterMedia = collapsePlaceCandidatesByKey(items, { it.placeAlbumCollapseKey() }, ::pickBetterForPlaceGrouping)
     return collapsePlaceCandidatesByKey(
         afterMedia,
         { it.placeGeoDedupeKey() ?: "path:${it.canonicalPath}" },

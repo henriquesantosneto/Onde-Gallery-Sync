@@ -76,9 +76,12 @@ private fun textPlaceAlbumEncodedKey(locationLabel: String?): String? {
     val label = locationLabel?.trim().orEmpty()
     if (label.isEmpty()) return null
     if (label.contains('°')) return PlaceMatchKey.legacyLabel(label).encode()
-    val components = PlaceComponents.fromGeocoderLabel(label) ?: return PlaceMatchKey.legacyLabel(label).encode()
-    return PlaceMatchKey.forComponents(components, label).encode()
+    val title = PlaceComponents.fromGeocoderLabel(label)?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
+        ?: label
+    return PlaceMatchKey.legacyLabel(title).encode()
 }
+
+internal fun GalleryDisplayItem.placeAlbumDisplayTitle(): String = placeAlbumTitleFromItem(this)
 
 private fun placeAlbumTitleFromItem(item: GalleryDisplayItem): String {
     val label = item.locationLabel?.trim().orEmpty()

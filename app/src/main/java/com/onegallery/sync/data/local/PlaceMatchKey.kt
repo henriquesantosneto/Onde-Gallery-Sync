@@ -89,17 +89,30 @@ data class PlaceMatchKey(
     }
 }
 
-fun GalleryDisplayItem.matchesPlace(key: PlaceMatchKey): Boolean {
+fun GalleryDisplayItem.matchesPlace(
+    key: PlaceMatchKey,
+    albumDisplayTitle: String? = null,
+): Boolean {
     if (key.level == PlaceLevel.LEGACY_LABEL) {
         val legacy = key.parts.firstOrNull().orEmpty()
-        return locationLabel == legacy
+        if (locationLabel == legacy) return true
+        return placeAlbumDisplayTitle().equals(legacy, ignoreCase = true)
     }
     if (key.level == PlaceLevel.GEO_CELL) {
-        val coords = validPlaceCoordinates(latitude, longitude) ?: return false
-        val cell = geographicCellKey(coords.first, coords.second)
-        val cellParts = cell.split(':')
-        return cellParts.getOrElse(0) { "" } == key.parts.getOrElse(0) { "" } &&
-            cellParts.getOrElse(1) { "" } == key.parts.getOrElse(1) { "" }
+        val coords = validPlaceCoordinates(latitude, longitude)
+        if (coords != null) {
+            val cell = geographicCellKey(coords.first, coords.second)
+            val cellParts = cell.split(':')
+            if (cellParts.getOrElse(0) { "" } == key.parts.getOrElse(0) { "" } &&
+                cellParts.getOrElse(1) { "" } == key.parts.getOrElse(1) { "" }
+            ) {
+                return true
+            }
+        }
+        if (!albumDisplayTitle.isNullOrBlank()) {
+            return placeAlbumDisplayTitle().equals(albumDisplayTitle.trim(), ignoreCase = true)
+        }
+        return false
     }
     val components = PlaceComponents.forItem(this) ?: return false
     fun eq(a: String?, b: String): Boolean =

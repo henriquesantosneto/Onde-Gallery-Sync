@@ -28,7 +28,7 @@ fun resolveBrowseGridItems(
         return libraryItems
             .filter { item ->
                 when {
-                    matchKey != null -> item.matchesPlace(matchKey)
+                    matchKey != null -> item.matchesPlace(matchKey, routePlaceTitle)
                     !routePlaceTitle.isNullOrBlank() -> item.locationLabel == routePlaceTitle
                     else -> false
                 }

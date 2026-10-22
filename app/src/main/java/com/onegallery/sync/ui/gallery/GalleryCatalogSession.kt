@@ -156,7 +156,7 @@ class GalleryCatalogSession {
                 }
                 val matchKey = PlaceMatchKey.decode(filter.matchKey)
                 val filtered = visibleItems.filter { item ->
-                    matchKey?.let { item.matchesPlace(it) }
+                    matchKey?.let { item.matchesPlace(it, filter.displayName) }
                         ?: (item.locationLabel == filter.displayName)
                 }.sortedBy(order)
                 browseFilterCacheKey = cacheKey
@@ -274,7 +274,13 @@ class GalleryCatalogSession {
         val coverRevisionStamp: Long,
         val catalogHead: String?,
         val catalogTail: String?,
+        /** Invalida cache após mudança de agrupamento de locais (~3 km / rótulo). */
+        val placeGroupingVersion: Int = PLACE_ALBUM_GROUPING_VERSION,
     )
+
+    companion object {
+        const val PLACE_ALBUM_GROUPING_VERSION = 2
+    }
 
     private fun computeGeoItems(catalog: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
         if (catalog.isEmpty()) return emptyList()

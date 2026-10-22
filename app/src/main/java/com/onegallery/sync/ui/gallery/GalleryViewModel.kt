@@ -267,6 +267,7 @@ class GalleryViewModel(
             if (deferredAlbumLists.value.albums.isEmpty()) {
                 scheduleAlbumListsFromLocalCatalog(
                     catalogItems = snap.catalogItems,
+                    visibleItems = snap.visibleItems,
                     fingerprint = fingerprint,
                     userAlbums = snap.userAlbums,
                     albumSort = galleryPreferences.albumListSort,
@@ -510,6 +511,7 @@ class GalleryViewModel(
                     }
                     scheduleAlbumListsFromLocalCatalog(
                         catalogItems = catalogItems,
+                        visibleItems = snapshot.visibleItems,
                         fingerprint = fingerprint,
                         userAlbums = snapshot.userAlbums,
                         albumSort = sort,
@@ -641,12 +643,14 @@ class GalleryViewModel(
     /** Monta pastas/locais a partir do catálogo local (MediaStore/bootstrap) — sem Room, mesmo caminho rápido da grade Fotos. */
     private fun scheduleAlbumListsFromLocalCatalog(
         catalogItems: List<GalleryDisplayItem>,
+        visibleItems: List<GalleryDisplayItem>,
         fingerprint: GalleryCatalogFingerprint,
         userAlbums: List<UserAlbumEntity>,
         albumSort: AlbumListSort,
         localRevision: Long,
     ) {
         if (catalogItems.isEmpty()) return
+        val albumItems = itemsForAlbumListGrouping(catalogItems, visibleItems)
         val pending = deferredAlbumLists.value
         if (pending.albums.isNotEmpty() &&
             pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
@@ -690,7 +694,7 @@ class GalleryViewModel(
                 )
             }
             val skeletonAlbums = buildAlbums(
-                catalogItems,
+                albumItems,
                 userAlbums,
                 albumSort,
                 albumCoverLocalIndex,
@@ -699,7 +703,7 @@ class GalleryViewModel(
             )
             val skeletonPlaces = sortPlaceAlbums(
                 buildPlaceAlbums(
-                    catalogItems,
+                    albumItems,
                     albumCoverLocalIndex,
                     mediaCacheRepository,
                     resolveCoverModels = false,
@@ -713,7 +717,7 @@ class GalleryViewModel(
             val resolveCovers = !deferCovers
             publish(
                 buildAlbums(
-                    catalogItems,
+                    albumItems,
                     userAlbums,
                     albumSort,
                     albumCoverLocalIndex,
@@ -722,7 +726,7 @@ class GalleryViewModel(
                 ),
                 sortPlaceAlbums(
                     buildPlaceAlbums(
-                        catalogItems,
+                        albumItems,
                         albumCoverLocalIndex,
                         mediaCacheRepository,
                         resolveCoverModels = resolveCovers,
@@ -763,6 +767,7 @@ class GalleryViewModel(
                     )
                 scheduleAlbumListsFromLocalCatalog(
                     catalogItems = bootstrapSnap.catalogItems,
+                    visibleItems = bootstrapSnap.visibleItems,
                     fingerprint = fingerprint,
                     userAlbums = userAlbums,
                     albumSort = albumSort,
@@ -776,6 +781,7 @@ class GalleryViewModel(
             if (catalogEntry != null && catalogEntry.catalogItems.isNotEmpty()) {
                 scheduleAlbumListsFromLocalCatalog(
                     catalogItems = catalogEntry.catalogItems,
+                    visibleItems = catalogEntry.visibleItems,
                     fingerprint = catalogEntry.fingerprint,
                     userAlbums = userAlbums,
                     albumSort = albumSort,
@@ -794,6 +800,7 @@ class GalleryViewModel(
                 ) ?: return@launch
                 scheduleAlbumListsFromLocalCatalog(
                     catalogItems = localBundle.catalogItems,
+                    visibleItems = localBundle.visibleItems,
                     fingerprint = localBundle.fingerprint,
                     userAlbums = userAlbums,
                     albumSort = albumSort,
@@ -1041,10 +1048,11 @@ class GalleryViewModel(
         }
         val userAlbums = snapshot.userAlbums
         val coverRevisionStamp = coverRevisions.values.fold(0L) { acc, stamp -> acc xor stamp }
+        val albumListItems = itemsForAlbumListGrouping(catalogItems, visibleItems)
         val (displayAlbums, displayPlaceAlbums) = albumListsForUi(
             albumLists = albumLists,
             fingerprint = fingerprint,
-            catalogItems = catalogItems,
+            catalogItems = albumListItems,
             userAlbums = userAlbums,
             albumSort = controls.albumSort,
             deferAlbumCoverModels = deferAlbumCoverModels,
@@ -1117,7 +1125,7 @@ class GalleryViewModel(
         clearSelection()
         if (placeKey != null) {
             viewModelScope.launch(Dispatchers.IO) {
-                prefetchBrowseThumbnailsForPlace(placeKey)
+                prefetchBrowseThumbnailsForPlace(placeKey, displayName)
             }
         }
     }
@@ -1179,7 +1187,9 @@ class GalleryViewModel(
                 changed.add(key)
             }
         }
-        groupDisplayItemsForPlaceAlbums(catalogItems).forEach { (encoded, group) ->
+        groupDisplayItemsForPlaceAlbums(
+            itemsForAlbumListGrouping(catalogItems, latestLibraryItems),
+        ).forEach { (encoded, group) ->
             val key = "place:$encoded"
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
             val previous = placeAlbumLatestSort.put(key, latest)
@@ -1195,10 +1205,10 @@ class GalleryViewModel(
         prefetchBrowseThumbnails(items, coverBucketId = "album:$albumName")
     }
 
-    private suspend fun prefetchBrowseThumbnailsForPlace(encodedMatchKey: String) {
+    private suspend fun prefetchBrowseThumbnailsForPlace(encodedMatchKey: String, albumTitle: String? = null) {
         val matchKey = PlaceMatchKey.decode(encodedMatchKey)
         val items = latestLibraryItems.filter { item ->
-            matchKey?.let { item.matchesPlace(it) } == true
+            matchKey?.let { item.matchesPlace(it, albumTitle) } == true
         }
         prefetchBrowseThumbnails(items, coverBucketId = "place:$encodedMatchKey")
     }
@@ -1291,7 +1301,7 @@ class GalleryViewModel(
                 val encoded = album.bucketId.removePrefix("place:")
                 val matchKey = PlaceMatchKey.decode(encoded)
                 all.filter { item ->
-                    matchKey?.let { item.matchesPlace(it) }
+                    matchKey?.let { item.matchesPlace(it, album.title) }
                         ?: (item.locationLabel == album.title)
                 }
             }
