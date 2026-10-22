@@ -190,6 +190,7 @@ fun OneGalleryApp(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ ->
+        app.localMediaRepository.invalidateLocalGallerySnapshot()
         // Sync fica só em segundo plano (WorkManager / MediaStore); abrir o app não dispara sync.
     }
 

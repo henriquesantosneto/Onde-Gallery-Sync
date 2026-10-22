@@ -10,10 +10,30 @@ import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 
 class LocalMediaRepository(private val context: Context) {
+
+    private val _localGalleryRevision = MutableStateFlow(0L)
+    val localGalleryRevision: StateFlow<Long> = _localGalleryRevision.asStateFlow()
+
+    @Volatile
+    private var cachedLocalGallerySnapshot: List<LocalMediaItem>? = null
+
+    fun invalidateLocalGallerySnapshot() {
+        cachedLocalGallerySnapshot = null
+        _localGalleryRevision.value = System.nanoTime()
+    }
+
+    /** Uma varredura do MediaStore (cacheada até [invalidateLocalGallerySnapshot]). */
+    suspend fun loadLocalGallerySnapshot(): List<LocalMediaItem> = withContext(Dispatchers.IO) {
+        cachedLocalGallerySnapshot?.let { return@withContext it }
+        loadAllMedia().also { cachedLocalGallerySnapshot = it }
+    }
 
     fun loadAlbums(): List<MediaAlbum> {
         val albums = linkedMapOf<String, MutableList<LocalMediaItem>>()

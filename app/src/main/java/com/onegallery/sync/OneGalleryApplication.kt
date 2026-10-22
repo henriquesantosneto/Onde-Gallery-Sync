@@ -124,6 +124,7 @@ class OneGalleryApplication : Application() {
         mediaCacheRepository = MediaCacheRepository(this)
         applicationScope.launch(Dispatchers.IO) {
             mediaCacheRepository.warmThumbnailExistsCache()
+            runCatching { localMediaRepository.loadLocalGallerySnapshot() }
         }
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
@@ -151,7 +152,11 @@ class OneGalleryApplication : Application() {
             backgroundScope = applicationScope,
         )
         syncTaskLauncher = SyncTaskLauncher(this, syncCoordinator)
-        mediaLibraryChangeWatcher = MediaLibraryChangeWatcher(applicationContext, syncPreferences)
+        mediaLibraryChangeWatcher = MediaLibraryChangeWatcher(
+            context = applicationContext,
+            syncPreferences = syncPreferences,
+            onLibraryChanged = { localMediaRepository.invalidateLocalGallerySnapshot() },
+        )
         registerWifiSyncNetworkGuard()
         rescheduleBackgroundSync()
     }

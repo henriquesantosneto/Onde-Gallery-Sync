@@ -11,6 +11,7 @@ import com.onegallery.sync.worker.BackgroundSyncScheduler
 class MediaLibraryChangeWatcher(
     private val context: Context,
     private val syncPreferences: SyncPreferences,
+    private val onLibraryChanged: () -> Unit = {},
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var registered = false
@@ -25,6 +26,7 @@ class MediaLibraryChangeWatcher(
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean) {
+            onLibraryChanged()
             scheduleDebouncedSync()
         }
     }

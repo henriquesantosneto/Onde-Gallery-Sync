@@ -11,6 +11,7 @@ import com.onegallery.sync.data.local.PlaceLevel
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.matchesPlace
 import com.onegallery.sync.data.local.preferredBrowseKey
+import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import android.content.Context
 import com.onegallery.sync.data.local.MediaStorageAccess
@@ -27,6 +28,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -154,32 +157,46 @@ class GalleryViewModel(
         syncCoordinator.galleryMetadata,
         syncCoordinator.userAlbums,
         syncCoordinator.galleryDisplayRefreshEpoch,
-    ) { metadata, userAlbums, _ ->
+        localMediaRepository.localGalleryRevision,
+    ) { metadata, userAlbums, _, _ ->
         metadata to userAlbums
     }.conflate()
-        .map { (metadata, userAlbums) ->
-            runCatching {
-                val catalog = dedupeGalleryDisplayItems(
-                    metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
-                )
-                LibrarySnapshot(
-                    catalogItems = catalog,
-                    visibleItems = catalog.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
-                    userAlbums = userAlbums,
-                )
-            }.getOrElse { error ->
-                if (error is OutOfMemoryError) {
-                    errorState.value = "Biblioteca muito grande para exibir de uma vez. Sincronize em partes."
-                    LibrarySnapshot(
-                        catalogItems = emptyList(),
-                        visibleItems = emptyList(),
-                        userAlbums = userAlbums,
-                    )
-                } else {
-                    throw error
+        .flatMapLatest { (metadata, userAlbums) ->
+            flow {
+                val snapshot = runCatching {
+                    buildLibrarySnapshot(metadata, userAlbums)
+                }.getOrElse { error ->
+                    if (error is OutOfMemoryError) {
+                        errorState.value =
+                            "Biblioteca muito grande para exibir de uma vez. Sincronize em partes."
+                        LibrarySnapshot(
+                            catalogItems = emptyList(),
+                            visibleItems = emptyList(),
+                            userAlbums = userAlbums,
+                        )
+                    } else {
+                        throw error
+                    }
                 }
-            }
+                emit(snapshot)
+            }.flowOn(Dispatchers.IO)
         }.flowOn(Dispatchers.Default)
+
+    private suspend fun buildLibrarySnapshot(
+        metadata: List<SyncMetadataEntity>,
+        userAlbums: List<UserAlbumEntity>,
+    ): LibrarySnapshot {
+        val indexed = dedupeGalleryDisplayItems(
+            metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
+        )
+        val localItems = localMediaRepository.loadLocalGallerySnapshot()
+        val catalog = mergeIndexedGalleryWithLocalMedia(indexed, localItems, mediaCacheRepository)
+        return LibrarySnapshot(
+            catalogItems = catalog,
+            visibleItems = catalog.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
+            userAlbums = userAlbums,
+        )
+    }
 
     private val uiControls = combine(
         combine(browseFilter, loading, errorState, selectionMode) { filter, isLoading, error, selecting ->

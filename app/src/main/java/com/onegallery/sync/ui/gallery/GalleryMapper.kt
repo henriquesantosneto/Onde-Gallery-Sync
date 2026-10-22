@@ -1,11 +1,13 @@
 package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
+import com.onegallery.sync.data.local.LocalMediaItem
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.sync.PendingDeleteTarget
+import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
-import com.onegallery.sync.sync.SyncPaths
 import java.io.File
 
 object GalleryMapper {
@@ -83,5 +85,46 @@ object GalleryMapper {
 
     private fun resolveDisplayAlbumName(entity: SyncMetadataEntity): String {
         return GalleryAlbumKeys.forEntity(entity)
+    }
+
+    /** MediaStore antes do sync indexar a linha no Room. */
+    fun toDisplayItemFromLocal(
+        item: LocalMediaItem,
+        mediaCacheRepository: MediaCacheRepository,
+    ): GalleryDisplayItem {
+        val canonical = SyncPaths.canonicalFromLocal(item)
+        val kind = if (isVideoFileName(item.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
+        val placeholderThumb = if (mediaCacheRepository.isThumbnailCachedFast(canonical, null)) {
+            mediaCacheRepository.thumbFile(canonical).takeIf { it.isFile && it.length() > 0L }
+        } else {
+            null
+        }
+        val sort = item.dateTakenSeconds?.takeIf { it > 0L }
+            ?: item.dateAddedSeconds.takeIf { it > 0L }
+            ?: item.dateModifiedSeconds.takeIf { it > 0L }
+            ?: 0L
+        return GalleryDisplayItem(
+            canonicalPath = canonical,
+            displayName = item.displayName,
+            albumName = SyncPaths.folderAlbumName(
+                canonicalPath = canonical,
+                relativePath = item.relativePath,
+                bucketDisplayName = item.bucketDisplayName,
+            ),
+            kind = kind,
+            cloudState = CloudSyncState.LOCAL_ONLY,
+            localMediaId = item.id,
+            oneDriveItemId = null,
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = item.uri,
+            cachedOriginal = null,
+            cachedPlaceholderThumb = placeholderThumb,
+            sortTimestamp = sort,
+            locationLabel = null,
+            latitude = item.latitude,
+            longitude = item.longitude,
+            videoDurationMs = item.durationMs,
+            localReleasedForSpace = false,
+        )
     }
 }
