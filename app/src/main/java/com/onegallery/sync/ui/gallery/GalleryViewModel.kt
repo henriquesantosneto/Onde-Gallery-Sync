@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -281,6 +282,11 @@ class GalleryViewModel(
 
     fun onReturningToForeground() {
         loading.value = false
+        viewModelScope.launch {
+            val metadata = syncCoordinator.galleryMetadata.first()
+            val userAlbums = syncCoordinator.userAlbums.first()
+            scheduleAlbumListsFromMetadata(metadata, userAlbums, albumListSort.value)
+        }
     }
 
     fun loadMoreGridItems() {
@@ -393,8 +399,12 @@ class GalleryViewModel(
     private val librarySnapshotLive = combine(
         librarySnapshotCore,
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
-    ) { snapshot, _ ->
+        syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
+    ) { snapshot, _, syncRunning ->
         if (snapshot.catalogItems.size > 8_000) {
+            snapshot
+        } else if (!syncRunning && snapshot.catalogItems.isNotEmpty()) {
+            // Pós-sync: prefetch de miniaturas dispara refresh em lote — não revarrer catálogo inteiro parado.
             snapshot
         } else {
             catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
@@ -526,6 +536,10 @@ class GalleryViewModel(
         albumListsBuildJob?.cancel()
         albumListsBuildJob = viewModelScope.launch(Dispatchers.Default) {
             val deferCovers = metadata.size > 3_000
+            val app = appContext.applicationContext as OneGalleryApplication
+            val skipHeavyCoverPass = deferCovers &&
+                app.appForegroundState.isInForeground() &&
+                !syncCoordinator.state.value.isRunning
             val catalogItems = latestCatalogItems
             fun publishLists(
                 albums: List<MediaAlbum>,
@@ -577,6 +591,7 @@ class GalleryViewModel(
             if (deferCovers) {
                 publishLists(skeletonAlbums, skeletonPlaces, coverRevisionStamp)
             }
+            if (skipHeavyCoverPass) return@launch
             val withCovers = GalleryAlbumIndexBuilder.buildFolderAlbums(
                 metadata = metadata,
                 userAlbums = userAlbums,

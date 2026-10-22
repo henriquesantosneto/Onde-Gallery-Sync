@@ -47,11 +47,13 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = application as OneGalleryApplication
         app.appForegroundState.setForeground(true)
+        app.syncCoordinator.onAppUiVisibilityChanged(inForeground = true)
     }
 
     override fun onStop() {
         val app = application as OneGalleryApplication
         app.appForegroundState.setForeground(false)
+        app.syncCoordinator.onAppUiVisibilityChanged(inForeground = false)
         app.persistSessionCatalogForBackground()
         super.onStop()
     }
