@@ -1,13 +1,13 @@
 package com.onegallery.sync.ui.sync
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,6 +25,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -35,7 +36,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,6 +92,13 @@ fun SyncStatusScreen(
             coordinatorState.isRunning -> emptyList()
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
+    }
+    val activeItems = coordinatorState.activeItems
+    val activePaths = remember(activeItems) {
+        activeItems.map { it.canonicalPath }.toSet()
+    }
+    val queueWaiting = remember(queueForUi, activePaths) {
+        queueForUi.filter { it.canonicalPath !in activePaths }
     }
 
     Scaffold(
@@ -173,7 +184,6 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        val activeItems = coordinatorState.activeItems
                         if (coordinatorState.isRunning) {
                             if (activeItems.isEmpty()) {
                                 LinearProgressIndicator(
@@ -198,55 +208,38 @@ fun SyncStatusScreen(
                                     }
                                 }
                             }
-                        }
-                        val activePaths = activeItems.map { it.canonicalPath }.toSet()
-                        val queueWaiting = queueForUi.filter { it.canonicalPath !in activePaths }
-                        if (queueWaiting.isNotEmpty()) {
-                            Text(
-                                if (queueWaiting.size > 1) {
-                                    "Aguardando na fila (${queueWaiting.size})"
-                                } else {
-                                    "Aguardando na fila"
-                                },
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
-                            )
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 200.dp)
-                                    .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                queueWaiting.forEach { row ->
-                                    SyncQueueItemRow(
-                                        row = row,
-                                        activeItems = coordinatorState.activeItems,
-                                        isRunning = coordinatorState.isRunning,
+                            if (queueWaiting.isEmpty() && coordinatorState.activityDetail.isBlank()) {
+                                val phaseHint = when (coordinatorState.progressPhase) {
+                                    SyncProgressPhase.LISTING_REMOTE ->
+                                        "Varrendo todas as subpastas no OneDrive (pode levar vários minutos). " +
+                                            "Não mostramos subpasta a subpasta — só a pasta raiz de sync acima."
+                                    SyncProgressPhase.SANITIZING_INDEX ->
+                                        "Última checagem de entradas duplicadas ou órfãs."
+                                    else -> null
+                                }
+                                phaseHint?.let { hint ->
+                                    Text(
+                                        hint,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 12.dp),
                                     )
                                 }
-                            }
-                        } else if (coordinatorState.isRunning && coordinatorState.activityDetail.isBlank()) {
-                            val phaseHint = when (coordinatorState.progressPhase) {
-                                SyncProgressPhase.LISTING_REMOTE ->
-                                    "Varrendo todas as subpastas no OneDrive (pode levar vários minutos). " +
-                                        "Não mostramos subpasta a subpasta — só a pasta raiz de sync acima."
-                                SyncProgressPhase.SANITIZING_INDEX ->
-                                    "Última checagem de entradas duplicadas ou órfãs."
-                                else -> null
-                            }
-                            phaseHint?.let { hint ->
-                                Text(
-                                    hint,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 12.dp),
-                                )
                             }
                         }
                     }
                 }
+            }
+
+            item {
+                SyncQueueScrollPanel(
+                    queueWaiting = queueWaiting,
+                    activeItems = activeItems,
+                    isRunning = coordinatorState.isRunning,
+                )
+            }
+
+            item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -331,6 +324,84 @@ fun SyncStatusScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 24.dp),
                 )
+            }
+        }
+    }
+}
+
+private val SyncQueueRowStride = 52.dp
+private val SyncQueueRowGap = 8.dp
+private const val SyncQueueVisibleRowCount = 20
+
+@Composable
+private fun syncQueueListViewportHeight(): Dp {
+    val screenCap = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+    val twentyRows = SyncQueueRowStride * SyncQueueVisibleRowCount +
+        SyncQueueRowGap * (SyncQueueVisibleRowCount - 1)
+    return minOf(twentyRows, screenCap)
+}
+
+@Composable
+private fun SyncQueueScrollPanel(
+    queueWaiting: List<SyncQueueDisplayRow>,
+    activeItems: List<ActiveSyncItem>,
+    isRunning: Boolean,
+) {
+    val viewportHeight = syncQueueListViewportHeight()
+    val outline = MaterialTheme.colorScheme.outlineVariant
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            if (queueWaiting.size > 1) {
+                "Itens a sincronizar (${queueWaiting.size})"
+            } else {
+                "Itens a sincronizar"
+            },
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(viewportHeight)
+                .border(1.dp, outline, MaterialTheme.shapes.medium),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            if (queueWaiting.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (isRunning) {
+                            "Nenhum item aguardando na fila."
+                        } else {
+                            "Nenhum item pendente — toque em Sincronizar agora."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
+                ) {
+                    items(
+                        queueWaiting,
+                        key = { "queue-${it.canonicalPath}" },
+                    ) { row ->
+                        SyncQueueItemRow(
+                            row = row,
+                            activeItems = activeItems,
+                            isRunning = isRunning,
+                        )
+                    }
+                }
             }
         }
     }
