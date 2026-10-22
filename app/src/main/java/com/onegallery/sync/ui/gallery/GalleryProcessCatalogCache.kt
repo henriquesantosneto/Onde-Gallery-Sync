@@ -14,8 +14,25 @@ class GalleryProcessCatalogCache {
         val fingerprint: GalleryCatalogFingerprint,
         val localRevision: Long,
     ) {
+        /** Índice inteiro montado (ou quase — dedupe pode reduzir 1–2 linhas). */
         val isCompleteCatalog: Boolean
-            get() = catalogItems.isNotEmpty() && catalogItems.size >= fingerprint.rowCount
+            get() {
+                if (visibleItems.isEmpty()) return false
+                if (fingerprint.rowCount <= 0) return true
+                val threshold = (fingerprint.rowCount * 99) / 100
+                return visibleItems.size >= threshold || catalogItems.size >= threshold
+            }
+
+        fun isRestorable(): Boolean = visibleItems.isNotEmpty()
+
+        fun toSnapshotBundle(): GalleryCatalogSession.SnapshotBundle =
+            GalleryCatalogSession.SnapshotBundle(
+                catalogItems = catalogItems,
+                visibleItems = visibleItems,
+                userAlbums = userAlbums,
+                fingerprint = fingerprint,
+                localRevision = localRevision,
+            )
     }
 
     @Volatile
@@ -33,6 +50,10 @@ class GalleryProcessCatalogCache {
     }
 
     fun peek(): Entry? = entry
+
+    fun replace(entry: Entry) {
+        this.entry = entry
+    }
 
     fun clear() {
         entry = null

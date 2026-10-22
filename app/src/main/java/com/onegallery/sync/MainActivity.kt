@@ -50,7 +50,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        (application as OneGalleryApplication).appForegroundState.setForeground(false)
+        val app = application as OneGalleryApplication
+        app.appForegroundState.setForeground(false)
+        app.persistSessionCatalogForBackground()
         super.onStop()
     }
 

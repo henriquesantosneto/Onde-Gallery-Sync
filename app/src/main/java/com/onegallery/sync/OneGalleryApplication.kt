@@ -41,6 +41,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import com.onegallery.sync.ui.gallery.GallerySessionCatalogSpill
 
 class OneGalleryApplication : Application() {
     lateinit var authManager: MsalAuthManager
@@ -124,6 +127,14 @@ class OneGalleryApplication : Application() {
             localOneDriveFolderConnected = oneDriveFolderPreferences.treeUri != null,
         )
         galleryPreferences = GalleryPreferences(this)
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                GallerySessionCatalogSpill.hydrateProcessCache(
+                    this@OneGalleryApplication,
+                    galleryProcessCatalogCache,
+                )
+            }
+        }
         mediaCacheRepository = MediaCacheRepository(this)
         applicationScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             mediaCacheRepository.warmThumbnailExistsCache()
@@ -202,5 +213,13 @@ class OneGalleryApplication : Application() {
 
     fun rescheduleBackgroundSync() {
         BackgroundSyncScheduler.applyAlwaysOnPolicy(this)
+    }
+
+    /** Grava catálogo da sessão ao ir para 2º plano (processo morto nos recentes ainda reabre rápido). */
+    fun persistSessionCatalogForBackground() {
+        val bundle = galleryProcessCatalogCache.peek()?.toSnapshotBundle() ?: return
+        applicationScope.launch(Dispatchers.IO) {
+            GallerySessionCatalogSpill.save(this@OneGalleryApplication, bundle)
+        }
     }
 }

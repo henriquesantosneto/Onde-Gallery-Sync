@@ -182,28 +182,24 @@ class GalleryViewModel(
         }
     }
 
-    /** Mesmo processo após Home — catálogo completo já montado, sem Room map de novo. */
+    /** RAM do processo ou spill da última sessão — exibe a grade antes do rebuild completo. */
     private fun restoreProcessCatalogSnapshot(): LibrarySnapshot? {
         val app = appContext.applicationContext as OneGalleryApplication
         val entry = app.galleryProcessCatalogCache.peek() ?: return null
-        if (!entry.isCompleteCatalog) return null
+        if (!entry.isRestorable()) return null
         val bundle = entry.toSnapshotBundle()
         catalogSession.publish(bundle, activeSort = galleryPreferences.sortOrder)
         return bundle.toLibrarySnapshot()
     }
 
-    private fun GalleryProcessCatalogCache.Entry.toSnapshotBundle(): GalleryCatalogSession.SnapshotBundle =
-        GalleryCatalogSession.SnapshotBundle(
-            catalogItems = catalogItems,
-            visibleItems = visibleItems,
-            userAlbums = userAlbums,
-            fingerprint = fingerprint,
-            localRevision = localRevision,
-        )
-
     private fun persistProcessCatalog(bundle: GalleryCatalogSession.SnapshotBundle) {
         val app = appContext.applicationContext as OneGalleryApplication
         app.galleryProcessCatalogCache.save(bundle)
+    }
+
+    override fun onCleared() {
+        (appContext.applicationContext as? OneGalleryApplication)?.persistSessionCatalogForBackground()
+        super.onCleared()
     }
 
     fun onReturningToForeground() {
@@ -268,13 +264,16 @@ class GalleryViewModel(
                     if (process.fingerprint == fingerprint &&
                         process.localRevision == localRevision &&
                         process.userAlbums == userAlbums &&
-                        process.isCompleteCatalog &&
-                        metadata.size <= process.catalogItems.size
+                        process.isRestorable()
                     ) {
                         val bundle = process.toSnapshotBundle()
                         catalogSession.publish(bundle, activeSort = sortOrder.value)
                         emit(bundle.toLibrarySnapshot())
-                        return@flow
+                        if (process.isCompleteCatalog &&
+                            metadata.size <= process.catalogItems.size
+                        ) {
+                            return@flow
+                        }
                     }
                 }
                 val cached = catalogSession.lastBundle
@@ -337,7 +336,8 @@ class GalleryViewModel(
         when {
             live.catalogItems.isNotEmpty() -> live
             live.visibleItems.isNotEmpty() -> live
-            bootstrap != null && bootstrap.catalogItems.isNotEmpty() -> bootstrap
+            bootstrap != null &&
+                (bootstrap.catalogItems.isNotEmpty() || bootstrap.visibleItems.isNotEmpty()) -> bootstrap
             else -> live
         }
     }
