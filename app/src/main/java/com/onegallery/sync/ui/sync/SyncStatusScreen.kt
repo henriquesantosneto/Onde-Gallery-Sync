@@ -175,6 +175,7 @@ fun SyncStatusScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 8.dp),
                                 )
+                            }
                         } else {
                             Text(
                                 coordinatorState.lastMessage,
