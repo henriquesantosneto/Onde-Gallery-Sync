@@ -273,6 +273,7 @@ class GalleryViewModel(
     private fun persistProcessCatalog(bundle: GalleryCatalogSession.SnapshotBundle) {
         val app = appContext.applicationContext as OneGalleryApplication
         app.galleryProcessCatalogCache.save(bundle)
+        app.scheduleSessionSpillPersistDebounced()
     }
 
     override fun onCleared() {
@@ -788,9 +789,10 @@ class GalleryViewModel(
             ?: catalogSession.lastBundle?.fingerprint
             ?: GalleryCatalogFingerprint(
                 rowCount = catalogItems.size,
-                headPath = catalogItems.firstOrNull()?.canonicalPath,
-                tailPath = catalogItems.lastOrNull()?.canonicalPath,
                 maxModifiedSeconds = 0L,
+                pathChecksum = catalogItems.fold(0L) { acc, item ->
+                    acc xor item.canonicalPath.hashCode().toLong()
+                },
             )
         val partialCatalog = fingerprint != null &&
             fingerprint.rowCount > catalogItems.size

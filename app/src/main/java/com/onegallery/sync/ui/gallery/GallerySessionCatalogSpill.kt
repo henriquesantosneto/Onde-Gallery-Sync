@@ -23,7 +23,7 @@ import kotlinx.coroutines.withContext
 object GallerySessionCatalogSpill {
     private const val FILE_NAME = "gallery_session_v1.gz"
     private const val FORMAT_MAGIC = 0x4F475353 // OGSS
-    private const val FORMAT_VERSION = 2
+    private const val FORMAT_VERSION = 3
     private const val MAX_PERSISTED_ITEMS = 8_000
     private const val MAX_CACHE_BYTES = 24L * 1024L * 1024L
 
@@ -67,8 +67,7 @@ object GallerySessionCatalogSpill {
                 out.writeLong(bundle.localRevision)
                 out.writeInt(bundle.fingerprint.rowCount)
                 out.writeLong(bundle.fingerprint.maxModifiedSeconds)
-                writeNullableUtf(out, bundle.fingerprint.headPath)
-                writeNullableUtf(out, bundle.fingerprint.tailPath)
+                out.writeLong(bundle.fingerprint.pathChecksum)
                 out.writeInt(toPersist.size)
                 for (item in toPersist) {
                     writeItem(out, item)
@@ -88,12 +87,21 @@ object GallerySessionCatalogSpill {
             DataInputStream(gzip).use { input ->
                 if (input.readInt() != FORMAT_MAGIC) return null
                 val formatVersion = input.readInt()
-                if (formatVersion != 1 && formatVersion != 2) return null
+                if (formatVersion !in 1..3) return null
                 val localRevision = input.readLong()
                 val rowCount = input.readInt()
                 val maxMod = input.readLong()
-                val head = readNullableUtf(input)
-                val tail = readNullableUtf(input)
+                val fingerprint = when (formatVersion) {
+                    3 -> {
+                        val checksum = input.readLong()
+                        GalleryCatalogFingerprint(rowCount, maxMod, checksum)
+                    }
+                    else -> {
+                        val head = readNullableUtf(input)
+                        val tail = readNullableUtf(input)
+                        GalleryCatalogFingerprint.legacyFromSpill(rowCount, head, tail, maxMod)
+                    }
+                }
                 val count = input.readInt()
                 if (count <= 0 || count > MAX_PERSISTED_ITEMS) return null
                 val items = ArrayList<GalleryDisplayItem>(count)
@@ -105,7 +113,6 @@ object GallerySessionCatalogSpill {
                 } else {
                     emptyList()
                 }
-                val fingerprint = GalleryCatalogFingerprint(rowCount, head, tail, maxMod)
                 GalleryProcessCatalogCache.Entry(
                     catalogItems = items,
                     visibleItems = items,

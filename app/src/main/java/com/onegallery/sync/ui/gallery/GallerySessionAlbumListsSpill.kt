@@ -16,7 +16,7 @@ import kotlinx.coroutines.withContext
 object GallerySessionAlbumListsSpill {
     private const val FILE_NAME = "gallery_album_lists_v1.gz"
     private const val FORMAT_MAGIC = 0x4F47414C // OGAL
-    private const val FORMAT_VERSION = 1
+    private const val FORMAT_VERSION = 2
     private const val MAX_ALBUMS = 4_000
     private const val MAX_CACHE_BYTES = 8L * 1024L * 1024L
 
@@ -60,8 +60,7 @@ object GallerySessionAlbumListsSpill {
                 out.writeInt(entry.albumListSort.ordinal)
                 out.writeInt(entry.fingerprint.rowCount)
                 out.writeLong(entry.fingerprint.maxModifiedSeconds)
-                writeNullableUtf(out, entry.fingerprint.headPath)
-                writeNullableUtf(out, entry.fingerprint.tailPath)
+                out.writeLong(entry.fingerprint.pathChecksum)
                 writeAlbumList(out, albums)
                 writeAlbumList(out, places)
             }
@@ -77,15 +76,20 @@ object GallerySessionAlbumListsSpill {
         return GZIPInputStream(FileInputStream(file)).use { gzip ->
             DataInputStream(gzip).use { input ->
                 if (input.readInt() != FORMAT_MAGIC) return null
-                if (input.readInt() != FORMAT_VERSION) return null
+                val formatVersion = input.readInt()
+                if (formatVersion != 1 && formatVersion != 2) return null
                 val localRevision = input.readLong()
                 val coverRevisionStamp = input.readLong()
                 val sort = AlbumListSort.entries.getOrNull(input.readInt()) ?: AlbumListSort.NAME_A_Z
                 val rowCount = input.readInt()
                 val maxMod = input.readLong()
-                val head = readNullableUtf(input)
-                val tail = readNullableUtf(input)
-                val fingerprint = GalleryCatalogFingerprint(rowCount, head, tail, maxMod)
+                val fingerprint = if (formatVersion >= 2) {
+                    GalleryCatalogFingerprint(rowCount, maxMod, input.readLong())
+                } else {
+                    val head = readNullableUtf(input)
+                    val tail = readNullableUtf(input)
+                    GalleryCatalogFingerprint.legacyFromSpill(rowCount, head, tail, maxMod)
+                }
                 val albums = readAlbumList(input)
                 val placeAlbums = readAlbumList(input)
                 GalleryProcessAlbumListsCache.Entry(

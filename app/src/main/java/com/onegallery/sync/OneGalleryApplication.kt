@@ -99,6 +99,8 @@ class OneGalleryApplication : Application() {
 
     val galleryProcessAlbumListsCache = GalleryProcessAlbumListsCache()
 
+    private var sessionSpillWriteJob: kotlinx.coroutines.Job? = null
+
     lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
         private set
 
@@ -221,6 +223,15 @@ class OneGalleryApplication : Application() {
 
     fun rescheduleBackgroundSync() {
         BackgroundSyncScheduler.applyAlwaysOnPolicy(this)
+    }
+
+    /** Grava spill alguns segundos após montar catálogo (processo morto sem onStop). */
+    fun scheduleSessionSpillPersistDebounced() {
+        sessionSpillWriteJob?.cancel()
+        sessionSpillWriteJob = applicationScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(2_500L)
+            persistSessionCatalogForBackground(blocking = false)
+        }
     }
 
     /** Grava catálogo da sessão ao ir para 2º plano (processo morto nos recentes ainda reabre rápido). */
