@@ -253,7 +253,7 @@ fun SyncStatusScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 8.dp),
-                            ) { Text("Cancelar todas as tarefas") }
+                            ) { Text("Parar sincronismo") }
                         }
                     }
                 }

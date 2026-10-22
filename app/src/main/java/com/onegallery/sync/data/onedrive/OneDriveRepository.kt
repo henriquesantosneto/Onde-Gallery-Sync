@@ -326,6 +326,7 @@ class OneDriveRepository(
         var nextLink: String? = null
         var started = false
         while (true) {
+            coroutineContext.ensureActive()
             val page = when {
                 !started && initialFromItemId ->
                     graphApi.listFolderDeltaInitial(auth, start)
@@ -764,9 +765,11 @@ class OneDriveRepository(
         folders.add(rootFolderId to "")
 
         while (folders.isNotEmpty()) {
+            coroutineContext.ensureActive()
             val (folderId, prefix) = folders.removeFirst()
             var nextLink: String? = null
             do {
+                coroutineContext.ensureActive()
                 val page = if (nextLink == null) {
                     graphApi.listFolderChildren("Bearer $token", folderId)
                 } else {

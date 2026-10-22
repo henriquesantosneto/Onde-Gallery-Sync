@@ -7,8 +7,7 @@ import androidx.work.WorkerParameters
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.R
 import com.onegallery.sync.sync.SyncForegroundNotifications
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 class SyncWorker(
     appContext: Context,
@@ -34,9 +33,9 @@ class SyncWorker(
             }.onFailure { error ->
                 android.util.Log.e("SyncWorker", "setForeground failed; sync may stop if minimized", error)
             }
-            withContext(NonCancellable) {
-                doWorkBody(app, userInitiated)
-            }
+            doWorkBody(app, userInitiated)
+        } catch (cancelled: CancellationException) {
+            Result.success()
         } finally {
             app.syncCoordinator.setWorkerForegroundSession(false)
         }
@@ -62,13 +61,14 @@ class SyncWorker(
                 .fold(
                     onSuccess = { Result.success() },
                     onFailure = {
-                        if (it.message?.contains("Offline", ignoreCase = true) == true ||
-                            it.message?.contains("Wi‑Fi", ignoreCase = true) == true ||
-                            it.message?.contains("pausa", ignoreCase = true) == true
-                        ) {
-                            Result.success()
-                        } else {
-                            Result.retry()
+                        when {
+                            it is CancellationException -> Result.success()
+                            it.message?.contains("Offline", ignoreCase = true) == true ||
+                                it.message?.contains("Wi‑Fi", ignoreCase = true) == true ||
+                                it.message?.contains("pausa", ignoreCase = true) == true ||
+                                it.message?.contains("cancel", ignoreCase = true) == true ->
+                                Result.success()
+                            else -> Result.retry()
                         }
                     },
                 )

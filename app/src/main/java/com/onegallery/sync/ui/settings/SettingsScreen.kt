@@ -59,6 +59,7 @@ import com.onegallery.sync.auth.MsalBuiltInConfig
 import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
+import com.onegallery.sync.sync.runningHeadlineFallback
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncTaskLauncher
 
@@ -299,18 +300,42 @@ fun SettingsScreen(
                 ListItem(
                     headlineContent = { Text("Sync") },
                     supportingContent = {
-                        if (syncState.isRunning) {
-                            LinearProgressIndicator(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                            )
-                        } else {
-                            Text(
-                                syncState.lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
-                                    .ifBlank { "Ver fila, transferências e estatísticas" },
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                        Column {
+                            if (syncState.isRunning) {
+                                Text(
+                                    syncState.activityHeadline.ifBlank {
+                                        syncState.progressPhase.runningHeadlineFallback()
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                syncState.activityDetail.takeIf { it.isNotBlank() }?.let { detail ->
+                                    Text(
+                                        detail,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                )
+                                OutlinedButton(
+                                    onClick = { syncCoordinator.requestCancelSync() },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                ) {
+                                    Text("Parar sincronismo")
+                                }
+                            } else {
+                                Text(
+                                    syncState.lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
+                                        .ifBlank { "Ver fila, transferências e estatísticas" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                     },
                     leadingContent = {

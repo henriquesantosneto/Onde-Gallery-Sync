@@ -34,6 +34,7 @@ import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
+import com.onegallery.sync.worker.BackgroundSyncScheduler
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -279,7 +280,7 @@ class SyncCoordinator(
         cancelActiveSync(
             SyncCancelReason.USER,
             applyUserCooldown = true,
-            inProgressMessage = "Cancelando todas as tarefas…",
+            inProgressMessage = "Parando sincronismo…",
         )
     }
 
@@ -322,7 +323,10 @@ class SyncCoordinator(
         if (applyUserCooldown) {
             syncPreferences.pauseAutoSyncAfterUserCancel()
         }
+        BackgroundSyncScheduler.cancelPendingSyncWork(appContext)
         _state.value = _state.value.copy(
+            isRunning = false,
+            progressPhase = SyncProgressPhase.IDLE,
             lastMessage = inProgressMessage,
             activityHeadline = inProgressMessage,
             activityDetail = "",
@@ -330,19 +334,10 @@ class SyncCoordinator(
             activeItems = emptyList(),
         )
         cancelAllManagedSyncJobs(inProgressMessage)
+        bulkGalleryDisplayRefreshJob?.cancel()
         val job = activeLongTaskJob.get()
         if (job != null) {
             job.cancel(CancellationException(inProgressMessage))
-        } else if (_state.value.isRunning) {
-            _state.value = _state.value.copy(
-                isRunning = false,
-                activeItems = emptyList(),
-                runQueue = emptyList(),
-                lastMessage = completedMessageForCancelReason(reason),
-            )
-            if (reason != SyncCancelReason.USER) {
-                resetSyncCancel()
-            }
         }
     }
 
@@ -1106,7 +1101,9 @@ class SyncCoordinator(
                         oneDriveRepository.syncRootLabel()?.let { "Pasta: $it" }
                             ?: "Aguarde — pode demorar com bibliotecas grandes.",
                     )
+                    ensureNotCancelled()
                     val remoteListing = listRemoteFiles().getOrThrow()
+                    ensureNotCancelled()
                     val remoteFiles = remoteListing.files
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
                     val remoteByContentKey = buildRemoteContentIndex(remoteFiles)
@@ -1380,6 +1377,7 @@ class SyncCoordinator(
                             SyncPreferences.MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS,
                         )
                     }
+                    ensureNotCancelled()
                     // Mesmo mutex + foreground service até terminar miniaturas/GPS (não perder ao minimizar).
                     runPostSyncEnrichmentInternal(
                         coreSyncMessagePrefix = coreSyncMessage.substringBefore("\n"),
@@ -3210,6 +3208,7 @@ class SyncCoordinator(
     private suspend fun runPostSyncEnrichmentInternal(coreSyncMessagePrefix: String) {
         withSyncForeground {
             runCatching {
+                ensureNotCancelled()
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,
@@ -3226,8 +3225,11 @@ class SyncCoordinator(
                     "Uma miniatura por álbum (pastas e locais), antes de indexar GPS.",
                     alsoUpdateLastMessage = false,
                 )
+                ensureNotCancelled()
                 ensureAlbumCoverThumbnails()
+                ensureNotCancelled()
                 materializeNonVisualThumbnails()
+                ensureNotCancelled()
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Miniaturas na galeria…",

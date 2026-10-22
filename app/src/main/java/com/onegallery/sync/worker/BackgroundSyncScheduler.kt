@@ -78,6 +78,11 @@ object BackgroundSyncScheduler {
         )
     }
 
+    /** Interrompe sync one-shot (inclui worker em andamento). Não cancela o periódico de 15 min. */
+    fun cancelPendingSyncWork(context: Context) {
+        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(IMMEDIATE_UNIQUE)
+    }
+
     /** Botão “Sincronizar agora” / gesto explícito — WorkManager, não a UI Compose. */
     fun enqueueUserRequestedSync(context: Context, prefs: SyncPreferences) {
         if (!prefs.hasCompletedSetup) return
