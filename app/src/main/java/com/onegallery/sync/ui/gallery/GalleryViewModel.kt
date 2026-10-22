@@ -32,7 +32,10 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Job
@@ -145,6 +148,34 @@ class GalleryViewModel(
     private var gridThumbnailPrefetchJob: Job? = null
     private val gridThumbnailPrefetchQueued = ConcurrentHashMap.newKeySet<String>()
 
+    private val catalogSession = GalleryCatalogSession()
+    private val displayBuildCache = GalleryDisplayBuildCache(mediaCacheRepository)
+    private val galleryCatalogDiskCache =
+        (appContext.applicationContext as OneGalleryApplication).galleryCatalogDiskCache
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val warmLibrarySnapshotOnce = flow {
+        val app = appContext.applicationContext as OneGalleryApplication
+        val warm = app.warmGalleryCatalog ?: galleryCatalogDiskCache.loadWarmSnapshot() ?: return@flow
+        val visible = warm.catalogItems.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
+        catalogSession.publish(
+            GalleryCatalogSession.SnapshotBundle(
+                catalogItems = warm.catalogItems,
+                visibleItems = visible,
+                userAlbums = emptyList(),
+                fingerprint = warm.fingerprint,
+                localRevision = warm.localRevision,
+            ),
+        )
+        emit(
+            LibrarySnapshot(
+                catalogItems = warm.catalogItems,
+                visibleItems = visible,
+                userAlbums = emptyList(),
+            ),
+        )
+    }.take(1).flowOn(Dispatchers.IO)
+
     private data class LibrarySnapshot(
         /** Índice completo (contagens, capas, locais). */
         val catalogItems: List<GalleryDisplayItem>,
@@ -153,18 +184,28 @@ class GalleryViewModel(
         val userAlbums: List<UserAlbumEntity>,
     )
 
-    private val librarySnapshot = combine(
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val librarySnapshotCore = combine(
         syncCoordinator.galleryMetadata,
         syncCoordinator.userAlbums,
-        syncCoordinator.galleryDisplayRefreshEpoch,
         localMediaRepository.localGalleryRevision,
-    ) { metadata, userAlbums, _, _ ->
-        metadata to userAlbums
+    ) { metadata, userAlbums, localRevision ->
+        Triple(metadata, userAlbums, localRevision)
     }.conflate()
-        .flatMapLatest { (metadata, userAlbums) ->
+        .flatMapLatest { (metadata, userAlbums, localRevision) ->
             flow {
+                val fingerprint = GalleryCatalogFingerprint.from(metadata)
+                val cached = catalogSession.lastBundle
+                if (cached != null &&
+                    cached.fingerprint == fingerprint &&
+                    cached.localRevision == localRevision &&
+                    cached.userAlbums == userAlbums
+                ) {
+                    emit(cached.toLibrarySnapshot())
+                    return@flow
+                }
                 val snapshot = runCatching {
-                    buildLibrarySnapshot(metadata, userAlbums)
+                    buildLibrarySnapshot(metadata, userAlbums, localRevision, fingerprint)
                 }.getOrElse { error ->
                     if (error is OutOfMemoryError) {
                         errorState.value =
@@ -180,20 +221,47 @@ class GalleryViewModel(
                 }
                 emit(snapshot)
             }.flowOn(Dispatchers.IO)
-        }.flowOn(Dispatchers.Default)
+        }
+
+    private val librarySnapshotLive = combine(
+        librarySnapshotCore,
+        syncCoordinator.galleryDisplayRefreshEpoch,
+    ) { snapshot, _ ->
+        catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
+    }.flowOn(Dispatchers.Default)
+
+    private val librarySnapshot = merge(warmLibrarySnapshotOnce, librarySnapshotLive)
+
+    private fun GalleryCatalogSession.SnapshotBundle.toLibrarySnapshot(): LibrarySnapshot =
+        LibrarySnapshot(
+            catalogItems = catalogItems,
+            visibleItems = visibleItems,
+            userAlbums = userAlbums,
+        )
 
     private suspend fun buildLibrarySnapshot(
         metadata: List<SyncMetadataEntity>,
         userAlbums: List<UserAlbumEntity>,
+        localRevision: Long,
+        fingerprint: GalleryCatalogFingerprint,
     ): LibrarySnapshot {
-        val indexed = dedupeGalleryDisplayItems(
-            metadata.map { GalleryMapper.toDisplayItem(it, mediaCacheRepository) },
-        )
+        val indexed = dedupeGalleryDisplayItems(displayBuildCache.mapIndexed(metadata))
         val localItems = localMediaRepository.loadLocalGallerySnapshot()
         val catalog = mergeIndexedGalleryWithLocalMedia(indexed, localItems, mediaCacheRepository)
+        val visible = catalog.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
+        catalogSession.publish(
+            GalleryCatalogSession.SnapshotBundle(
+                catalogItems = catalog,
+                visibleItems = visible,
+                userAlbums = userAlbums,
+                fingerprint = fingerprint,
+                localRevision = localRevision,
+            ),
+        )
+        galleryCatalogDiskCache.scheduleSave(catalog, fingerprint, localRevision)
         return LibrarySnapshot(
             catalogItems = catalog,
-            visibleItems = catalog.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) },
+            visibleItems = visible,
             userAlbums = userAlbums,
         )
     }
@@ -248,7 +316,7 @@ class GalleryViewModel(
             syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(coverKeysToRefresh)
         }
         val userAlbums = snapshot.userAlbums
-        val libraryItems = visibleItems.sortedBy(controls.order)
+        val libraryItems = catalogSession.sortedLibraryItems(visibleItems, controls.order)
         val items = when (val filter = controls.browseFilter) {
             GalleryBrowseFilter.All -> libraryItems
             is GalleryBrowseFilter.AlbumFolder -> visibleItems
@@ -262,6 +330,7 @@ class GalleryViewModel(
                 }
                 .sortedBy(controls.order)
         }
+        val coverRevisionStamp = coverRevisions.values.fold(0L) { acc, stamp -> acc xor stamp }
 
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
         val placeBrowse = controls.browseFilter as? GalleryBrowseFilter.Place
@@ -272,22 +341,22 @@ class GalleryViewModel(
             isLoading = controls.isLoading,
             libraryItems = libraryItems,
             items = items,
-            albums = buildAlbums(
-                catalogItems,
-                userAlbums,
-                controls.albumSort,
-                albumCoverLocalIndex,
-                mediaCacheRepository,
-                resolveCoverModels = !deferAlbumCoverModels,
+            albums = catalogSession.albumsFor(
+                catalogItems = catalogItems,
+                userAlbums = userAlbums,
+                albumSort = controls.albumSort,
+                deferCoverModels = deferAlbumCoverModels,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                coverRevisionStamp = coverRevisionStamp,
             ),
-            placeAlbums = sortPlaceAlbums(
-                buildPlaceAlbums(
-                    catalogItems,
-                    albumCoverLocalIndex,
-                    mediaCacheRepository,
-                    resolveCoverModels = !deferAlbumCoverModels,
-                ),
-                controls.albumSort,
+            placeAlbums = catalogSession.placeAlbumsFor(
+                catalogItems = catalogItems,
+                albumSort = controls.albumSort,
+                deferCoverModels = deferAlbumCoverModels,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                coverRevisionStamp = coverRevisionStamp,
             ),
             userAlbums = userAlbums,
             albumFilter = albumFilter,
@@ -723,7 +792,7 @@ class GalleryViewModel(
 
 }
 
-private fun buildAlbums(
+internal fun buildAlbums(
     mirrored: List<GalleryDisplayItem>,
     userAlbums: List<UserAlbumEntity>,
     sort: AlbumListSort,
@@ -764,7 +833,7 @@ private fun buildAlbums(
     return sortMediaAlbums(albums, sort)
 }
 
-private fun sortMediaAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
+internal fun sortMediaAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
     return when (sort) {
         AlbumListSort.NAME_A_Z -> albums.sortedBy { it.title.lowercase() }
         AlbumListSort.NAME_Z_A -> albums.sortedByDescending { it.title.lowercase() }
@@ -772,7 +841,7 @@ private fun sortMediaAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List
     }
 }
 
-private fun buildPlaceAlbums(
+internal fun buildPlaceAlbums(
     items: List<GalleryDisplayItem>,
     albumCoverLocalIndex: AlbumCoverLocalIndex,
     mediaCacheRepository: MediaCacheRepository,
@@ -821,7 +890,7 @@ private fun buildPlaceAlbums(
         }
 }
 
-private fun sortPlaceAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
+internal fun sortPlaceAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): List<MediaAlbum> {
     fun hierarchyKey(album: MediaAlbum): List<String> {
         val raw = album.bucketId.removePrefix("place:")
         val match = PlaceMatchKey.decode(raw)

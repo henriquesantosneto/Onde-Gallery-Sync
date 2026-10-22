@@ -32,6 +32,7 @@ import com.onegallery.sync.sync.NetworkMonitor
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.AppUserMessages
+import com.onegallery.sync.ui.gallery.GalleryCatalogDiskCache
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
 import android.util.Log
@@ -89,6 +90,12 @@ class OneGalleryApplication : Application() {
     lateinit var mediaCacheRepository: MediaCacheRepository
         private set
 
+    lateinit var galleryCatalogDiskCache: GalleryCatalogDiskCache
+        private set
+
+    @Volatile
+    var warmGalleryCatalog: GalleryCatalogDiskCache.GalleryWarmCatalog? = null
+
     lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
         private set
 
@@ -122,9 +129,11 @@ class OneGalleryApplication : Application() {
         )
         galleryPreferences = GalleryPreferences(this)
         mediaCacheRepository = MediaCacheRepository(this)
+        galleryCatalogDiskCache = GalleryCatalogDiskCache(this, applicationScope)
         applicationScope.launch(Dispatchers.IO) {
             mediaCacheRepository.warmThumbnailExistsCache()
             runCatching { localMediaRepository.loadLocalGallerySnapshot() }
+            warmGalleryCatalog = galleryCatalogDiskCache.loadWarmSnapshot()
         }
         val saOneDriveRepository = SaOneDriveRepository(this, oneDriveFolderPreferences)
         val localMirrorRepository = LocalMirrorRepository(this)
