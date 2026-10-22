@@ -251,7 +251,13 @@ fun GalleryScreen(
         },
     ) { padding ->
         when {
-            state.isLoading && gridItems.isEmpty() -> {
+            gridItems.isEmpty() && !state.indexHydrated -> {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator() }
+            }
+            state.isLoading && gridItems.isEmpty() && state.indexHydrated -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
@@ -272,7 +278,7 @@ fun GalleryScreen(
                         if (requiresActiveBrowseFilter) {
                             "Nenhuma mídia neste álbum ainda. Sincronize ou aguarde as miniaturas."
                         } else {
-                            "Nenhuma mídia indexada. Conceda permissão e sincronize."
+                            "Nenhuma mídia encontrada. Verifique permissão de fotos ou aguarde o índice local."
                         },
                     )
                 }

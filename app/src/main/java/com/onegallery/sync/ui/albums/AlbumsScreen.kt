@@ -238,6 +238,16 @@ fun AlbumsScreen(
             }
         }
         when {
+            gridEntries.isEmpty() && !state.indexHydrated -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                }
+            }
             gridEntries.isEmpty() -> {
                 Box(
                     modifier = Modifier
@@ -248,10 +258,10 @@ fun AlbumsScreen(
                     Text(
                         when (selectedTab) {
                             AlbumsBrowseTab.ALBUMS ->
-                                "Nenhum álbum ainda. Sincronize ou crie um álbum."
+                                "Nenhum álbum ainda. Crie um álbum ou aguarde o índice da galeria."
                             AlbumsBrowseTab.PLACES ->
-                                "Nenhum local com GPS no índice. Sincronize e conceda " +
-                                    "“Localização das mídias” para ver locais aqui."
+                                "Nenhum local com GPS no índice. Conceda " +
+                                    "“Localização das mídias” após indexar as fotos."
                         },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

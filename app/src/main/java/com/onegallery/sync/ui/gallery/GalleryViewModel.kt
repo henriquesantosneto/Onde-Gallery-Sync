@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Job
@@ -70,6 +71,8 @@ data class GalleryUiState(
     val albumSelectionMode: Boolean = false,
     val selectedAlbumTitles: Set<String> = emptySet(),
     val error: String? = null,
+    /** Room/bootstrap já emitiu o índice (mesmo vazio) — distingue “carregando” de “sem fotos”. */
+    val indexHydrated: Boolean = false,
     /** Itens com coordenadas GPS (mapa de locais). */
     val geoItems: List<GalleryDisplayItem> = emptyList(),
     /** Revisão por álbum (`bucketId` → nanoTime) após miniatura local gravada. */
@@ -151,6 +154,20 @@ class GalleryViewModel(
     private val galleryCatalogDiskCache =
         (appContext.applicationContext as OneGalleryApplication).galleryCatalogDiskCache
 
+    private val galleryBootstrap = MutableStateFlow<LibrarySnapshot?>(null)
+    private val indexHydrated = MutableStateFlow(false)
+
+    init {
+        viewModelScope.launch {
+            syncCoordinator.galleryMetadata.collect {
+                indexHydrated.value = true
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            galleryBootstrap.value = buildOfflineBootstrapSnapshot(emptyList())
+        }
+    }
+
     private data class LibrarySnapshot(
         /** Índice completo (contagens, capas, locais). */
         val catalogItems: List<GalleryDisplayItem>,
@@ -169,10 +186,6 @@ class GalleryViewModel(
     }.conflate()
         .flatMapLatest { (metadata, userAlbums, localRevision) ->
             flow {
-                if (metadata.isEmpty()) {
-                    emit(loadWarmLibrarySnapshot(userAlbums))
-                    return@flow
-                }
                 val fingerprint = GalleryCatalogFingerprint.from(metadata)
                 val cached = catalogSession.lastBundle
                 if (cached != null &&
@@ -209,7 +222,42 @@ class GalleryViewModel(
         catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
     }.flowOn(Dispatchers.Default)
 
-    private val librarySnapshot = librarySnapshotLive
+    private val effectiveLibrarySnapshot = combine(
+        galleryBootstrap,
+        librarySnapshotLive,
+    ) { bootstrap, live ->
+        when {
+            live.catalogItems.isNotEmpty() -> live
+            live.visibleItems.isNotEmpty() -> live
+            bootstrap != null && bootstrap.catalogItems.isNotEmpty() -> bootstrap
+            else -> live
+        }
+    }
+
+    private suspend fun buildOfflineBootstrapSnapshot(
+        userAlbums: List<UserAlbumEntity>,
+    ): LibrarySnapshot? {
+        loadWarmLibrarySnapshot(userAlbums)
+            .takeIf { it.catalogItems.isNotEmpty() }
+            ?.let { return it }
+        val app = appContext.applicationContext as OneGalleryApplication
+        var metadata = app.galleryMetadataBootstrap.peekSnapshot()
+        if (metadata.isNullOrEmpty()) {
+            repeat(40) {
+                delay(50)
+                metadata = app.galleryMetadataBootstrap.peekSnapshot()
+                if (!metadata.isNullOrEmpty()) return@repeat
+            }
+        }
+        val indexed = metadata?.takeIf { it.isNotEmpty() }?.let { rows ->
+            dedupeGalleryDisplayItems(displayBuildCache.mapIndexed(rows))
+        }.orEmpty()
+        val localItems = localMediaRepository.loadLocalGallerySnapshot()
+        if (indexed.isEmpty() && localItems.isEmpty()) return null
+        val catalog = mergeIndexedGalleryWithLocalMedia(indexed, localItems, mediaCacheRepository)
+        val visible = catalog.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
+        return LibrarySnapshot(catalog, visible, userAlbums)
+    }
 
     private suspend fun loadWarmLibrarySnapshot(userAlbums: List<UserAlbumEntity>): LibrarySnapshot {
         val app = appContext.applicationContext as OneGalleryApplication
@@ -291,10 +339,11 @@ class GalleryViewModel(
     }
 
     val state: StateFlow<GalleryUiState> = combine(
-        librarySnapshot,
+        effectiveLibrarySnapshot,
         uiControls,
         syncCoordinator.albumCoverRevisions,
-    ) { snapshot, controls, coverRevisions ->
+        indexHydrated,
+    ) { snapshot, controls, coverRevisions, hydrated ->
         coverRevisions.forEach { (key, stamp) ->
             val previous = lastAlbumCoverRevisions[key]
             if (previous != null && previous != stamp) {
@@ -302,7 +351,9 @@ class GalleryViewModel(
             }
         }
         lastAlbumCoverRevisions = coverRevisions
-        if (!initialLibrarySnapshotApplied) {
+        if (!initialLibrarySnapshotApplied &&
+            (hydrated || snapshot.catalogItems.isNotEmpty() || snapshot.visibleItems.isNotEmpty())
+        ) {
             initialLibrarySnapshotApplied = true
             loading.value = false
         }
@@ -369,6 +420,7 @@ class GalleryViewModel(
             albumSelectionMode = controls.albumSelecting,
             selectedAlbumTitles = controls.selectedAlbums,
             error = controls.error,
+            indexHydrated = hydrated,
             geoItems = catalogItems.filter { it.latitude != null && it.longitude != null },
             albumCoverRevisions = coverRevisions,
         )

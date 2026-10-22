@@ -14,6 +14,7 @@ import com.onegallery.sync.auth.AuthPreferences
 import com.onegallery.sync.auth.MsalAuthManager
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.AppDatabase
+import com.onegallery.sync.data.local.db.GalleryMetadataBootstrap
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCaptureTimeResolver
 import com.onegallery.sync.data.local.MediaLocationResolver
@@ -93,6 +94,9 @@ class OneGalleryApplication : Application() {
     lateinit var galleryCatalogDiskCache: GalleryCatalogDiskCache
         private set
 
+    lateinit var galleryMetadataBootstrap: GalleryMetadataBootstrap
+        private set
+
     @Volatile
     var warmGalleryCatalog: GalleryCatalogDiskCache.GalleryWarmCatalog? = null
 
@@ -114,6 +118,8 @@ class OneGalleryApplication : Application() {
         )
         authManager = MsalAuthManager(this, AuthPreferences(this))
         database = AppDatabase.create(this)
+        galleryMetadataBootstrap = GalleryMetadataBootstrap(applicationScope)
+        galleryMetadataBootstrap.startLoading(database.syncMetadataDao())
         localMediaRepository = LocalMediaRepository(this)
         val mediaLocationResolver = MediaLocationResolver(this)
         val mediaCaptureTimeResolver = MediaCaptureTimeResolver(this)
