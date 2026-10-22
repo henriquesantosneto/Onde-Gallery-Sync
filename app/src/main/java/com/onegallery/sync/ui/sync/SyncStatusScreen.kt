@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,15 +85,26 @@ fun SyncStatusScreen(
     LaunchedEffect(Unit) {
         syncCoordinator.refreshThumbnailCacheStats(force = true)
     }
+    DisposableEffect(Unit) {
+        syncCoordinator.setSyncStatusScreenVisible(true)
+        onDispose { syncCoordinator.setSyncStatusScreenVisible(false) }
+    }
     var clearingErrors by remember { mutableStateOf(false) }
-    val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
+    val thumbnailPrefetchActive = coordinatorState.progressPhase == SyncProgressPhase.PREFETCH_THUMBNAILS &&
+        (
+            coordinatorState.runQueue.isNotEmpty() ||
+                coordinatorState.activeItems.isNotEmpty() ||
+                (coordinatorState.thumbnailStats?.indexedPending ?: 0) > 0
+            )
+    val showLiveActivity = coordinatorState.isRunning || thumbnailPrefetchActive
+    val queueForUi = remember(coordinatorState.runQueue, syncQueue) {
         when {
-            coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
-                coordinatorState.runQueue
-            coordinatorState.isRunning -> emptyList()
+            coordinatorState.runQueue.isNotEmpty() -> coordinatorState.runQueue
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
     }
+    val queueIsThumbnailBatch = coordinatorState.runQueue.isNotEmpty() &&
+        coordinatorState.progressPhase == SyncProgressPhase.PREFETCH_THUMBNAILS
     val activeItems = coordinatorState.activeItems
     val activePaths = remember(activeItems) {
         activeItems.map { it.canonicalPath }.toSet()
@@ -143,7 +155,7 @@ fun SyncStatusScreen(
                             modifier = Modifier.padding(top = 6.dp),
                             fontWeight = FontWeight.Medium,
                         )
-                        if (coordinatorState.isRunning) {
+                        if (showLiveActivity) {
                             val detail = coordinatorState.activityDetail.ifBlank {
                                 coordinatorState.lastMessage.lineSequence().drop(1).joinToString("\n")
                             }
@@ -163,13 +175,23 @@ fun SyncStatusScreen(
                                     modifier = Modifier.padding(top = 6.dp),
                                 )
                             }
-                            Text(
-                                "Com o app minimizado, o sync continua pela notificação " +
-                                    "em segundo plano (WorkManager).",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
+                            if (coordinatorState.isRunning) {
+                                Text(
+                                    "Com o app minimizado, o sync continua pela notificação " +
+                                        "em segundo plano (WorkManager).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            } else if (thumbnailPrefetchActive) {
+                                Text(
+                                    "Miniaturas continuam enquanto esta tela estiver aberta " +
+                                        "(fora da galeria, para não travar Fotos/Álbuns).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
                         } else {
                             Text(
                                 coordinatorState.lastMessage,
@@ -184,7 +206,7 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        if (coordinatorState.isRunning) {
+                        if (showLiveActivity) {
                             if (activeItems.isEmpty()) {
                                 LinearProgressIndicator(
                                     modifier = Modifier
@@ -236,6 +258,8 @@ fun SyncStatusScreen(
                     queueWaiting = queueWaiting,
                     activeItems = activeItems,
                     isRunning = coordinatorState.isRunning,
+                    queueIsThumbnailBatch = queueIsThumbnailBatch,
+                    thumbnailPendingTotal = coordinatorState.thumbnailStats?.indexedPending ?: 0,
                 )
             }
 
@@ -346,20 +370,36 @@ private fun SyncQueueScrollPanel(
     queueWaiting: List<SyncQueueDisplayRow>,
     activeItems: List<ActiveSyncItem>,
     isRunning: Boolean,
+    queueIsThumbnailBatch: Boolean,
+    thumbnailPendingTotal: Int,
 ) {
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
     Column(modifier = Modifier.fillMaxWidth()) {
+        val title = when {
+            queueIsThumbnailBatch && thumbnailPendingTotal > 0 ->
+                "Miniaturas (~$thumbnailPendingTotal no índice · leva atual ${queueWaiting.size})"
+            queueIsThumbnailBatch ->
+                "Miniaturas (leva atual ${queueWaiting.size})"
+            queueWaiting.size > 1 ->
+                "Operações de sync (${queueWaiting.size})"
+            else ->
+                "Operações de sync"
+        }
         Text(
-            if (queueWaiting.size > 1) {
-                "Itens a sincronizar (${queueWaiting.size})"
-            } else {
-                "Itens a sincronizar"
-            },
+            title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(bottom = 6.dp),
         )
+        if (!queueIsThumbnailBatch && thumbnailPendingTotal > 0) {
+            Text(
+                "~$thumbnailPendingTotal miniatura(s) ainda sem cache — aparecem aqui ao processar.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -374,10 +414,13 @@ private fun SyncQueueScrollPanel(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (isRunning) {
-                            "Nenhum item aguardando na fila."
-                        } else {
-                            "Nenhum item pendente — toque em Sincronizar agora."
+                        when {
+                            thumbnailPendingTotal > 0 ->
+                                "~$thumbnailPendingTotal miniatura(s) pendentes — iniciando leva…"
+                            isRunning ->
+                                "Nenhum item aguardando na fila."
+                            else ->
+                                "Nenhuma operação de sync — toque em Sincronizar agora."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

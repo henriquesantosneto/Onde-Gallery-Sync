@@ -180,6 +180,8 @@ class SyncCoordinator(
     private var bulkGalleryDisplayRefreshJob: Job? = null
     private var backgroundThumbPrefetchJob: Job? = null
     private val backgroundThumbPrefetchDeferred = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** Tela Sync aberta — prefetch de miniaturas pode rodar em 1º plano (fila visível na UI). */
+    private val syncStatusScreenVisibleCount = AtomicInteger(0)
     private val pendingAlbumCoverPaths = ConcurrentHashMap.newKeySet<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
@@ -647,18 +649,52 @@ class SyncCoordinator(
         _galleryDisplayRefreshEpoch.value = System.nanoTime()
     }
 
+    fun setSyncStatusScreenVisible(visible: Boolean) {
+        if (visible) {
+            syncStatusScreenVisibleCount.incrementAndGet()
+            kickThumbnailPrefetchIfIdle()
+        } else {
+            syncStatusScreenVisibleCount.updateAndGet { current ->
+                (current - 1).coerceAtLeast(0)
+            }
+            if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
+                backgroundThumbPrefetchJob?.cancel()
+                backgroundThumbPrefetchJob = null
+            }
+        }
+    }
+
+    /** Retoma miniaturas pendentes (ex.: ao abrir a tela Sync com milhares no índice). */
+    fun kickThumbnailPrefetchIfIdle() {
+        if (_state.value.isRunning) return
+        if (backgroundThumbPrefetchJob?.isActive == true) return
+        val scope = backgroundScope ?: return
+        scope.launch(Dispatchers.IO) {
+            if (countIndexedMissingThumbnails() == 0) return@launch
+            scheduleBackgroundThumbnailPrefetchIfNeeded()
+        }
+    }
+
+    private fun allowForegroundThumbnailPrefetch(): Boolean =
+        syncStatusScreenVisibleCount.get() > 0
+
     /**
-     * Prefetch pós-sync de miniaturas compete com galeria/álbuns em 1º plano — adia até ir para 2º plano.
+     * Prefetch pós-sync de miniaturas compete com galeria/álbuns em 1º plano — adia até ir para 2º plano,
+     * exceto enquanto a tela Sync estiver aberta.
      */
     fun onAppUiVisibilityChanged(inForeground: Boolean) {
         if (inForeground) {
-            backgroundThumbPrefetchJob?.cancel()
-            backgroundThumbPrefetchJob = null
-            val scope = backgroundScope ?: return
-            scope.launch(Dispatchers.IO) {
-                if (countIndexedMissingThumbnails() > 0) {
-                    backgroundThumbPrefetchDeferred.set(true)
+            if (!allowForegroundThumbnailPrefetch()) {
+                backgroundThumbPrefetchJob?.cancel()
+                backgroundThumbPrefetchJob = null
+                val scope = backgroundScope ?: return
+                scope.launch(Dispatchers.IO) {
+                    if (countIndexedMissingThumbnails() > 0) {
+                        backgroundThumbPrefetchDeferred.set(true)
+                    }
                 }
+            } else {
+                kickThumbnailPrefetchIfIdle()
             }
         } else {
             resumeBackgroundThumbnailPrefetchIfNeeded()
@@ -666,7 +702,7 @@ class SyncCoordinator(
     }
 
     private fun resumeBackgroundThumbnailPrefetchIfNeeded() {
-        if (appForegroundState.isInForeground()) return
+        if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) return
         if (_state.value.isRunning) return
         scheduleBackgroundThumbnailPrefetchIfNeeded()
     }
@@ -798,8 +834,21 @@ class SyncCoordinator(
         }
     }
 
-    private fun setRunQueueFromEntities(entities: List<SyncMetadataEntity>) {
-        val rows = entities.map { SyncQueueDisplayRow.fromEntity(it) }
+    private fun setRunQueueFromEntities(
+        entities: List<SyncMetadataEntity>,
+        thumbnailQueue: Boolean = false,
+    ) {
+        val rows = entities.map { entity ->
+            if (thumbnailQueue) {
+                SyncQueueDisplayRow(
+                    canonicalPath = entity.canonicalPath,
+                    displayName = entity.displayName,
+                    statusLabel = thumbnailOperationLabel(entity),
+                )
+            } else {
+                SyncQueueDisplayRow.fromEntity(entity)
+            }
+        }
         val apply = { _state.value = _state.value.copy(runQueue = rows) }
         if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
     }
@@ -2592,7 +2641,7 @@ class SyncCoordinator(
         )
         thumbRows.chunked(THUMB_PREFETCH_BATCH).forEach { batch ->
             ensureNotCancelled()
-            setRunQueueFromEntities(batch)
+            setRunQueueFromEntities(batch, thumbnailQueue = true)
             runMissingThumbnailPrefetch(batch, honorSyncCancel = true)
         }
     }
@@ -3375,13 +3424,13 @@ class SyncCoordinator(
 
     /** Após cancelar sync/index, completa miniaturas pendentes sem refazer upload/download. */
     private fun scheduleThumbnailPrefetchAfterInterrupt() {
-        if (appForegroundState.isInForeground()) {
+        if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
             backgroundThumbPrefetchDeferred.set(true)
             return
         }
         val scope = backgroundScope ?: return
         val job = scope.launch {
-            if (appForegroundState.isInForeground()) {
+            if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
                 backgroundThumbPrefetchDeferred.set(true)
                 return@launch
             }
@@ -3407,7 +3456,7 @@ class SyncCoordinator(
 
     /** Continua miniaturas após o sync principal (bibliotecas grandes, ex. dezenas de milhares na nuvem). */
     private fun scheduleBackgroundThumbnailPrefetchIfNeeded() {
-        if (appForegroundState.isInForeground()) {
+        if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
             backgroundThumbPrefetchDeferred.set(true)
             return
         }
@@ -3418,7 +3467,7 @@ class SyncCoordinator(
             delay(BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS)
             var stalledPasses = 0
             repeat(THUMB_BACKGROUND_CONTINUE_PASSES) {
-                if (appForegroundState.isInForeground()) {
+                if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
                     backgroundThumbPrefetchDeferred.set(true)
                     return@launch
                 }
@@ -3462,7 +3511,7 @@ class SyncCoordinator(
         if (paths.isEmpty()) return
         val rows = paths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
         if (rows.isEmpty()) return
-        setRunQueueFromEntities(rows)
+        setRunQueueFromEntities(rows, thumbnailQueue = true)
         setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Capas dos álbuns…",
@@ -3550,7 +3599,7 @@ class SyncCoordinator(
                 if (remainingEstimate == 0) break
                 val rows = buildMissingThumbnailEntities(batchSize)
                 if (rows.isEmpty()) break
-                setRunQueueFromEntities(rows)
+                setRunQueueFromEntities(rows, thumbnailQueue = true)
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Miniaturas na galeria…",
