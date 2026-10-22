@@ -94,7 +94,7 @@ object GallerySessionCatalogSpill {
                 val fingerprint = when (formatVersion) {
                     3 -> {
                         val checksum = input.readLong()
-                        GalleryCatalogFingerprint(rowCount, maxMod, checksum)
+                        GalleryCatalogFingerprint(rowCount, checksum, maxMod)
                     }
                     else -> {
                         val head = readNullableUtf(input)

@@ -183,7 +183,7 @@ class GalleryViewModel(
         val fingerprint = bootstrap?.fingerprint
             ?: catalogEntry?.fingerprint
             ?: albumEntry.fingerprint
-        if (albumEntry.fingerprint != fingerprint) {
+        if (!albumEntry.fingerprint.matchesIndex(fingerprint)) {
             return DeferredAlbumLists()
         }
         val catalogItems = bootstrap?.catalogItems ?: catalogEntry?.catalogItems.orEmpty()
@@ -249,9 +249,8 @@ class GalleryViewModel(
                 Triple(metadata, userAlbums, sort)
             }
                 .distinctUntilChanged { previous, next ->
-                    GalleryCatalogFingerprint.from(previous.first) ==
-                        GalleryCatalogFingerprint.from(next.first) &&
-                        previous.first.size == next.first.size &&
+                    GalleryCatalogFingerprint.from(previous.first)
+                        .matchesIndex(GalleryCatalogFingerprint.from(next.first)) &&
                         previous.second == next.second &&
                         previous.third == next.third
                 }
@@ -319,7 +318,7 @@ class GalleryViewModel(
         LibraryBuildInputs(metadata, userAlbums, localRevision)
     }.conflate()
         .distinctUntilChanged { previous, next ->
-            previous.fingerprint == next.fingerprint &&
+            previous.fingerprint.matchesIndex(next.fingerprint) &&
                 previous.userAlbums == next.userAlbums
         }
         .flatMapLatest { inputs ->
@@ -328,55 +327,57 @@ class GalleryViewModel(
                 val userAlbums = inputs.userAlbums
                 val localRevision = inputs.localRevision
                 val app = appContext.applicationContext as OneGalleryApplication
+                val fingerprint = GalleryLibrarySession.fingerprintOf(metadata)
                 if (metadata.isEmpty()) {
-                    app.galleryProcessCatalogCache.peek()?.takeIf { it.isRestorable() }?.let { process ->
-                        val bundle = process.toSnapshotBundle().copy(
-                            userAlbums = userAlbums.ifEmpty { process.userAlbums },
-                            localRevision = localRevision,
-                        )
-                        catalogSession.publish(bundle, activeSort = sortOrder.value)
-                        emit(bundle.toLibrarySnapshot())
-                        galleryBootstrap.value = bundle.toLibrarySnapshot()
-                    } ?: emit(
-                        LibrarySnapshot(
-                            catalogItems = emptyList(),
-                            visibleItems = emptyList(),
-                            userAlbums = userAlbums,
-                        ),
+                    val resolved = GalleryLibrarySession.resolveFromSessionCacheWhenIndexEmpty(
+                        userAlbums = userAlbums,
+                        localRevision = localRevision,
+                        processCache = app.galleryProcessCatalogCache,
                     )
-                    return@flow
-                }
-                val fingerprint = GalleryCatalogFingerprint.from(metadata)
-                app.galleryProcessCatalogCache.peek()?.let { process ->
-                    if (process.fingerprint == fingerprint && process.isRestorable()) {
-                        val bundle = process.toSnapshotBundle().copy(
-                            userAlbums = userAlbums,
-                            localRevision = localRevision,
-                        )
-                        catalogSession.publish(bundle, activeSort = sortOrder.value)
-                        persistProcessCatalog(bundle)
-                        val snapshot = bundle.toLibrarySnapshot()
+                    if (resolved != null) {
+                        catalogSession.publish(resolved.bundle, activeSort = sortOrder.value)
+                        val snapshot = resolved.bundle.toLibrarySnapshot()
                         emit(snapshot)
                         galleryBootstrap.value = snapshot
+                    } else {
+                        emit(
+                            LibrarySnapshot(
+                                catalogItems = emptyList(),
+                                visibleItems = emptyList(),
+                                userAlbums = userAlbums,
+                            ),
+                        )
+                    }
+                    return@flow
+                }
+                GalleryLibrarySession.resolveFromSessionCache(
+                    metadata = metadata,
+                    userAlbums = userAlbums,
+                    localRevision = localRevision,
+                    processCache = app.galleryProcessCatalogCache,
+                )?.let { resolved ->
+                    catalogSession.publish(resolved.bundle, activeSort = sortOrder.value)
+                    persistProcessCatalog(resolved.bundle)
+                    val snapshot = resolved.bundle.toLibrarySnapshot()
+                    emit(snapshot)
+                    galleryBootstrap.value = snapshot
+                    if (GalleryLibrarySession.shouldSkipFullRebuild(metadata, resolved)) {
                         return@flow
                     }
                 }
-                val cached = catalogSession.lastBundle
-                val cacheMatches = cached != null &&
-                    cached.fingerprint == fingerprint &&
-                    cached.localRevision == localRevision &&
-                    cached.userAlbums == userAlbums
-                val matchedBundle = if (cacheMatches) cached else null
-                val catalogComplete = matchedBundle != null &&
-                    matchedBundle.catalogItems.size >= metadata.size
-
-                if (catalogComplete) {
-                    emit(matchedBundle!!.toLibrarySnapshot())
-                    return@flow
-                }
-
-                if (matchedBundle != null && matchedBundle.catalogItems.isNotEmpty()) {
-                    emit(matchedBundle.toLibrarySnapshot())
+                GalleryLibrarySession.resolveFromInMemorySession(
+                    metadata = metadata,
+                    userAlbums = userAlbums,
+                    localRevision = localRevision,
+                    catalogSession = catalogSession,
+                )?.let { resolved ->
+                    catalogSession.publish(resolved.bundle, activeSort = sortOrder.value)
+                    val snapshot = resolved.bundle.toLibrarySnapshot()
+                    emit(snapshot)
+                    galleryBootstrap.value = snapshot
+                    if (GalleryLibrarySession.shouldSkipFullRebuild(metadata, resolved)) {
+                        return@flow
+                    }
                 }
 
                 val snapshot = runCatching {
@@ -403,13 +404,10 @@ class GalleryViewModel(
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
         syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
     ) { snapshot, _, syncRunning ->
-        if (snapshot.catalogItems.size > 8_000) {
-            snapshot
-        } else if (!syncRunning && snapshot.catalogItems.isNotEmpty()) {
-            // Pós-sync: prefetch de miniaturas dispara refresh em lote — não revarrer catálogo inteiro parado.
-            snapshot
-        } else {
-            catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
+        when {
+            snapshot.catalogItems.size > 1_500 -> snapshot
+            !syncRunning -> snapshot
+            else -> catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
         }
     }.distinctUntilChanged { previous, next ->
         previous.catalogItems === next.catalogItems &&
@@ -524,16 +522,14 @@ class GalleryViewModel(
         )
     }
 
-    /** Mesma regra da grade Fotos: RAM/spill por fingerprint, rebuild só se o índice mudou. */
-    private fun applySessionAlbumListsIfCurrent(
+    private fun applySessionAlbumListsFromEntry(
+        entry: GalleryProcessAlbumListsCache.Entry,
         fingerprint: GalleryCatalogFingerprint,
         metadataRowCount: Int,
         userAlbums: List<UserAlbumEntity>,
         albumSort: AlbumListSort,
-    ): Boolean {
+    ) {
         val app = appContext.applicationContext as OneGalleryApplication
-        val entry = app.galleryProcessAlbumListsCache.peek() ?: return false
-        if (entry.fingerprint != fingerprint || !entry.isRestorable()) return false
         val albums = sortMediaAlbums(entry.albums, albumSort)
         val placeAlbums = sortPlaceAlbums(entry.placeAlbums, albumSort)
         val catalogItems = latestCatalogItems.ifEmpty {
@@ -556,6 +552,19 @@ class GalleryViewModel(
             deferCoverModels = metadataRowCount > 3_000,
             coverRevisionStamp = entry.coverRevisionStamp,
         )
+    }
+
+    /** Mesma regra da grade Fotos: RAM/spill por fingerprint, rebuild só se o índice mudou. */
+    private fun applySessionAlbumListsIfCurrent(
+        fingerprint: GalleryCatalogFingerprint,
+        metadataRowCount: Int,
+        userAlbums: List<UserAlbumEntity>,
+        albumSort: AlbumListSort,
+    ): Boolean {
+        val entry = (appContext.applicationContext as OneGalleryApplication)
+            .galleryProcessAlbumListsCache.peek() ?: return false
+        if (!entry.fingerprint.matchesIndex(fingerprint) || !entry.isRestorable()) return false
+        applySessionAlbumListsFromEntry(entry, fingerprint, metadataRowCount, userAlbums, albumSort)
         return true
     }
 
@@ -567,9 +576,10 @@ class GalleryViewModel(
     ) {
         val app = appContext.applicationContext as OneGalleryApplication
         if (metadata.isEmpty()) {
-            val spillFingerprint = app.galleryProcessAlbumListsCache.peek()?.fingerprint
-                ?: app.galleryProcessCatalogCache.peek()?.fingerprint
-                ?: return
+            val spillFingerprint = GalleryAlbumLibrarySession.resolveWhenMetadataEmpty(
+                app.galleryProcessAlbumListsCache,
+                app.galleryProcessCatalogCache,
+            ) ?: return
             applySessionAlbumListsIfCurrent(
                 fingerprint = spillFingerprint,
                 metadataRowCount = spillFingerprint.rowCount,
@@ -579,11 +589,21 @@ class GalleryViewModel(
             return
         }
         val fingerprint = GalleryCatalogFingerprint.from(metadata)
+        GalleryAlbumLibrarySession.resolveFromProcessCache(
+            metadata = metadata,
+            userAlbums = userAlbums,
+            albumSort = albumSort,
+            albumCache = app.galleryProcessAlbumListsCache,
+            catalogFingerprint = fingerprint,
+        )?.let { entry ->
+            applySessionAlbumListsFromEntry(entry, fingerprint, metadata.size, userAlbums, albumSort)
+            return
+        }
         if (applySessionAlbumListsIfCurrent(fingerprint, metadata.size, userAlbums, albumSort)) {
             return
         }
         val pending = deferredAlbumLists.value
-        if (pending.catalogFingerprint == fingerprint &&
+        if (pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
             pending.metadataRowCount == metadata.size &&
             pending.albumSort == albumSort &&
             pending.albums.isNotEmpty()
@@ -677,7 +697,7 @@ class GalleryViewModel(
         deferAlbumCoverModels: Boolean,
         coverRevisionStamp: Long,
     ): Pair<List<MediaAlbum>, List<MediaAlbum>> {
-        if (albumLists.albums.isNotEmpty() && albumLists.catalogFingerprint == fingerprint) {
+        if (albumLists.albums.isNotEmpty() && albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true) {
             return albumLists.albums to albumLists.placeAlbums
         }
         if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS) {
@@ -790,7 +810,6 @@ class GalleryViewModel(
             ?: catalogSession.lastBundle?.fingerprint
             ?: GalleryCatalogFingerprint(
                 rowCount = catalogItems.size,
-                maxModifiedSeconds = 0L,
                 pathChecksum = catalogItems.fold(0L) { acc, item ->
                     acc xor item.canonicalPath.hashCode().toLong()
                 },

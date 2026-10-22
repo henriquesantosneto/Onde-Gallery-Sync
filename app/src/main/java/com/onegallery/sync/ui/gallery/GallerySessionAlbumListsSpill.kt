@@ -84,7 +84,7 @@ object GallerySessionAlbumListsSpill {
                 val rowCount = input.readInt()
                 val maxMod = input.readLong()
                 val fingerprint = if (formatVersion >= 2) {
-                    GalleryCatalogFingerprint(rowCount, maxMod, input.readLong())
+                    GalleryCatalogFingerprint(rowCount, input.readLong(), maxMod)
                 } else {
                     val head = readNullableUtf(input)
                     val tail = readNullableUtf(input)

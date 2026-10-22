@@ -192,7 +192,12 @@ class SyncCoordinator(
     private var thumbnailStatsRefreshScheduled = false
 
     init {
-        mediaCacheRepository.onThumbnailCommitted = { canonicalPath ->
+        mediaCacheRepository.onThumbnailCommitted = onThumbnailCommitted@{ canonicalPath ->
+            if (appForegroundState.isInForeground() && !_state.value.isRunning) {
+                scheduleAlbumCoverRevisionForPath(canonicalPath)
+                scheduleThumbnailStatsRefresh(debounceMs = 60_000L)
+                return@onThumbnailCommitted
+            }
             if (bulkThumbnailPrefetchDepth.get() == 0) {
                 notifyGalleryDisplayRefresh()
             } else {
