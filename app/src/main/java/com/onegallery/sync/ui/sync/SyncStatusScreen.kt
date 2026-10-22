@@ -327,16 +327,18 @@ fun SyncStatusScreen(
     }
 }
 
-private val SyncQueueRowStride = 52.dp
-private val SyncQueueRowGap = 8.dp
-private const val SyncQueueVisibleRowCount = 10
+/** Altura de uma linha compacta na fila (nome + status em uma faixa estreita). */
+private val SyncQueueRowStride = 34.dp
+private val SyncQueueRowGap = 4.dp
+/** Linhas visíveis no quadro; o restante rola com a barrinha à direita. */
+private const val SyncQueueVisibleRowCount = 5
+private val SyncQueueEmptyHeight = 56.dp
 
 @Composable
 private fun syncQueueListViewportHeight(): Dp {
-    val fixedViewport = SyncQueueRowStride * SyncQueueVisibleRowCount +
+    return SyncQueueRowStride * SyncQueueVisibleRowCount +
         SyncQueueRowGap * (SyncQueueVisibleRowCount - 1) +
-        16.dp
-    return fixedViewport
+        12.dp
 }
 
 @Composable
@@ -348,10 +350,11 @@ private fun SyncQueueScrollPanel(
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
     val listCount = activeItems.size + queueWaiting.size
+    val panelHeight = if (listCount == 0) SyncQueueEmptyHeight else viewportHeight
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(viewportHeight)
+            .height(panelHeight)
             .border(1.dp, outline, MaterialTheme.shapes.medium),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surface,
@@ -378,7 +381,7 @@ private fun SyncQueueScrollPanel(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+                    contentPadding = PaddingValues(start = 10.dp, end = 18.dp, top = 6.dp, bottom = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
                 ) {
                     items(
@@ -418,7 +421,8 @@ private fun SyncQueueScrollbar(
     val layoutInfo = listState.layoutInfo
     val totalItems = layoutInfo.totalItemsCount
     val visibleCount = layoutInfo.visibleItemsInfo.size
-    if (totalItems <= visibleCount || visibleCount == 0) return
+    if (totalItems == 0) return
+    val showThumb = totalItems > visibleCount && visibleCount > 0
     val scrollRange = (totalItems - visibleCount).coerceAtLeast(1)
     val scrollIndex = listState.firstVisibleItemIndex.coerceIn(0, scrollRange)
     val thumbFraction = visibleCount.toFloat() / totalItems.toFloat()
@@ -429,21 +433,23 @@ private fun SyncQueueScrollbar(
         modifier = modifier.width(5.dp),
     ) {
         val trackHeight = maxHeight
-        val thumbHeight = trackHeight * thumbFraction.coerceIn(0.12f, 1f)
-        val maxTravel = (trackHeight - thumbHeight).coerceAtLeast(0.dp)
-        val thumbTop = maxTravel * thumbOffsetFraction
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(trackColor, RoundedCornerShape(3.dp)),
         )
-        Box(
-            modifier = Modifier
-                .width(5.dp)
-                .height(thumbHeight)
-                .offset(y = thumbTop)
-                .background(thumbColor, RoundedCornerShape(3.dp)),
-        )
+        if (showThumb) {
+            val thumbHeight = trackHeight * thumbFraction.coerceIn(0.18f, 1f)
+            val maxTravel = (trackHeight - thumbHeight).coerceAtLeast(0.dp)
+            val thumbTop = maxTravel * thumbOffsetFraction
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .height(thumbHeight)
+                    .offset(y = thumbTop)
+                    .background(thumbColor, RoundedCornerShape(3.dp)),
+            )
+        }
     }
 }
 
@@ -511,14 +517,15 @@ private fun SyncActiveTransferRow(activeItem: ActiveSyncItem) {
     Column(Modifier.fillMaxWidth()) {
         Text(
             activeItem.displayName,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
+            maxLines = 1,
         )
         Text(
             activeItem.operationLabel,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
         )
         SyncTransferProgressBar(activeItem = activeItem)
     }
@@ -533,13 +540,13 @@ private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
             progress = { fraction },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = 3.dp),
         )
     } else {
         LinearProgressIndicator(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = 3.dp),
         )
     }
     if (byteLabel != null) {
@@ -547,7 +554,8 @@ private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
             byteLabel,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = 2.dp),
+            maxLines = 1,
         )
     }
 }
@@ -573,9 +581,9 @@ private fun SyncQueueItemRow(
     ) {
         Text(
             row.displayName,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 2,
+            maxLines = 1,
         )
         Text(
             if (isActive) {
@@ -583,7 +591,7 @@ private fun SyncQueueItemRow(
             } else {
                 row.statusLabel
             },
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             color = if (isActive) {
                 MaterialTheme.colorScheme.primary
             } else {
