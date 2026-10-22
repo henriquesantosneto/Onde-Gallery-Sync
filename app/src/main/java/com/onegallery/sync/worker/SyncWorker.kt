@@ -6,6 +6,7 @@ import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.R
+import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.sync.SyncForegroundNotifications
 import kotlinx.coroutines.CancellationException
 
@@ -55,6 +56,7 @@ class SyncWorker(
             runAutoReleaseOnly(app)
             return Result.success()
         }
+        app.syncCoordinator.refreshPendingTransferCache()
         var syncResult: Result = Result.success()
         if (userInitiated || !app.syncCoordinator.shouldDeferAutomaticBidirectionalSync()) {
             syncResult = app.syncCoordinator.runBidirectionalSync(userInitiated = userInitiated)
@@ -72,6 +74,8 @@ class SyncWorker(
                         }
                     },
                 )
+        } else {
+            BackgroundSyncScheduler.enqueueDeferredAutoSync(app, prefs)
         }
         runAutoReleaseOnly(app)
         return syncResult

@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 object BackgroundSyncScheduler {
 
     const val IMMEDIATE_UNIQUE = "onegallery_bidirectional_sync_now"
+    const val DEFERRED_UNIQUE = "onegallery_bidirectional_sync_deferred"
 
     fun syncConstraints(prefs: SyncPreferences): Constraints {
         val networkType = if (prefs.wifiOnly) {
@@ -36,6 +37,7 @@ object BackgroundSyncScheduler {
         if (!prefs.backgroundSyncAlwaysEnabled || !prefs.hasCompletedSetup) {
             WorkManager.getInstance(app).cancelUniqueWork(SyncWorker.UNIQUE_NAME)
             WorkManager.getInstance(app).cancelUniqueWork(IMMEDIATE_UNIQUE)
+            WorkManager.getInstance(app).cancelUniqueWork(DEFERRED_UNIQUE)
             app.mediaLibraryChangeWatcher.stop()
             return
         }
@@ -68,13 +70,49 @@ object BackgroundSyncScheduler {
     ) {
         if (!prefs.backgroundSyncAlwaysEnabled || !prefs.hasCompletedSetup) return
         if (prefs.isAutoSyncPaused()) return
-        if (prefs.shouldDeferBackgroundSyncByTime()) return
+        val cooldownMs = prefs.millisUntilBackgroundSyncAllowed()
+        if (cooldownMs > 0L) {
+            enqueueDeferredAutoSync(
+                context = context,
+                prefs = prefs,
+                extraDelayMs = delaySeconds * 1_000L,
+            )
+            return
+        }
         enqueueSyncWork(
             context = context,
             prefs = prefs,
             userInitiated = false,
             delaySeconds = delaySeconds,
             policy = policy,
+            uniqueWorkName = IMMEDIATE_UNIQUE,
+        )
+    }
+
+    /**
+     * Agenda sync automático após cooldown (MediaStore/rede/periódico que caiu no intervalo mínimo).
+     * [ExistingWorkPolicy.KEEP] evita empurrar o prazo a cada evento repetido.
+     */
+    fun enqueueDeferredAutoSync(
+        context: Context,
+        prefs: SyncPreferences,
+        extraDelayMs: Long = 0L,
+    ) {
+        if (!prefs.backgroundSyncAlwaysEnabled || !prefs.hasCompletedSetup) return
+        if (prefs.isAutoSyncPaused()) return
+        val waitMs = (prefs.millisUntilBackgroundSyncAllowed() + extraDelayMs).coerceAtLeast(0L)
+        if (waitMs <= 0L) {
+            enqueueSyncSoon(context, prefs, delaySeconds = 0L)
+            return
+        }
+        val delaySec = ((waitMs + 999L) / 1_000L).coerceAtLeast(1L)
+        enqueueSyncWork(
+            context = context,
+            prefs = prefs,
+            userInitiated = false,
+            delaySeconds = delaySec,
+            policy = ExistingWorkPolicy.KEEP,
+            uniqueWorkName = DEFERRED_UNIQUE,
         )
     }
 
@@ -101,6 +139,7 @@ object BackgroundSyncScheduler {
         userInitiated: Boolean,
         delaySeconds: Long,
         policy: ExistingWorkPolicy,
+        uniqueWorkName: String = IMMEDIATE_UNIQUE,
     ) {
         val builder = OneTimeWorkRequestBuilder<SyncWorker>()
             .setInputData(SyncWorker.input(userInitiated))
@@ -112,7 +151,7 @@ object BackgroundSyncScheduler {
             builder.setInitialDelay(delaySeconds, TimeUnit.SECONDS)
         }
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            IMMEDIATE_UNIQUE,
+            uniqueWorkName,
             policy,
             builder.build(),
         )

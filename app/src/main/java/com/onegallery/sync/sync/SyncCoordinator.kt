@@ -416,21 +416,18 @@ class SyncCoordinator(
         pathsUploadedThisSync.clear()
     }
 
+    suspend fun refreshPendingTransferCache() {
+        val pending = syncMetadataDao.countPendingUploadOperations() +
+            syncMetadataDao.countPendingDownloadOperations()
+        syncPreferences.cachedPendingTransferCount = pending
+    }
+
     /** Sync automático (WorkManager / rede / MediaStore) sem pendências urgentes. */
     suspend fun shouldDeferAutomaticBidirectionalSync(): Boolean {
         if (syncPreferences.isAutoSyncPaused()) return true
-        if (syncPreferences.isMediaLibraryWatchSuppressed()) return true
         if (_state.value.isRunning) return true
-        val last = syncPreferences.lastBidirectionalSyncCompletedAtMs
-        if (last <= 0L) return false
-        val elapsed = System.currentTimeMillis() - last
-        if (elapsed >= SyncPreferences.AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS) return false
-        if (elapsed >= SyncPreferences.AUTO_BIDIRECTIONAL_UPLOAD_RETRY_MS &&
-            syncMetadataDao.countPendingUploadOperations() > 0
-        ) {
-            return false
-        }
-        return true
+        refreshPendingTransferCache()
+        return syncPreferences.millisUntilBackgroundSyncAllowed() > 0L
     }
 
     private fun isUserCancellation(): Boolean =
@@ -1082,6 +1079,7 @@ class SyncCoordinator(
     suspend fun runBidirectionalSync(userInitiated: Boolean = false): Result<SyncSummary> {
         ensureAutoSyncAllowed(userInitiated)?.let { return Result.failure(it.exceptionOrNull()!!) }
         if (!userInitiated && shouldDeferAutomaticBidirectionalSync()) {
+            BackgroundSyncScheduler.enqueueDeferredAutoSync(appContext, syncPreferences)
             return Result.success(SyncSummary(0, 0, 0))
         }
         if (!SyncCapability.bidirectionalSyncEnabled) {
@@ -3369,9 +3367,12 @@ class SyncCoordinator(
                         )
                     }
                 }
-                finalMessage to syncMetadataDao.countPendingOperations()
-            }.onSuccess { (finalMessage, pendingCount) ->
+                val transferPending = syncMetadataDao.countPendingUploadOperations() +
+                    syncMetadataDao.countPendingDownloadOperations()
+                Triple(finalMessage, syncMetadataDao.countPendingOperations(), transferPending)
+            }.onSuccess { (finalMessage, pendingCount, transferPending) ->
                 syncPreferences.lastBidirectionalSyncCompletedAtMs = System.currentTimeMillis()
+                syncPreferences.cachedPendingTransferCount = transferPending
                 _state.value = _state.value.copy(
                     isRunning = false,
                     activeItems = emptyList(),
@@ -3387,6 +3388,9 @@ class SyncCoordinator(
                 )
                 if (countIndexedMissingThumbnails() > 0) {
                     scheduleBackgroundThumbnailPrefetchIfNeeded()
+                }
+                if (syncPreferences.cachedPendingTransferCount > 0) {
+                    BackgroundSyncScheduler.enqueueDeferredAutoSync(appContext, syncPreferences)
                 }
             }.onFailure { error ->
                 syncPreferences.lastBidirectionalSyncCompletedAtMs = System.currentTimeMillis()

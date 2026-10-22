@@ -33,8 +33,11 @@ class MediaLibraryChangeWatcher(
 
     private fun scheduleDebouncedSync() {
         if (!syncPreferences.backgroundSyncAlwaysEnabled) return
-        if (syncPreferences.isMediaLibraryWatchSuppressed()) return
-        if (syncPreferences.shouldDeferBackgroundSyncByTime()) return
+        if (syncPreferences.isAutoSyncPaused()) return
+        if (syncPreferences.isMediaLibraryWatchSuppressed()) {
+            BackgroundSyncScheduler.enqueueDeferredAutoSync(context, syncPreferences)
+            return
+        }
         handler.removeCallbacks(debounceRunnable)
         handler.postDelayed(debounceRunnable, DEBOUNCE_MS)
     }
@@ -64,6 +67,6 @@ class MediaLibraryChangeWatcher(
 
     companion object {
         private const val DEBOUNCE_MS = 8_000L
-        private const val LIBRARY_CHANGE_DELAY_SEC = 45L
+        private const val LIBRARY_CHANGE_DELAY_SEC = 30L
     }
 }

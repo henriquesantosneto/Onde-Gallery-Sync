@@ -27,6 +27,7 @@ Manter o índice `sync_metadata` alinhado com MediaStore e OneDrive **sem exigir
 
 - **Nome único:** `onegallery_bidirectional_sync_now` (`IMMEDIATE_UNIQUE`).
 - **Delay padrão:** 30 s (`enqueueSyncSoon`); **REPLACE** reinicia o timer se houver rajada de eventos.
+- **Cooldown:** se cair no intervalo mínimo (12 min, ou **3 min** com envios/downloads pendentes), agenda `onegallery_bidirectional_sync_deferred` (KEEP) em vez de descartar o gatilho.
 - Usado por: watcher de biblioteca, callback de rede (~25 s), boot.
 
 ### Pré-condições (não enfileira se)
@@ -50,7 +51,7 @@ Manter o índice `sync_metadata` alinhado com MediaStore e OneDrive **sem exigir
 
 - Observa URIs de imagens e vídeos no MediaStore.
 - **Debounce:** 8 s (`DEBOUNCE_MS`) antes de reagir.
-- Enfileira sync com delay **45 s** (`LIBRARY_CHANGE_DELAY_SEC`) para agrupar imports (WhatsApp, câmera).
+- Enfileira sync com delay **30 s** (`LIBRARY_CHANGE_DELAY_SEC`) para agrupar imports (WhatsApp, câmera).
 - **Suprimido** enquanto sync está rodando e por janelas após sync / liberação de espaço (evita ciclo infinito).
 
 ## Callback de rede (`OneGalleryApplication`)

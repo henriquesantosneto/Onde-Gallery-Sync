@@ -108,6 +108,14 @@ class SyncPreferences(context: Context) {
         get() = prefs.getLong(KEY_LAST_BIDIR_SYNC_DONE_MS, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_BIDIR_SYNC_DONE_MS, value).apply()
 
+    /**
+     * Atualizado ao fim do sync (e no [SyncWorker]) para gatilhos em background
+     * respeitarem retry curto quando ainda há envios/downloads na fila.
+     */
+    var cachedPendingTransferCount: Int
+        get() = prefs.getInt(KEY_CACHED_PENDING_TRANSFER, 0).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_CACHED_PENDING_TRANSFER, value.coerceAtLeast(0)).apply()
+
     /** Round-robin no backfill de GPS para não ficar reprovando sempre os mesmos itens. */
     var gpsBackfillCursor: Int
         get() = prefs.getInt(KEY_GPS_BACKFILL_CURSOR, 0).coerceAtLeast(0)
@@ -170,14 +178,35 @@ class SyncPreferences(context: Context) {
     fun isMediaLibraryWatchSuppressed(): Boolean =
         System.currentTimeMillis() < mediaLibraryWatchSuppressedUntilMs
 
-    /** Evita rajadas de sync automático (WorkManager, rede, MediaStore). */
-    fun shouldDeferBackgroundSyncByTime(): Boolean {
-        if (isAutoSyncPaused()) return true
-        if (isMediaLibraryWatchSuppressed()) return true
-        val last = lastBidirectionalSyncCompletedAtMs
-        if (last <= 0L) return false
-        return System.currentTimeMillis() - last < AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS
+    /** Intervalo mínimo antes de outro sync automático (menor se ainda há transferências pendentes). */
+    fun autoBidirectionalMinIntervalMs(): Long {
+        return if (cachedPendingTransferCount > 0) {
+            AUTO_BIDIRECTIONAL_UPLOAD_RETRY_MS
+        } else {
+            AUTO_BIDIRECTIONAL_MIN_INTERVAL_MS
+        }
     }
+
+    /**
+     * Quanto falta até um sync automático poder rodar (0 = já pode).
+     * Usado para agendar WorkManager em vez de descartar o gatilho.
+     */
+    fun millisUntilBackgroundSyncAllowed(): Long {
+        val pauseMs = autoSyncPausedRemainingMs()
+        if (pauseMs > 0L) return pauseMs
+        val now = System.currentTimeMillis()
+        if (isMediaLibraryWatchSuppressed()) {
+            return (mediaLibraryWatchSuppressedUntilMs - now).coerceAtLeast(0L)
+        }
+        val last = lastBidirectionalSyncCompletedAtMs
+        if (last <= 0L) return 0L
+        val elapsed = now - last
+        val need = autoBidirectionalMinIntervalMs()
+        return (need - elapsed).coerceAtLeast(0L)
+    }
+
+    /** Evita rajadas de sync automático (WorkManager, rede, MediaStore). */
+    fun shouldDeferBackgroundSyncByTime(): Boolean = millisUntilBackgroundSyncAllowed() > 0L
 
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
@@ -212,6 +241,7 @@ class SyncPreferences(context: Context) {
         const val MEDIA_LIBRARY_SUPPRESS_AFTER_LOCAL_RELEASE_MS = 10 * 60 * 1000L
 
         private const val KEY_LAST_BIDIR_SYNC_DONE_MS = "last_bidir_sync_done_ms"
+        private const val KEY_CACHED_PENDING_TRANSFER = "cached_pending_transfer_count"
         private const val KEY_MEDIA_WATCH_SUPPRESS_UNTIL_MS = "media_watch_suppress_until_ms"
         private const val KEY_GPS_BACKFILL_CURSOR = "gps_backfill_cursor"
         private const val KEY_THUMB_FAIL_COUNTS = "thumb_fail_counts"

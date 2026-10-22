@@ -52,6 +52,14 @@ interface SyncMetadataDao {
     )
     suspend fun countPendingUploadOperations(): Int
 
+    @Query(
+        """
+        SELECT COUNT(*) FROM sync_metadata
+        WHERE cloudState = 'PENDING_DOWNLOAD' AND pendingDeleteTarget = 'NONE'
+        """,
+    )
+    suspend fun countPendingDownloadOperations(): Int
+
     @Query("SELECT * FROM sync_metadata WHERE canonicalPath = :canonicalPath LIMIT 1")
     suspend fun getByCanonicalPath(canonicalPath: String): SyncMetadataEntity?
 

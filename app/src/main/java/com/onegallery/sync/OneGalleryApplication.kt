@@ -193,8 +193,10 @@ class OneGalleryApplication : Application() {
         connectivityManager.registerDefaultNetworkCallback(
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    if (skipInitialNetworkAvailable) return
-                    if (syncPreferences.shouldDeferBackgroundSyncByTime()) return
+                    if (skipInitialNetworkAvailable) {
+                        skipInitialNetworkAvailable = false
+                        return
+                    }
                     BackgroundSyncScheduler.enqueueSyncSoon(
                         context = this@OneGalleryApplication,
                         prefs = syncPreferences,
