@@ -15,6 +15,19 @@ data class GalleryCatalogFingerprint(
         rowCount == other.rowCount && pathChecksum == other.pathChecksum
 
     companion object {
+        fun fromDisplayPaths(paths: List<String>): GalleryCatalogFingerprint {
+            if (paths.isEmpty()) return GalleryCatalogFingerprint(0, 0L, 0L)
+            var checksum = 0L
+            for (path in paths) {
+                checksum = checksum xor path.hashCode().toLong()
+            }
+            return GalleryCatalogFingerprint(
+                rowCount = paths.size,
+                pathChecksum = checksum,
+                maxModifiedSeconds = 0L,
+            )
+        }
+
         fun from(metadata: List<SyncMetadataEntity>): GalleryCatalogFingerprint {
             if (metadata.isEmpty()) {
                 return GalleryCatalogFingerprint(0, 0L, 0L)

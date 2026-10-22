@@ -339,15 +339,31 @@ class GalleryViewModel(
                         val snapshot = resolved.bundle.toLibrarySnapshot()
                         emit(snapshot)
                         galleryBootstrap.value = snapshot
-                    } else {
-                        emit(
-                            LibrarySnapshot(
-                                catalogItems = emptyList(),
-                                visibleItems = emptyList(),
-                                userAlbums = userAlbums,
-                            ),
-                        )
+                        return@flow
                     }
+                    val localBootstrap = GalleryLocalBootstrap.buildSnapshotBundle(
+                        localMediaRepository = localMediaRepository,
+                        mediaCacheRepository = mediaCacheRepository,
+                        userAlbums = userAlbums,
+                        localRevision = localRevision,
+                    )
+                    if (localBootstrap != null) {
+                        catalogSession.publish(localBootstrap, activeSort = sortOrder.value)
+                        persistProcessCatalog(localBootstrap)
+                        val snapshot = localBootstrap.toLibrarySnapshot()
+                        emit(snapshot)
+                        galleryBootstrap.value = snapshot
+                        app.syncCoordinator.warmLocalIndexIfEmpty()
+                        return@flow
+                    }
+                    emit(
+                        LibrarySnapshot(
+                            catalogItems = emptyList(),
+                            visibleItems = emptyList(),
+                            userAlbums = userAlbums,
+                        ),
+                    )
+                    app.syncCoordinator.warmLocalIndexIfEmpty()
                     return@flow
                 }
                 GalleryLibrarySession.resolveFromSessionCache(
@@ -579,13 +595,67 @@ class GalleryViewModel(
             val spillFingerprint = GalleryAlbumLibrarySession.resolveWhenMetadataEmpty(
                 app.galleryProcessAlbumListsCache,
                 app.galleryProcessCatalogCache,
-            ) ?: return
-            applySessionAlbumListsIfCurrent(
-                fingerprint = spillFingerprint,
-                metadataRowCount = spillFingerprint.rowCount,
-                userAlbums = userAlbums,
-                albumSort = albumSort,
             )
+            if (spillFingerprint != null) {
+                applySessionAlbumListsIfCurrent(
+                    fingerprint = spillFingerprint,
+                    metadataRowCount = spillFingerprint.rowCount,
+                    userAlbums = userAlbums,
+                    albumSort = albumSort,
+                )
+                return
+            }
+            viewModelScope.launch(Dispatchers.Default) {
+                val localBundle = GalleryLocalBootstrap.buildSnapshotBundle(
+                    localMediaRepository = localMediaRepository,
+                    mediaCacheRepository = mediaCacheRepository,
+                    userAlbums = userAlbums,
+                    localRevision = localMediaRepository.localGalleryRevision.value,
+                ) ?: return@launch
+                val fingerprint = localBundle.fingerprint
+                val resolveCovers = localBundle.catalogItems.size <= 3_000
+                val albums = buildAlbums(
+                    localBundle.catalogItems,
+                    userAlbums,
+                    albumSort,
+                    albumCoverLocalIndex,
+                    mediaCacheRepository,
+                    resolveCoverModels = resolveCovers,
+                )
+                val placeAlbums = sortPlaceAlbums(
+                    buildPlaceAlbums(
+                        localBundle.catalogItems,
+                        albumCoverLocalIndex,
+                        mediaCacheRepository,
+                        resolveCoverModels = resolveCovers,
+                    ),
+                    albumSort,
+                )
+                if (albums.isEmpty() && placeAlbums.isEmpty()) return@launch
+                applySessionAlbumListsFromEntry(
+                    GalleryProcessAlbumListsCache.Entry(
+                        albums = albums,
+                        placeAlbums = placeAlbums,
+                        fingerprint = fingerprint,
+                        localRevision = localBundle.localRevision,
+                        albumListSort = albumSort,
+                        coverRevisionStamp = 0L,
+                    ),
+                    fingerprint,
+                    fingerprint.rowCount,
+                    userAlbums,
+                    albumSort,
+                )
+                persistProcessAlbumLists(
+                    albums = albums,
+                    placeAlbums = placeAlbums,
+                    fingerprint = fingerprint,
+                    localRevision = localBundle.localRevision,
+                    albumSort = albumSort,
+                    coverRevisionStamp = 0L,
+                )
+            }
+            app.syncCoordinator.warmLocalIndexIfEmpty()
             return
         }
         val fingerprint = GalleryCatalogFingerprint.from(metadata)

@@ -183,6 +183,7 @@ class OneGalleryApplication : Application() {
         )
         registerWifiSyncNetworkGuard()
         rescheduleBackgroundSync()
+        syncCoordinator.warmLocalIndexIfEmpty()
     }
 
     private fun registerWifiSyncNetworkGuard() {

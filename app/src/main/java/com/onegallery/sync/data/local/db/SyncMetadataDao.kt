@@ -19,6 +19,9 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata")
     suspend fun getAll(): List<SyncMetadataEntity>
 
+    @Query("SELECT COUNT(*) FROM sync_metadata")
+    suspend fun countAll(): Int
+
     @Query("SELECT * FROM sync_metadata WHERE localMediaId IS NOT NULL")
     suspend fun getRowsWithLocalCopy(): List<SyncMetadataEntity>
 

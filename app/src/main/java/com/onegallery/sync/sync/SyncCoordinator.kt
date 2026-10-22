@@ -671,6 +671,25 @@ class SyncCoordinator(
         scheduleBackgroundThumbnailPrefetchIfNeeded()
     }
 
+    /**
+     * Preenche o Room a partir do MediaStore sem sync na nuvem — mesma base do início do sync,
+     * para a galeria montar spill/sessão antes do usuário tocar em Sincronizar.
+     */
+    fun warmLocalIndexIfEmpty() {
+        val scope = backgroundScope ?: return
+        scope.launch(Dispatchers.IO) {
+            if (!syncPreferences.hasCompletedSetup) return@launch
+            if (_state.value.isRunning) return@launch
+            if (syncMetadataDao.countAll() > 0) return@launch
+            if (!longTaskMutex.tryLock()) return@launch
+            try {
+                indexLocalLibrary(manageRunningState = false, userInitiated = false)
+            } finally {
+                longTaskMutex.unlock()
+            }
+        }
+    }
+
     /** Estilo galeria: só os álbuns afetados, após miniatura local gravada (lote curto). */
     private fun scheduleAlbumCoverRevisionForPath(canonicalPath: String) {
         pendingAlbumCoverPaths.add(canonicalPath)
