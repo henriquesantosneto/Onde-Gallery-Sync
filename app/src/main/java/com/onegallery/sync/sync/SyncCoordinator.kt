@@ -46,7 +46,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -856,6 +858,13 @@ class SyncCoordinator(
             val apply = { _state.value = _state.value.copy(runQueue = next) }
             if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
         }
+    }
+
+    /** Evita UI presa com 1–2 miniaturas após timeout ou ao seguir para GPS. */
+    private fun clearRunQueueAndActiveTransfers() {
+        clearActiveSyncItems()
+        val apply = { _state.value = _state.value.copy(runQueue = emptyList()) }
+        if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
     }
 
     private fun planUploadsForSync(
@@ -3322,6 +3331,7 @@ class SyncCoordinator(
                     alsoUpdateLastMessage = false,
                 )
                 val thumbsStillMissing = runCompleteThumbnailPrefetchBeforeMetadata()
+                clearRunQueueAndActiveTransfers()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
                 setSyncProgress(
@@ -3558,12 +3568,18 @@ class SyncCoordinator(
             if (after == 0) return 0
             if (after >= before - THUMB_STALL_MIN_PROGRESS) {
                 stalledPasses++
-                if (stalledPasses >= THUMB_POST_SYNC_MAX_STALL_PASSES) return after
+                if (stalledPasses >= THUMB_POST_SYNC_MAX_STALL_PASSES) {
+                    forcePlaceholderForStubbornMissingThumbnails()
+                    clearRunQueueAndActiveTransfers()
+                    return countIndexedMissingThumbnails()
+                }
             } else {
                 stalledPasses = 0
             }
             pass++
         }
+        forcePlaceholderForStubbornMissingThumbnails()
+        clearRunQueueAndActiveTransfers()
         return countIndexedMissingThumbnails()
     }
 
@@ -3700,10 +3716,18 @@ class SyncCoordinator(
                                 ),
                                 force = true,
                             )
-                            ensureThumbnailCached(
-                                row.canonicalPath,
-                                activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
-                            )
+                            var timedOut = false
+                            try {
+                                withTimeout(THUMB_PREFETCH_ITEM_TIMEOUT_MS) {
+                                    ensureThumbnailCached(
+                                        row.canonicalPath,
+                                        activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
+                                    )
+                                }
+                            } catch (_: TimeoutCancellationException) {
+                                timedOut = true
+                                syncPreferences.incrementThumbnailFailure(row.canonicalPath)
+                            }
                             var hit = mediaCacheRepository.thumbnailIfCached(
                                 row.canonicalPath,
                                 row.oneDriveItemId,
@@ -3713,8 +3737,11 @@ class SyncCoordinator(
                                     row.canonicalPath,
                                     1,
                                 ) { left, _ -> left + 1 } ?: 1
-                                if (attempts >= 2) {
+                                if (timedOut || attempts >= 2) {
                                     hit = persistMinimalPlaceholderThumbnail(row) != null
+                                    if (hit) {
+                                        syncPreferences.clearThumbnailFailure(row.canonicalPath)
+                                    }
                                 }
                             } else {
                                 thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
@@ -4383,6 +4410,8 @@ class SyncCoordinator(
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
         const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 2
+        /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
+        const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 120_000L
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
