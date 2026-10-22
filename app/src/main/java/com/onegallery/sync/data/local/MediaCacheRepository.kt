@@ -102,6 +102,35 @@ class MediaCacheRepository(context: Context) {
         return displayableThumbnailIfCached(canonicalPath, oneDriveItemId) != null
     }
 
+    /**
+     * Montagem do índice (~milhares de linhas): só stat/tamanho, sem decode nem cópia de alias.
+     * A UI valida o bitmap ao exibir ([displayableThumbnailIfCached]).
+     */
+    fun thumbnailFileForIndexBuild(canonicalPath: String, oneDriveItemId: String? = null): File? {
+        val minBytes = MIN_DISPLAYABLE_THUMB_BYTES
+        if (thumbExistsCache[canonicalPath] == true) {
+            val cached = thumbFile(canonicalPath)
+            if (cached.isFile && cached.length() >= minBytes) return cached
+            thumbExistsCache.remove(canonicalPath)
+        }
+        val safeName = safeFileName(canonicalPath)
+        if (thumbOnDiskBySafeName[safeName] == true) {
+            val file = thumbFile(canonicalPath)
+            if (file.isFile && file.length() >= minBytes) {
+                rememberThumbOnDisk(canonicalPath, file)
+                return file
+            }
+        }
+        val file = thumbFile(canonicalPath)
+        if (file.isFile && file.length() >= minBytes) {
+            rememberThumbOnDisk(canonicalPath, file)
+            return file
+        }
+        val itemId = oneDriveItemId?.takeIf { it.isNotBlank() } ?: return null
+        val alias = thumbFileByRemoteItemId(itemId)
+        return alias.takeIf { it.isFile && it.length() >= minBytes }
+    }
+
     fun displayableThumbnailIfCached(
         canonicalPath: String,
         oneDriveItemId: String? = null,
@@ -196,8 +225,10 @@ class MediaCacheRepository(context: Context) {
 
     fun isDisplayableGalleryThumbFile(file: File): Boolean = isDisplayableGalleryThumb(file)
 
+    private val MIN_DISPLAYABLE_THUMB_BYTES = 128L
+
     private fun isDisplayableGalleryThumb(file: File): Boolean {
-        if (file.length() < 128L) return false
+        if (file.length() < MIN_DISPLAYABLE_THUMB_BYTES) return false
         val (w, h) = decodeBounds(file) ?: return false
         return w >= MIN_DISPLAYABLE_THUMB_EDGE_PX && h >= MIN_DISPLAYABLE_THUMB_EDGE_PX
     }

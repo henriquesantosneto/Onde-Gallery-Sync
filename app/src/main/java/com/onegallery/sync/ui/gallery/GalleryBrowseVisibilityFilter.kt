@@ -10,9 +10,7 @@ fun filterVisibleForGalleryBrowse(
     if (items.size >= 1_500) {
         val out = ArrayList<GalleryDisplayItem>(items.size)
         for (item in items) {
-            if (item.showInBrowseGrid || item.isVisibleInGalleryBrowse(mediaCacheRepository)) {
-                out.add(item)
-            }
+            if (item.showInBrowseGrid) out.add(item)
         }
         return out
     }

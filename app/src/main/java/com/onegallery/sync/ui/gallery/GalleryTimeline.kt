@@ -125,11 +125,17 @@ fun buildGalleryGridEntries(
     items: List<GalleryDisplayItem>,
     sortOrder: GallerySortOrder,
     grouping: TimelineGrouping = TimelineGrouping.RELAXED,
+    /** Verdadeiro quando [items] já veio de [GalleryCatalogSession.sortedLibraryItems] na ordem de data. */
+    itemsAlreadySortedForTimeline: Boolean = false,
 ): List<GalleryGridEntry> {
     if (!isDateTimelineSort(sortOrder)) {
         return items.map { GalleryGridEntry.Photo(it) }
     }
-    val sorted = sortedTimelinePhotos(items, sortOrder)
+    val sorted = if (itemsAlreadySortedForTimeline) {
+        items
+    } else {
+        sortedTimelinePhotos(items, sortOrder)
+    }
     val today = LocalDate.now()
     val entries = mutableListOf<GalleryGridEntry>()
     var lastYear: Int? = null

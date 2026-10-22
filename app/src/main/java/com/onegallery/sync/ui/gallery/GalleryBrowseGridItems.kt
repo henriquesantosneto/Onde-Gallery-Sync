@@ -17,11 +17,13 @@ fun resolveBrowseGridItems(
         return libraryItems
     }
     if (!routeAlbumFolderKey.isNullOrBlank()) {
+        if (browseItemsFromState.isNotEmpty()) return browseItemsFromState
         return libraryItems
             .filter { it.albumName == routeAlbumFolderKey }
             .sortedBy(sortOrder)
     }
     if (!routePlaceMatchKey.isNullOrBlank()) {
+        if (browseItemsFromState.isNotEmpty()) return browseItemsFromState
         val matchKey = PlaceMatchKey.decode(routePlaceMatchKey)
         return libraryItems
             .filter { item ->

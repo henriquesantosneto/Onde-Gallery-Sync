@@ -301,8 +301,14 @@ fun GalleryScreen(
                 val dateTimeline = isDateTimelineSort(state.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val gridState = rememberLazyGridState()
-                val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping) {
-                    buildGalleryGridEntries(gridItems, state.sortOrder, timelineGrouping)
+                val timelinePresorted = isDateTimelineSort(state.sortOrder)
+                val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping, timelinePresorted) {
+                    buildGalleryGridEntries(
+                        gridItems,
+                        state.sortOrder,
+                        timelineGrouping,
+                        itemsAlreadySortedForTimeline = timelinePresorted,
+                    )
                 }
                 val stickyBarHeightPx = remember(density) {
                     with(density) { GalleryStickyTimelineBarHeight.roundToPx() }

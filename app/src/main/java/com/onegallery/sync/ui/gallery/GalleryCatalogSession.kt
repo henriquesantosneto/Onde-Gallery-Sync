@@ -2,7 +2,9 @@ package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaAlbum
+import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.db.UserAlbumEntity
+import com.onegallery.sync.data.local.matchesPlace
 
 /** Estado derivado reutilizável entre recomposições e mudanças leves (miniaturas). */
 class GalleryCatalogSession {
@@ -21,6 +23,16 @@ class GalleryCatalogSession {
     private var sortedLibraryCache: Pair<Int, GallerySortOrder>? = null
     private var sortedLibraryItems: List<GalleryDisplayItem> = emptyList()
 
+    private var preSortedDateNewest: List<GalleryDisplayItem> = emptyList()
+    private var preSortedDateOldest: List<GalleryDisplayItem> = emptyList()
+    private var preSortVisibleRef: List<GalleryDisplayItem>? = null
+
+    private var cachedGeoItems: List<GalleryDisplayItem> = emptyList()
+    private var geoCatalogRef: List<GalleryDisplayItem>? = null
+
+    private var browseFilterCacheKey: BrowseFilterCacheKey? = null
+    private var browseFilterCachedItems: List<GalleryDisplayItem> = emptyList()
+
     private var folderAlbumsCacheKey: AlbumsCacheKey? = null
     private var cachedAlbums: List<MediaAlbum> = emptyList()
     private var placeAlbumsCacheKey: AlbumsCacheKey? = null
@@ -31,7 +43,25 @@ class GalleryCatalogSession {
         sortedLibraryCache = null
         folderAlbumsCacheKey = null
         placeAlbumsCacheKey = null
+        browseFilterCacheKey = null
+        if (bundle.visibleItems !== preSortVisibleRef) {
+            preSortVisibleRef = bundle.visibleItems
+            val visible = bundle.visibleItems
+            if (visible.size >= 400) {
+                preSortedDateNewest = visible.sortedByDescending { it.sortTimestamp }
+                preSortedDateOldest = visible.sortedBy { it.sortTimestamp }
+            } else {
+                preSortedDateNewest = visible
+                preSortedDateOldest = visible
+            }
+        }
+        if (bundle.catalogItems !== geoCatalogRef) {
+            geoCatalogRef = bundle.catalogItems
+            cachedGeoItems = computeGeoItems(bundle.catalogItems)
+        }
     }
+
+    fun geoItems(): List<GalleryDisplayItem> = cachedGeoItems
 
     fun refreshThumbnailFlags(mediaCacheRepository: MediaCacheRepository): SnapshotBundle? {
         val current = lastBundle ?: return null
@@ -55,10 +85,7 @@ class GalleryCatalogSession {
         if (!changed) return current
         val visible = updated.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
         val next = current.copy(catalogItems = updated, visibleItems = visible)
-        lastBundle = next
-        sortedLibraryCache = null
-        folderAlbumsCacheKey = null
-        placeAlbumsCacheKey = null
+        publish(next)
         return next
     }
 
@@ -66,6 +93,19 @@ class GalleryCatalogSession {
         visibleItems: List<GalleryDisplayItem>,
         order: GallerySortOrder,
     ): List<GalleryDisplayItem> {
+        when (order) {
+            GallerySortOrder.DATE_NEWEST -> {
+                if (visibleItems === preSortVisibleRef && preSortedDateNewest.isNotEmpty()) {
+                    return preSortedDateNewest
+                }
+            }
+            GallerySortOrder.DATE_OLDEST -> {
+                if (visibleItems === preSortVisibleRef && preSortedDateOldest.isNotEmpty()) {
+                    return preSortedDateOldest
+                }
+            }
+            else -> Unit
+        }
         val key = visibleItems.size to order
         if (sortedLibraryCache == key && sortedLibraryItems.isNotEmpty()) {
             return sortedLibraryItems
@@ -73,6 +113,50 @@ class GalleryCatalogSession {
         sortedLibraryItems = visibleItems.sortedBy(order)
         sortedLibraryCache = key
         return sortedLibraryItems
+    }
+
+    fun browseItemsFor(
+        visibleItems: List<GalleryDisplayItem>,
+        filter: GalleryBrowseFilter,
+        order: GallerySortOrder,
+    ): List<GalleryDisplayItem> {
+        when (filter) {
+            GalleryBrowseFilter.All -> return sortedLibraryItems(visibleItems, order)
+            is GalleryBrowseFilter.AlbumFolder -> {
+                val cacheKey = BrowseFilterCacheKey(
+                    visibleSize = visibleItems.size,
+                    visibleHead = visibleItems.firstOrNull()?.canonicalPath,
+                    filter = filter,
+                    order = order,
+                )
+                if (browseFilterCacheKey == cacheKey && browseFilterCachedItems.isNotEmpty()) {
+                    return browseFilterCachedItems
+                }
+                val filtered = visibleItems.filter { it.albumName == filter.name }.sortedBy(order)
+                browseFilterCacheKey = cacheKey
+                browseFilterCachedItems = filtered
+                return filtered
+            }
+            is GalleryBrowseFilter.Place -> {
+                val cacheKey = BrowseFilterCacheKey(
+                    visibleSize = visibleItems.size,
+                    visibleHead = visibleItems.firstOrNull()?.canonicalPath,
+                    filter = filter,
+                    order = order,
+                )
+                if (browseFilterCacheKey == cacheKey && browseFilterCachedItems.isNotEmpty()) {
+                    return browseFilterCachedItems
+                }
+                val matchKey = PlaceMatchKey.decode(filter.matchKey)
+                val filtered = visibleItems.filter { item ->
+                    matchKey?.let { item.matchesPlace(it) }
+                        ?: (item.locationLabel == filter.displayName)
+                }.sortedBy(order)
+                browseFilterCacheKey = cacheKey
+                browseFilterCachedItems = filtered
+                return filtered
+            }
+        }
     }
 
     fun albumsFor(
@@ -141,6 +225,13 @@ class GalleryCatalogSession {
         return cachedPlaceAlbums
     }
 
+    private data class BrowseFilterCacheKey(
+        val visibleSize: Int,
+        val visibleHead: String?,
+        val filter: GalleryBrowseFilter,
+        val order: GallerySortOrder,
+    )
+
     private data class AlbumsCacheKey(
         val catalogSize: Int,
         val userAlbumCount: Int,
@@ -150,4 +241,15 @@ class GalleryCatalogSession {
         val catalogHead: String?,
         val catalogTail: String?,
     )
+
+    private fun computeGeoItems(catalog: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+        if (catalog.isEmpty()) return emptyList()
+        val out = ArrayList<GalleryDisplayItem>()
+        for (item in catalog) {
+            if (item.latitude != null && item.longitude != null) {
+                out.add(item)
+            }
+        }
+        return out
+    }
 }

@@ -274,6 +274,11 @@ class GalleryViewModel(
         } else {
             catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
         }
+    }.distinctUntilChanged { previous, next ->
+        previous.catalogItems === next.catalogItems &&
+            previous.visibleItems === next.visibleItems &&
+            previous.fingerprint == next.fingerprint &&
+            previous.userAlbums == next.userAlbums
     }.flowOn(Dispatchers.Default)
 
     private val effectiveLibrarySnapshot = combine(
@@ -456,10 +461,30 @@ class GalleryViewModel(
         GalleryStateInputs(snapshot, controls, coverRevisions, hydrated, albumLists)
     }
 
+    private val galleryUiStateCore = galleryStateInputs
+        .map { inputs -> buildGalleryUiState(inputs, GalleryGridPagination.initialLimit) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            GalleryUiState(),
+        )
+
     val state: StateFlow<GalleryUiState> = combine(
-        galleryStateInputs,
+        galleryUiStateCore,
         gridWindowLimit,
-    ) { inputs, gridLimit ->
+    ) { core, limit ->
+        if (core.gridWindowLimit == limit) core else core.copy(gridWindowLimit = limit)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        GalleryUiState(),
+    )
+
+    private fun buildGalleryUiState(
+        inputs: GalleryStateInputs,
+        gridLimit: Int,
+    ): GalleryUiState {
         val snapshot = inputs.snapshot
         val controls = inputs.controls
         val coverRevisions = inputs.coverRevisions
@@ -510,25 +535,13 @@ class GalleryViewModel(
         )
         val deferAlbumLists = catalogItems.size >= DEFER_ALBUM_LISTS_MIN_ITEMS
         val libraryItems = catalogSession.sortedLibraryItems(visibleItems, controls.order)
-        val items = when (val filter = controls.browseFilter) {
-            GalleryBrowseFilter.All -> libraryItems
-            is GalleryBrowseFilter.AlbumFolder -> visibleItems
-                .filter { it.albumName == filter.name }
-                .sortedBy(controls.order)
-            is GalleryBrowseFilter.Place -> visibleItems
-                .filter { item ->
-                    PlaceMatchKey.decode(filter.matchKey)?.let { key ->
-                        item.matchesPlace(key)
-                    } ?: (item.locationLabel == filter.displayName)
-                }
-                .sortedBy(controls.order)
-        }
+        val items = catalogSession.browseItemsFor(visibleItems, controls.browseFilter, controls.order)
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
         val placeBrowse = controls.browseFilter as? GalleryBrowseFilter.Place
         val locationFilter = placeBrowse?.displayName
         val placeBrowseMatchKey = placeBrowse?.matchKey
 
-        GalleryUiState(
+        return GalleryUiState(
             isLoading = controls.isLoading,
             libraryItems = libraryItems,
             items = items,
@@ -573,16 +586,11 @@ class GalleryViewModel(
             selectedAlbumTitles = controls.selectedAlbums,
             error = controls.error,
             indexHydrated = hydrated,
-            geoItems = catalogItems.filter { it.latitude != null && it.longitude != null },
+            geoItems = catalogSession.geoItems(),
             albumCoverRevisions = coverRevisions,
             gridWindowLimit = gridLimit,
         )
-    }.flowOn(Dispatchers.Default)
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            GalleryUiState(),
-        )
+    }
 
     fun clearBrowseFilters() {
         browseFilter.value = GalleryBrowseFilter.All
