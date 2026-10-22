@@ -35,6 +35,7 @@ import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.ui.gallery.GalleryCatalogDiskCache
 import com.onegallery.sync.ui.gallery.GalleryPreferences
+import com.onegallery.sync.ui.gallery.GalleryProcessCatalogCache
 import com.onegallery.sync.sync.SyncTaskLauncher
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -99,6 +100,8 @@ class OneGalleryApplication : Application() {
 
     @Volatile
     var warmGalleryCatalog: GalleryCatalogDiskCache.GalleryWarmCatalog? = null
+
+    val galleryProcessCatalogCache = GalleryProcessCatalogCache()
 
     lateinit var mediaLibraryChangeWatcher: MediaLibraryChangeWatcher
         private set

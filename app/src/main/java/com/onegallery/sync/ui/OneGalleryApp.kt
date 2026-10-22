@@ -320,6 +320,7 @@ fun OneGalleryApp(
         ),
     )
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        galleryViewModel.onReturningToForeground()
         galleryViewModel.resumePendingLocalRemovalIfAccessGranted()
     }
     val backStack by navController.currentBackStackEntryAsState()
