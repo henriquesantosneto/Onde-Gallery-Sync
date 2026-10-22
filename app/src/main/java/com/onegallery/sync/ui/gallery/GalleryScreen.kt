@@ -90,15 +90,29 @@ fun GalleryScreen(
             viewModel.setPlaceFilter(routePlaceTitle, routePlaceMatchKey)
         }
     }
-    val gridItems = resolveBrowseGridItems(
-        requiresActiveBrowseFilter = requiresActiveBrowseFilter,
-        libraryItems = state.libraryItems,
-        browseItemsFromState = state.items,
-        sortOrder = state.sortOrder,
-        routeAlbumFolderKey = routeAlbumFolderKey,
-        routePlaceMatchKey = routePlaceMatchKey,
-        routePlaceTitle = routePlaceTitle,
-    )
+    val fullBrowseGridItems = remember(
+        requiresActiveBrowseFilter,
+        state.libraryItems,
+        state.items,
+        state.sortOrder,
+        routeAlbumFolderKey,
+        routePlaceMatchKey,
+        routePlaceTitle,
+    ) {
+        resolveBrowseGridItems(
+            requiresActiveBrowseFilter = requiresActiveBrowseFilter,
+            libraryItems = state.libraryItems,
+            browseItemsFromState = state.items,
+            sortOrder = state.sortOrder,
+            routeAlbumFolderKey = routeAlbumFolderKey,
+            routePlaceMatchKey = routePlaceMatchKey,
+            routePlaceTitle = routePlaceTitle,
+        )
+    }
+    val gridItems = remember(fullBrowseGridItems, state.gridWindowLimit) {
+        fullBrowseGridItems.take(state.gridWindowLimit)
+    }
+    val browseGridHasMore = fullBrowseGridItems.size > gridItems.size
     val gridPinch = rememberGalleryGridZoom(galleryPreferences.galleryGridZoom) { scale ->
         galleryPreferences.galleryGridZoom = scale
     }
@@ -152,8 +166,8 @@ fun GalleryScreen(
     }
     val filteredBrowse = state.locationFilter != null || state.albumFilter != null
     val browseMediaCountLine = if (filteredBrowse && !state.selectionMode) {
-        val photos = gridItems.count { it.kind == MediaKind.IMAGE }
-        val videos = gridItems.count { it.kind == MediaKind.VIDEO }
+        val photos = fullBrowseGridItems.count { it.kind == MediaKind.IMAGE }
+        val videos = fullBrowseGridItems.count { it.kind == MediaKind.VIDEO }
         formatMediaCount(photos, videos)
     } else {
         null
@@ -324,6 +338,22 @@ fun GalleryScreen(
                         .distinctUntilChanged()
                         .collect { paths ->
                             viewModel.prefetchGridThumbnails(paths)
+                        }
+                }
+                LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
+                    if (!browseGridHasMore) return@LaunchedEffect
+                    snapshotFlow {
+                        val visible = gridState.layoutInfo.visibleItemsInfo
+                        if (visible.isEmpty()) return@snapshotFlow false
+                        val lastVisibleIndex = visible.last().index
+                        lastVisibleIndex >= gridEntries.lastIndex -
+                            GalleryGridPagination.loadMoreVisibleTailMargin
+                    }
+                        .distinctUntilChanged()
+                        .collect { nearEnd ->
+                            if (nearEnd) {
+                                viewModel.loadMoreGridItems()
+                            }
                         }
                 }
                 Box(

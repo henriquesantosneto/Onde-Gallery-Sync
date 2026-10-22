@@ -77,6 +77,8 @@ data class GalleryUiState(
     val geoItems: List<GalleryDisplayItem> = emptyList(),
     /** Revisão por álbum (`bucketId` → nanoTime) após miniatura local gravada. */
     val albumCoverRevisions: Map<String, Long> = emptyMap(),
+    /** Quantos itens da grade (fotos/vídeos) montar na UI; [libraryItems] permanece completo para o pager. */
+    val gridWindowLimit: Int = GalleryGridPagination.initialLimit,
 )
 
 private data class SelectionSlice(
@@ -167,6 +169,8 @@ class GalleryViewModel(
     private val deferredAlbumLists = MutableStateFlow(DeferredAlbumLists())
     private var albumListsBuildJob: Job? = null
 
+    private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
+
     init {
         viewModelScope.launch {
             syncCoordinator.galleryMetadata.collect {
@@ -175,6 +179,12 @@ class GalleryViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             seedWarmBootstrapIfAvailable()
+        }
+    }
+
+    fun loadMoreGridItems() {
+        gridWindowLimit.update { current ->
+            current + GalleryGridPagination.pageSize
         }
     }
 
@@ -275,6 +285,22 @@ class GalleryViewModel(
             live.visibleItems.isNotEmpty() -> live
             bootstrap != null && bootstrap.catalogItems.isNotEmpty() -> bootstrap
             else -> live
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            combine(
+                effectiveLibrarySnapshot.map { it.fingerprint },
+                browseFilter,
+                sortOrder,
+            ) { fingerprint, filter, order ->
+                Triple(fingerprint, filter, order)
+            }
+                .distinctUntilChanged()
+                .collect {
+                    gridWindowLimit.value = GalleryGridPagination.initialLimit
+                }
         }
     }
 
@@ -412,13 +438,33 @@ class GalleryViewModel(
         }
     }
 
-    val state: StateFlow<GalleryUiState> = combine(
+    private data class GalleryStateInputs(
+        val snapshot: LibrarySnapshot,
+        val controls: UiControls,
+        val coverRevisions: Map<String, Long>,
+        val hydrated: Boolean,
+        val albumLists: DeferredAlbumLists,
+    )
+
+    private val galleryStateInputs = combine(
         effectiveLibrarySnapshot,
         uiControls,
         syncCoordinator.albumCoverRevisions,
         indexHydrated,
         deferredAlbumLists,
     ) { snapshot, controls, coverRevisions, hydrated, albumLists ->
+        GalleryStateInputs(snapshot, controls, coverRevisions, hydrated, albumLists)
+    }
+
+    val state: StateFlow<GalleryUiState> = combine(
+        galleryStateInputs,
+        gridWindowLimit,
+    ) { inputs, gridLimit ->
+        val snapshot = inputs.snapshot
+        val controls = inputs.controls
+        val coverRevisions = inputs.coverRevisions
+        val hydrated = inputs.hydrated
+        val albumLists = inputs.albumLists
         coverRevisions.forEach { (key, stamp) ->
             val previous = lastAlbumCoverRevisions[key]
             if (previous != null && previous != stamp) {
@@ -529,6 +575,7 @@ class GalleryViewModel(
             indexHydrated = hydrated,
             geoItems = catalogItems.filter { it.latitude != null && it.longitude != null },
             albumCoverRevisions = coverRevisions,
+            gridWindowLimit = gridLimit,
         )
     }.flowOn(Dispatchers.Default)
         .stateIn(
