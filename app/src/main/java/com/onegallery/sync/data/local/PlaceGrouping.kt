@@ -1,0 +1,115 @@
+package com.onegallery.sync.data.local
+
+import com.onegallery.sync.data.local.db.SyncMetadataEntity
+import com.onegallery.sync.ui.gallery.GalleryDisplayItem
+
+/** Pontuação do endereço resolvido — preferir bairro/cidade completos ao agrupar duplicatas. */
+internal fun PlaceComponents.locationSpecificityScore(): Int {
+    var score = 0
+    if (!country.isNullOrBlank()) score += 1
+    if (!adminArea.isNullOrBlank()) score += 1
+    if (!locality.isNullOrBlank()) score += 2
+    if (!subLocality.isNullOrBlank()) score += 4
+    return score
+}
+
+internal fun GalleryDisplayItem.locationSpecificityScore(): Int {
+    val fromComponents = PlaceComponents.forItem(this)?.locationSpecificityScore()
+    if (fromComponents != null && fromComponents > 0) return fromComponents
+    val parts = locationLabel?.trim()?.split(", ")?.count { it.isNotBlank() } ?: 0
+    return parts
+}
+
+internal fun SyncMetadataEntity.locationSpecificityScore(): Int {
+    val label = locationLabel?.trim().orEmpty()
+    if (label.isEmpty()) return 0
+    return PlaceComponents.fromGeocoderLabel(label)?.locationSpecificityScore()
+        ?: label.split(", ").count { it.isNotBlank() }
+}
+
+/**
+ * Mesma captura (ex.: cópia WhatsApp + linha indexada): coordenadas arredondadas + segundo da foto.
+ */
+internal fun GalleryDisplayItem.placeGeoDedupeKey(): String? {
+    val lat = latitude ?: return null
+    val lon = longitude ?: return null
+    if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+    val epochSec = sortTimestampToPlaceEpochSeconds(sortTimestamp) ?: return null
+    val latKey = (lat * 1_000).toLong()
+    val lonKey = (lon * 1_000).toLong()
+    return "geo:$latKey:$lonKey:$epochSec"
+}
+
+internal fun SyncMetadataEntity.placeGeoDedupeKey(): String? {
+    val lat = latitude ?: return null
+    val lon = longitude ?: return null
+    if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+    val epochSec = capturedAtSeconds?.takeIf { it > 0L }
+        ?: remoteModifiedAt?.takeIf { it > 0L }
+        ?: localModifiedAt?.takeIf { it > 0L }
+        ?: return null
+    val latKey = (lat * 1_000).toLong()
+    val lonKey = (lon * 1_000).toLong()
+    return "geo:$latKey:$lonKey:$epochSec"
+}
+
+private fun sortTimestampToPlaceEpochSeconds(sortTimestamp: Long): Long? {
+    if (sortTimestamp <= 0L) return null
+    return if (sortTimestamp > 1_000_000_000_000L) sortTimestamp / 1000L else sortTimestamp
+}
+
+/** Mantém a linha com endereço mais completo quando várias mídias são a mesma captura. */
+internal fun pickBetterForPlaceGrouping(
+    candidate: GalleryDisplayItem,
+    incumbent: GalleryDisplayItem,
+): GalleryDisplayItem {
+    val cScore = candidate.locationSpecificityScore()
+    val iScore = incumbent.locationSpecificityScore()
+    if (cScore != iScore) return if (cScore > iScore) candidate else incumbent
+    val cLabel = candidate.locationLabel?.length ?: 0
+    val iLabel = incumbent.locationLabel?.length ?: 0
+    if (cLabel != iLabel) return if (cLabel > iLabel) candidate else incumbent
+    return if (candidate.sortTimestamp >= incumbent.sortTimestamp) candidate else incumbent
+}
+
+internal fun pickBetterForPlaceGroupingEntity(
+    candidate: SyncMetadataEntity,
+    incumbent: SyncMetadataEntity,
+): SyncMetadataEntity {
+    val cScore = candidate.locationSpecificityScore()
+    val iScore = incumbent.locationSpecificityScore()
+    if (cScore != iScore) return if (cScore > iScore) candidate else incumbent
+    val cLabel = candidate.locationLabel?.length ?: 0
+    val iLabel = incumbent.locationLabel?.length ?: 0
+    if (cLabel != iLabel) return if (cLabel > iLabel) candidate else incumbent
+    return if (candidate.sortTimestamp() >= incumbent.sortTimestamp()) candidate else incumbent
+}
+
+private fun SyncMetadataEntity.sortTimestamp(): Long =
+    capturedAtSeconds?.takeIf { it > 0L }
+        ?: remoteModifiedAt?.takeIf { it > 0L }
+        ?: localModifiedAt?.takeIf { it > 0L }
+        ?: 0L
+
+/** Uma foto por captura geográfica antes de montar álbuns de local. */
+internal fun collapseItemsForPlaceAlbums(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+    if (items.size <= 1) return items
+    val best = LinkedHashMap<String, GalleryDisplayItem>(items.size)
+    for (item in items) {
+        val key = item.placeGeoDedupeKey() ?: "path:${item.canonicalPath}"
+        val existing = best[key]
+        best[key] = if (existing == null) item else pickBetterForPlaceGrouping(item, existing)
+    }
+    return best.values.toList()
+}
+
+internal fun collapseMetadataForPlaceAlbums(metadata: List<SyncMetadataEntity>): List<SyncMetadataEntity> {
+    if (metadata.size <= 1) return metadata
+    val best = LinkedHashMap<String, SyncMetadataEntity>(metadata.size)
+    for (entity in metadata) {
+        val key = entity.placeGeoDedupeKey() ?: "path:${entity.canonicalPath}"
+        val existing = best[key]
+        best[key] = if (existing == null) entity else pickBetterForPlaceGroupingEntity(entity, existing)
+    }
+    return best.values.toList()
+}

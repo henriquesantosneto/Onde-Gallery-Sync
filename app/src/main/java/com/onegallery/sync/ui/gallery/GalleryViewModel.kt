@@ -7,6 +7,7 @@ import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceComponents
+import com.onegallery.sync.data.local.collapseItemsForPlaceAlbums
 import com.onegallery.sync.data.local.PlaceLevel
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.matchesPlace
@@ -1165,7 +1166,7 @@ class GalleryViewModel(
                 changed.add(key)
             }
         }
-        val placeLocated = catalogItems.mapNotNull { item ->
+        val placeLocated = collapseItemsForPlaceAlbums(catalogItems).mapNotNull { item ->
             val label = item.locationLabel?.trim().orEmpty()
             val components = PlaceComponents.forItem(item)
                 ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
@@ -1549,7 +1550,7 @@ internal fun buildPlaceAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    val located = items.mapNotNull { item ->
+    val located = collapseItemsForPlaceAlbums(items).mapNotNull { item ->
         val label = item.locationLabel?.trim().orEmpty()
         val components = PlaceComponents.forItem(item)
             ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }

@@ -1,5 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
+import com.onegallery.sync.data.local.locationSpecificityScore
+
 /** Uma célula por mídia (local, nuvem ou caminho), mesmo com linhas duplicadas no índice. */
 fun dedupeGalleryDisplayItems(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
     if (items.size <= 1) return items
@@ -38,6 +40,7 @@ private fun galleryDisplayItemDedupeComparator() =
     compareByDescending<GalleryDisplayItem> { it.oneDriveItemId != null }
         .thenByDescending { it.localUri != null }
         .thenByDescending { it.cachedOriginal?.isFile == true }
+        .thenByDescending { it.locationSpecificityScore() }
         .thenByDescending { it.sortTimestamp }
 
 internal fun GalleryDisplayItem.galleryDedupeKey(): String {

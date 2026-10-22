@@ -5,6 +5,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.PlaceComponents
 import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.collapseMetadataForPlaceAlbums
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import com.onegallery.sync.sync.SyncPaths
@@ -68,7 +69,7 @@ object GalleryAlbumIndexBuilder {
         mediaCacheRepository: MediaCacheRepository,
         resolveCoverModels: Boolean,
     ): List<MediaAlbum> {
-        val located = metadata.mapNotNull { entity ->
+        val located = collapseMetadataForPlaceAlbums(metadata).mapNotNull { entity ->
             val label = entity.locationLabel?.trim().orEmpty()
             val components = placeComponentsForEntity(entity)
             when {
