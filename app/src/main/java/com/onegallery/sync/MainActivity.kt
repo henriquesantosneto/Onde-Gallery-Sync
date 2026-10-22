@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         val app = application as OneGalleryApplication
         app.appForegroundState.setForeground(false)
         app.syncCoordinator.onAppUiVisibilityChanged(inForeground = false)
-        app.persistSessionCatalogForBackground()
+        app.persistSessionCatalogForBackground(blocking = true)
         super.onStop()
     }
 

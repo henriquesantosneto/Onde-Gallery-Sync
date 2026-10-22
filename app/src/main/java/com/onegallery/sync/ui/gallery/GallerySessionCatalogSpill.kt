@@ -23,7 +23,7 @@ import kotlinx.coroutines.withContext
 object GallerySessionCatalogSpill {
     private const val FILE_NAME = "gallery_session_v1.gz"
     private const val FORMAT_MAGIC = 0x4F475353 // OGSS
-    private const val FORMAT_VERSION = 1
+    private const val FORMAT_VERSION = 2
     private const val MAX_PERSISTED_ITEMS = 8_000
     private const val MAX_CACHE_BYTES = 24L * 1024L * 1024L
 
@@ -73,6 +73,7 @@ object GallerySessionCatalogSpill {
                 for (item in toPersist) {
                     writeItem(out, item)
                 }
+                writeUserAlbums(out, bundle.userAlbums)
             }
         }
         val dest = cacheFile(context)
@@ -86,7 +87,8 @@ object GallerySessionCatalogSpill {
         return GZIPInputStream(FileInputStream(file)).use { gzip ->
             DataInputStream(gzip).use { input ->
                 if (input.readInt() != FORMAT_MAGIC) return null
-                if (input.readInt() != FORMAT_VERSION) return null
+                val formatVersion = input.readInt()
+                if (formatVersion != 1 && formatVersion != 2) return null
                 val localRevision = input.readLong()
                 val rowCount = input.readInt()
                 val maxMod = input.readLong()
@@ -98,13 +100,43 @@ object GallerySessionCatalogSpill {
                 repeat(count) {
                     items.add(readItem(input))
                 }
+                val userAlbums = if (formatVersion >= 2) {
+                    readUserAlbums(input)
+                } else {
+                    emptyList()
+                }
                 val fingerprint = GalleryCatalogFingerprint(rowCount, head, tail, maxMod)
                 GalleryProcessCatalogCache.Entry(
                     catalogItems = items,
                     visibleItems = items,
-                    userAlbums = emptyList(),
+                    userAlbums = userAlbums,
                     fingerprint = fingerprint,
                     localRevision = localRevision,
+                )
+            }
+        }
+    }
+
+    private fun writeUserAlbums(out: DataOutputStream, userAlbums: List<com.onegallery.sync.data.local.db.UserAlbumEntity>) {
+        out.writeInt(userAlbums.size.coerceAtMost(512))
+        userAlbums.take(512).forEach { album ->
+            out.writeUTF(album.id)
+            out.writeUTF(album.title)
+            out.writeLong(album.createdAtEpoch)
+        }
+    }
+
+    private fun readUserAlbums(input: DataInputStream): List<com.onegallery.sync.data.local.db.UserAlbumEntity> {
+        val count = input.readInt()
+        if (count < 0 || count > 512) return emptyList()
+        return buildList(count) {
+            repeat(count) {
+                add(
+                    com.onegallery.sync.data.local.db.UserAlbumEntity(
+                        id = input.readUTF(),
+                        title = input.readUTF(),
+                        createdAtEpoch = input.readLong(),
+                    ),
                 )
             }
         }

@@ -224,14 +224,19 @@ class OneGalleryApplication : Application() {
     }
 
     /** Grava catálogo da sessão ao ir para 2º plano (processo morto nos recentes ainda reabre rápido). */
-    fun persistSessionCatalogForBackground() {
-        applicationScope.launch(Dispatchers.IO) {
+    fun persistSessionCatalogForBackground(blocking: Boolean = false) {
+        suspend fun writeSpills() {
             galleryProcessCatalogCache.peek()?.toSnapshotBundle()?.let { bundle ->
                 GallerySessionCatalogSpill.save(this@OneGalleryApplication, bundle)
             }
             galleryProcessAlbumListsCache.peek()?.let { albums ->
                 GallerySessionAlbumListsSpill.save(this@OneGalleryApplication, albums)
             }
+        }
+        if (blocking) {
+            runBlocking { withContext(Dispatchers.IO) { writeSpills() } }
+        } else {
+            applicationScope.launch(Dispatchers.IO) { writeSpills() }
         }
     }
 }

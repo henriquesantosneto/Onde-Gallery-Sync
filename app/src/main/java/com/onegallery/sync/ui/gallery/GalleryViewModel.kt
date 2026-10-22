@@ -29,7 +29,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -282,11 +281,6 @@ class GalleryViewModel(
 
     fun onReturningToForeground() {
         loading.value = false
-        viewModelScope.launch {
-            val metadata = syncCoordinator.galleryMetadata.first()
-            val userAlbums = syncCoordinator.userAlbums.first()
-            scheduleAlbumListsFromMetadata(metadata, userAlbums, albumListSort.value)
-        }
     }
 
     fun loadMoreGridItems() {
@@ -323,40 +317,45 @@ class GalleryViewModel(
     }.conflate()
         .distinctUntilChanged { previous, next ->
             previous.fingerprint == next.fingerprint &&
-                previous.localRevision == next.localRevision &&
                 previous.userAlbums == next.userAlbums
         }
         .flatMapLatest { inputs ->
             flow {
                 val metadata = inputs.metadata
+                val userAlbums = inputs.userAlbums
+                val localRevision = inputs.localRevision
+                val app = appContext.applicationContext as OneGalleryApplication
                 if (metadata.isEmpty()) {
-                    emit(
+                    app.galleryProcessCatalogCache.peek()?.takeIf { it.isRestorable() }?.let { process ->
+                        val bundle = process.toSnapshotBundle().copy(
+                            userAlbums = userAlbums.ifEmpty { process.userAlbums },
+                            localRevision = localRevision,
+                        )
+                        catalogSession.publish(bundle, activeSort = sortOrder.value)
+                        emit(bundle.toLibrarySnapshot())
+                        galleryBootstrap.value = bundle.toLibrarySnapshot()
+                    } ?: emit(
                         LibrarySnapshot(
                             catalogItems = emptyList(),
                             visibleItems = emptyList(),
-                            userAlbums = inputs.userAlbums,
+                            userAlbums = userAlbums,
                         ),
                     )
                     return@flow
                 }
-                val userAlbums = inputs.userAlbums
-                val localRevision = inputs.localRevision
                 val fingerprint = GalleryCatalogFingerprint.from(metadata)
-                val app = appContext.applicationContext as OneGalleryApplication
                 app.galleryProcessCatalogCache.peek()?.let { process ->
-                    if (process.fingerprint == fingerprint &&
-                        process.localRevision == localRevision &&
-                        process.userAlbums == userAlbums &&
-                        process.isRestorable()
-                    ) {
-                        val bundle = process.toSnapshotBundle()
+                    if (process.fingerprint == fingerprint && process.isRestorable()) {
+                        val bundle = process.toSnapshotBundle().copy(
+                            userAlbums = userAlbums,
+                            localRevision = localRevision,
+                        )
                         catalogSession.publish(bundle, activeSort = sortOrder.value)
-                        emit(bundle.toLibrarySnapshot())
-                        if (process.isCompleteCatalog &&
-                            metadata.size <= process.catalogItems.size
-                        ) {
-                            return@flow
-                        }
+                        persistProcessCatalog(bundle)
+                        val snapshot = bundle.toLibrarySnapshot()
+                        emit(snapshot)
+                        galleryBootstrap.value = snapshot
+                        return@flow
                     }
                 }
                 val cached = catalogSession.lastBundle
@@ -420,12 +419,17 @@ class GalleryViewModel(
         galleryBootstrap,
         librarySnapshotLive,
     ) { bootstrap, live ->
+        val bootstrapVisible = bootstrap?.visibleItems?.size ?: 0
+        val liveVisible = when {
+            live.visibleItems.isNotEmpty() -> live.visibleItems.size
+            live.catalogItems.isNotEmpty() -> live.catalogItems.size
+            else -> 0
+        }
         when {
-            live.catalogItems.isNotEmpty() -> live
-            live.visibleItems.isNotEmpty() -> live
-            bootstrap != null &&
-                (bootstrap.catalogItems.isNotEmpty() || bootstrap.visibleItems.isNotEmpty()) -> bootstrap
-            else -> live
+            liveVisible > bootstrapVisible -> live
+            bootstrap != null && bootstrapVisible > 0 && liveVisible <= bootstrapVisible -> bootstrap
+            liveVisible > 0 -> live
+            else -> bootstrap ?: live
         }
     }
 
