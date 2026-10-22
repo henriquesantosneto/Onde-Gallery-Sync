@@ -90,13 +90,7 @@ fun SyncStatusScreen(
         onDispose { syncCoordinator.setSyncStatusScreenVisible(false) }
     }
     var clearingErrors by remember { mutableStateOf(false) }
-    val thumbnailPrefetchActive = coordinatorState.progressPhase == SyncProgressPhase.PREFETCH_THUMBNAILS &&
-        (
-            coordinatorState.runQueue.isNotEmpty() ||
-                coordinatorState.activeItems.isNotEmpty() ||
-                (coordinatorState.thumbnailStats?.indexedPending ?: 0) > 0
-            )
-    val showLiveActivity = coordinatorState.isRunning || thumbnailPrefetchActive
+    val showLiveActivity = coordinatorState.isRunning
     val queueForUi = remember(coordinatorState.runQueue, syncQueue) {
         when {
             coordinatorState.runQueue.isNotEmpty() -> coordinatorState.runQueue
@@ -181,15 +175,6 @@ fun SyncStatusScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 8.dp),
                                 )
-                            } else if (thumbnailPrefetchActive) {
-                                Text(
-                                    "Miniaturas continuam enquanto esta tela estiver aberta " +
-                                        "(fora da galeria, para não travar Fotos/Álbuns).",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 8.dp),
-                                )
-                            }
                         } else {
                             Text(
                                 coordinatorState.lastMessage,
