@@ -164,6 +164,9 @@ class GalleryViewModel(
         val albums: List<MediaAlbum> = emptyList(),
         val placeAlbums: List<MediaAlbum> = emptyList(),
         val catalogFingerprint: GalleryCatalogFingerprint? = null,
+        /** Linhas no Room quando a lista foi montada (detecta índice incompleto vs spill). */
+        val metadataRowCount: Int = 0,
+        val albumSort: AlbumListSort = AlbumListSort.NAME_A_Z,
     )
 
     private val deferredAlbumLists = MutableStateFlow(restoreDeferredAlbumListsFromSession())
@@ -176,13 +179,10 @@ class GalleryViewModel(
         val albumEntry = app.galleryProcessAlbumListsCache.peek() ?: return DeferredAlbumLists()
         val catalogEntry = app.galleryProcessCatalogCache.peek()
         val bootstrap = galleryBootstrap.value
-        val fingerprint = bootstrap?.fingerprint ?: catalogEntry?.fingerprint
-        if (fingerprint == null || albumEntry.fingerprint != fingerprint) {
-            return DeferredAlbumLists()
-        }
-        if (catalogEntry != null &&
-            albumEntry.localRevision != catalogEntry.localRevision
-        ) {
+        val fingerprint = bootstrap?.fingerprint
+            ?: catalogEntry?.fingerprint
+            ?: albumEntry.fingerprint
+        if (albumEntry.fingerprint != fingerprint) {
             return DeferredAlbumLists()
         }
         val catalogItems = bootstrap?.catalogItems ?: catalogEntry?.catalogItems.orEmpty()
@@ -202,6 +202,8 @@ class GalleryViewModel(
             albums = albums,
             placeAlbums = placeAlbums,
             catalogFingerprint = fingerprint,
+            metadataRowCount = fingerprint.rowCount,
+            albumSort = albumSort,
         )
     }
 
@@ -235,6 +237,25 @@ class GalleryViewModel(
             syncCoordinator.galleryMetadata.collect {
                 indexHydrated.value = true
             }
+        }
+        viewModelScope.launch {
+            combine(
+                syncCoordinator.galleryMetadata,
+                syncCoordinator.userAlbums,
+                albumListSort,
+            ) { metadata, userAlbums, sort ->
+                Triple(metadata, userAlbums, sort)
+            }
+                .distinctUntilChanged { previous, next ->
+                    GalleryCatalogFingerprint.from(previous.first) ==
+                        GalleryCatalogFingerprint.from(next.first) &&
+                        previous.first.size == next.first.size &&
+                        previous.second == next.second &&
+                        previous.third == next.third
+                }
+                .collect { (metadata, userAlbums, sort) ->
+                    scheduleAlbumListsFromMetadata(metadata, userAlbums, sort)
+                }
         }
     }
 
@@ -486,66 +507,126 @@ class GalleryViewModel(
         )
     }
 
-    private fun scheduleDeferredAlbumLists(
-        catalogItems: List<GalleryDisplayItem>,
+    /** Álbuns vêm do índice Room em paralelo ao catálogo da grade — spill/RAM só aceleram reabertura. */
+    private fun scheduleAlbumListsFromMetadata(
+        metadata: List<SyncMetadataEntity>,
         userAlbums: List<UserAlbumEntity>,
         albumSort: AlbumListSort,
-        fingerprint: GalleryCatalogFingerprint,
-        deferCoverModels: Boolean,
     ) {
-        if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS) return
+        if (metadata.isEmpty()) return
+        val fingerprint = GalleryCatalogFingerprint.from(metadata)
         val pending = deferredAlbumLists.value
         if (pending.catalogFingerprint == fingerprint &&
-            pending.albums.isNotEmpty() &&
-            albumSort == galleryPreferences.albumListSort
+            pending.metadataRowCount == metadata.size &&
+            pending.albumSort == albumSort &&
+            pending.albums.isNotEmpty()
         ) {
             return
         }
         albumListsBuildJob?.cancel()
         albumListsBuildJob = viewModelScope.launch(Dispatchers.Default) {
-            val albums = buildAlbums(
-                catalogItems,
-                userAlbums,
-                albumSort,
-                albumCoverLocalIndex,
-                mediaCacheRepository,
-                resolveCoverModels = !deferCoverModels,
-            )
-            val placeAlbums = sortPlaceAlbums(
-                buildPlaceAlbums(
-                    catalogItems,
-                    albumCoverLocalIndex,
-                    mediaCacheRepository,
-                    resolveCoverModels = !deferCoverModels,
-                ),
-                albumSort,
-            )
-            deferredAlbumLists.value = DeferredAlbumLists(
-                albums = albums,
-                placeAlbums = placeAlbums,
-                catalogFingerprint = fingerprint,
-            )
-            val revision = catalogSession.lastBundle?.localRevision ?: 0L
+            val deferCovers = metadata.size > 3_000
+            val catalogItems = latestCatalogItems
+            fun publishLists(
+                albums: List<MediaAlbum>,
+                placeAlbums: List<MediaAlbum>,
+                coverRevisionStamp: Long,
+            ) {
+                deferredAlbumLists.value = DeferredAlbumLists(
+                    albums = albums,
+                    placeAlbums = placeAlbums,
+                    catalogFingerprint = fingerprint,
+                    metadataRowCount = metadata.size,
+                    albumSort = albumSort,
+                )
+                catalogSession.restoreAlbumCaches(
+                    albums = albums,
+                    placeAlbums = placeAlbums,
+                    catalogItems = catalogItems,
+                    userAlbumCount = userAlbums.size,
+                    albumSort = albumSort,
+                    deferCoverModels = deferCovers,
+                    coverRevisionStamp = coverRevisionStamp,
+                )
+                persistProcessAlbumLists(
+                    albums = albums,
+                    placeAlbums = placeAlbums,
+                    fingerprint = fingerprint,
+                    localRevision = catalogSession.lastBundle?.localRevision ?: 0L,
+                    albumSort = albumSort,
+                    coverRevisionStamp = coverRevisionStamp,
+                )
+            }
             val coverRevisionStamp =
                 syncCoordinator.albumCoverRevisions.value.values.fold(0L) { acc, stamp -> acc xor stamp }
-            catalogSession.restoreAlbumCaches(
-                albums = albums,
-                placeAlbums = placeAlbums,
-                catalogItems = catalogItems,
-                userAlbumCount = userAlbums.size,
-                albumSort = albumSort,
-                deferCoverModels = deferCoverModels,
-                coverRevisionStamp = coverRevisionStamp,
+            val skeletonAlbums = GalleryAlbumIndexBuilder.buildFolderAlbums(
+                metadata = metadata,
+                userAlbums = userAlbums,
+                sort = albumSort,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                resolveCoverModels = false,
             )
-            persistProcessAlbumLists(
-                albums = albums,
-                placeAlbums = placeAlbums,
-                fingerprint = fingerprint,
-                localRevision = revision,
+            val skeletonPlaces = GalleryAlbumIndexBuilder.buildPlaceAlbums(
+                metadata = metadata,
+                sort = albumSort,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                resolveCoverModels = false,
+            )
+            if (deferCovers) {
+                publishLists(skeletonAlbums, skeletonPlaces, coverRevisionStamp)
+            }
+            val withCovers = GalleryAlbumIndexBuilder.buildFolderAlbums(
+                metadata = metadata,
+                userAlbums = userAlbums,
+                sort = albumSort,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                resolveCoverModels = true,
+            )
+            val placesWithCovers = GalleryAlbumIndexBuilder.buildPlaceAlbums(
+                metadata = metadata,
+                sort = albumSort,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                resolveCoverModels = true,
+            )
+            publishLists(withCovers, placesWithCovers, coverRevisionStamp)
+        }
+    }
+
+    private fun albumListsForUi(
+        albumLists: DeferredAlbumLists,
+        fingerprint: GalleryCatalogFingerprint,
+        catalogItems: List<GalleryDisplayItem>,
+        userAlbums: List<UserAlbumEntity>,
+        albumSort: AlbumListSort,
+        deferAlbumCoverModels: Boolean,
+        coverRevisionStamp: Long,
+    ): Pair<List<MediaAlbum>, List<MediaAlbum>> {
+        if (albumLists.albums.isNotEmpty() && albumLists.catalogFingerprint == fingerprint) {
+            return albumLists.albums to albumLists.placeAlbums
+        }
+        if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS) {
+            return catalogSession.albumsFor(
+                catalogItems = catalogItems,
+                userAlbums = userAlbums,
                 albumSort = albumSort,
+                deferCoverModels = deferAlbumCoverModels,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
+                coverRevisionStamp = coverRevisionStamp,
+            ) to catalogSession.placeAlbumsFor(
+                catalogItems = catalogItems,
+                albumSort = albumSort,
+                deferCoverModels = deferAlbumCoverModels,
+                albumCoverLocalIndex = albumCoverLocalIndex,
+                mediaCacheRepository = mediaCacheRepository,
                 coverRevisionStamp = coverRevisionStamp,
             )
         }
+        return albumLists.albums to albumLists.placeAlbums
     }
 
     private data class GalleryStateInputs(
@@ -653,14 +734,15 @@ class GalleryViewModel(
         }
         val userAlbums = snapshot.userAlbums
         val coverRevisionStamp = coverRevisions.values.fold(0L) { acc, stamp -> acc xor stamp }
-        scheduleDeferredAlbumLists(
+        val (displayAlbums, displayPlaceAlbums) = albumListsForUi(
+            albumLists = albumLists,
+            fingerprint = fingerprint,
             catalogItems = catalogItems,
             userAlbums = userAlbums,
             albumSort = controls.albumSort,
-            fingerprint = fingerprint,
-            deferCoverModels = deferAlbumCoverModels,
+            deferAlbumCoverModels = deferAlbumCoverModels,
+            coverRevisionStamp = coverRevisionStamp,
         )
-        val deferAlbumLists = catalogItems.size >= DEFER_ALBUM_LISTS_MIN_ITEMS
         val libraryItems = catalogSession.sortedLibraryItems(visibleItems, controls.order)
         val items = catalogSession.browseItemsFor(visibleItems, controls.browseFilter, controls.order)
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
@@ -672,35 +754,8 @@ class GalleryViewModel(
             isLoading = controls.isLoading,
             libraryItems = libraryItems,
             items = items,
-            albums = if (deferAlbumLists && albumLists.albums.isNotEmpty()) {
-                albumLists.albums
-            } else if (deferAlbumLists) {
-                emptyList()
-            } else {
-                catalogSession.albumsFor(
-                    catalogItems = catalogItems,
-                    userAlbums = userAlbums,
-                    albumSort = controls.albumSort,
-                    deferCoverModels = deferAlbumCoverModels,
-                    albumCoverLocalIndex = albumCoverLocalIndex,
-                    mediaCacheRepository = mediaCacheRepository,
-                    coverRevisionStamp = coverRevisionStamp,
-                )
-            },
-            placeAlbums = if (deferAlbumLists && albumLists.placeAlbums.isNotEmpty()) {
-                albumLists.placeAlbums
-            } else if (deferAlbumLists) {
-                emptyList()
-            } else {
-                catalogSession.placeAlbumsFor(
-                    catalogItems = catalogItems,
-                    albumSort = controls.albumSort,
-                    deferCoverModels = deferAlbumCoverModels,
-                    albumCoverLocalIndex = albumCoverLocalIndex,
-                    mediaCacheRepository = mediaCacheRepository,
-                    coverRevisionStamp = coverRevisionStamp,
-                )
-            },
+            albums = displayAlbums,
+            placeAlbums = displayPlaceAlbums,
             userAlbums = userAlbums,
             albumFilter = albumFilter,
             locationFilter = locationFilter,

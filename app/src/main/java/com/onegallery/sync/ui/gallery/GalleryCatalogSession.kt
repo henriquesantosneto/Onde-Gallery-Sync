@@ -242,8 +242,10 @@ class GalleryCatalogSession {
         deferCoverModels: Boolean,
         coverRevisionStamp: Long,
     ) {
+        val catalogSizeForKey = catalogItems.size.takeIf { it > 0 }
+            ?: albums.sumOf { it.itemCount }.coerceAtLeast(1)
         val key = AlbumsCacheKey(
-            catalogSize = catalogItems.size,
+            catalogSize = catalogSizeForKey,
             userAlbumCount = userAlbumCount,
             albumSort = albumSort,
             deferCovers = deferCoverModels,
