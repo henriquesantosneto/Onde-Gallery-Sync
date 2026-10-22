@@ -1,3 +1,4 @@
 # Copie para msal.properties (não vai para o Git) — só quem compila o APK.
 # Registro gratuito: docs/BUILTIN_MSAL.md
-MSAL_CLIENT_ID=00000000-0000-0000-0000-000000000000
+# Opcional: sobrescreve o Client ID já embutido no APK (ver app/build.gradle.kts).
+MSAL_CLIENT_ID=9aeb2dd3-6edb-4bdf-ab02-6b9399112aa3
