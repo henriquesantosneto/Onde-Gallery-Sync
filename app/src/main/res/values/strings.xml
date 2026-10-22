@@ -13,6 +13,14 @@
     <string name="permission_device_location_rationale">A localização do aparelho mostra onde você está no mapa em relação às fotos (como no botão de localização do Mapas).</string>
     <string name="map_my_location">Minha localização</string>
     <string name="settings_cloud_folder_reindex_hint">Trocar a pasta na nuvem recria o índice e sincroniza de novo.</string>
+    <string name="settings_battery_optimization_title">Bateria sem restrições</string>
+    <string name="settings_battery_optimization_summary_exempt">Ativo — o sistema pode manter o app mais tempo em memória e sync em 2º plano.</string>
+    <string name="settings_battery_optimization_summary_restricted">Recomendado para abrir Fotos/Álbuns rápido e sync estável. Toque em Permitir.</string>
+    <string name="settings_battery_optimization_grant">Permitir</string>
+    <string name="settings_battery_optimization_active">Ativo</string>
+    <string name="settings_battery_optimization_info_title">Bateria sem restrições</string>
+    <string name="settings_battery_optimization_info_body">O Android pode pausar apps em 2º plano para economizar bateria. Esta permissão pede ao sistema para não aplicar essas restrições ao One Gallery Sync.\n\nNão garante que o processo nunca será fechado, mas reduz bastante interrupções do sync e ajuda a manter a galeria pronta. A sessão em disco continua funcionando se o app for fechado.</string>
+    <string name="settings_battery_optimization_samsung_hint">Samsung: em Cuidado do dispositivo → Bateria → Limites de uso, adicione também este app em \"Apps que nunca entram em suspensão\".</string>
     <string name="map_photo_locations_hint">pinça para zoom · toque no pin (estilo mapa do Fotos)</string>
     <string name="cloud_badge">Nuvem</string>
     <string name="offline_badge">Offline</string>

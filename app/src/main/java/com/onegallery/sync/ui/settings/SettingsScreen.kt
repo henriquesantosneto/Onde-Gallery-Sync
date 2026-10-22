@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Info
@@ -62,6 +63,7 @@ import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.runningHeadlineFallback
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncTaskLauncher
+import com.onegallery.sync.system.BatteryOptimization
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,6 +86,7 @@ fun SettingsScreen(
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
     var allFilesAccess by remember { mutableStateOf(MediaStorageAccess.hasAllFilesAccess(context)) }
+    var batteryOptimizationExempt by remember { mutableStateOf(BatteryOptimization.isExempt(context)) }
     var autoFreeLocalAfterSync by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced)
     }
@@ -103,6 +106,7 @@ fun SettingsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 allFilesAccess = MediaStorageAccess.hasAllFilesAccess(context)
+                batteryOptimizationExempt = BatteryOptimization.isExempt(context)
                 if (allFilesAccess) {
                     if (pendingAutoReleaseAfterSync) {
                         pendingAutoReleaseAfterSync = false
@@ -519,6 +523,64 @@ fun SettingsScreen(
                         backgroundAlways = enabled
                         syncPreferences.backgroundSyncAlwaysEnabled = enabled
                         app.rescheduleBackgroundSync()
+                    },
+                )
+            }
+            item {
+                val batteryInfoTitle = stringResource(R.string.settings_battery_optimization_info_title)
+                val batteryInfoBody = stringResource(R.string.settings_battery_optimization_info_body) +
+                    if (BatteryOptimization.isSamsungDevice()) {
+                        "\n\n" + stringResource(R.string.settings_battery_optimization_samsung_hint)
+                    } else {
+                        ""
+                    }
+                ListItem(
+                    headlineContent = {
+                        SettingsHeadlineWithInfo(
+                            title = stringResource(R.string.settings_battery_optimization_title),
+                            onInfoClick = {
+                                settingsInfo = SettingsInfoDialog(
+                                    title = batteryInfoTitle,
+                                    body = batteryInfoBody,
+                                )
+                            },
+                        )
+                    },
+                    supportingContent = {
+                        Column {
+                            Text(
+                                text = if (batteryOptimizationExempt) {
+                                    stringResource(R.string.settings_battery_optimization_summary_exempt)
+                                } else {
+                                    stringResource(R.string.settings_battery_optimization_summary_restricted)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (!batteryOptimizationExempt && BatteryOptimization.isSamsungDevice()) {
+                                Text(
+                                    text = stringResource(R.string.settings_battery_optimization_samsung_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
+                        }
+                    },
+                    leadingContent = {
+                        Icon(Icons.Outlined.BatteryChargingFull, contentDescription = null)
+                    },
+                    trailingContent = {
+                        if (batteryOptimizationExempt) {
+                            Text(
+                                stringResource(R.string.settings_battery_optimization_active),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                        } else {
+                            Button(onClick = { BatteryOptimization.launchExemptionRequest(context) }) {
+                                Text(stringResource(R.string.settings_battery_optimization_grant))
+                            }
+                        }
                     },
                 )
             }
