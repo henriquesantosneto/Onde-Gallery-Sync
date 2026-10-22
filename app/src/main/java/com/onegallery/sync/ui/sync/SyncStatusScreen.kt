@@ -206,31 +206,16 @@ fun SyncStatusScreen(
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        if (showLiveActivity) {
-                            if (activeItems.isEmpty()) {
-                                LinearProgressIndicator(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 12.dp),
-                                )
-                            } else {
-                                Text(
-                                    if (activeItems.size == 1) {
-                                        "Transferência ativa"
-                                    } else {
-                                        "Transferências em paralelo (${activeItems.size})"
-                                    },
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
-                                )
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    activeItems.forEach { item ->
-                                        SyncActiveTransferRow(item)
-                                    }
-                                }
-                            }
-                            if (queueWaiting.isEmpty() && coordinatorState.activityDetail.isBlank()) {
+                        if (showLiveActivity &&
+                            activeItems.isEmpty() &&
+                            queueWaiting.isEmpty()
+                        ) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                            )
+                            if (coordinatorState.activityDetail.isBlank()) {
                                 val phaseHint = when (coordinatorState.progressPhase) {
                                     SyncProgressPhase.LISTING_REMOTE ->
                                         "Varrendo todas as subpastas no OneDrive (pode levar vários minutos). " +
@@ -375,16 +360,20 @@ private fun SyncQueueScrollPanel(
 ) {
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
+    val activeCount = activeItems.size
+    val waitingCount = queueWaiting.size
+    val listCount = activeCount + waitingCount
     Column(modifier = Modifier.fillMaxWidth()) {
         val title = when {
             queueIsThumbnailBatch && thumbnailPendingTotal > 0 ->
-                "Miniaturas (~$thumbnailPendingTotal no índice · leva atual ${queueWaiting.size})"
+                "Miniaturas · $activeCount em andamento · $waitingCount na fila " +
+                    "(~$thumbnailPendingTotal no índice)"
             queueIsThumbnailBatch ->
-                "Miniaturas (leva atual ${queueWaiting.size})"
-            queueWaiting.size > 1 ->
-                "Operações de sync (${queueWaiting.size})"
+                "Miniaturas · $activeCount em andamento · $waitingCount na fila"
+            listCount > 0 ->
+                "Transferências · $activeCount em andamento · $waitingCount na fila"
             else ->
-                "Operações de sync"
+                "Transferências e fila"
         }
         Text(
             title,
@@ -392,7 +381,7 @@ private fun SyncQueueScrollPanel(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(bottom = 6.dp),
         )
-        if (!queueIsThumbnailBatch && thumbnailPendingTotal > 0) {
+        if (!queueIsThumbnailBatch && thumbnailPendingTotal > 0 && listCount == 0) {
             Text(
                 "~$thumbnailPendingTotal miniatura(s) ainda sem cache — aparecem aqui ao processar.",
                 style = MaterialTheme.typography.bodySmall,
@@ -408,7 +397,7 @@ private fun SyncQueueScrollPanel(
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surface,
         ) {
-            if (queueWaiting.isEmpty()) {
+            if (listCount == 0) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -435,12 +424,18 @@ private fun SyncQueueScrollPanel(
                     verticalArrangement = Arrangement.spacedBy(SyncQueueRowGap),
                 ) {
                     items(
+                        activeItems,
+                        key = { "active-${it.canonicalPath}" },
+                    ) { item ->
+                        SyncActiveTransferRow(item)
+                    }
+                    items(
                         queueWaiting,
                         key = { "queue-${it.canonicalPath}" },
                     ) { row ->
                         SyncQueueItemRow(
                             row = row,
-                            activeItems = activeItems,
+                            activeItems = emptyList(),
                             isRunning = isRunning,
                         )
                     }
