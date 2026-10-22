@@ -214,10 +214,14 @@ class GalleryViewModel(
         }
         .flatMapLatest { inputs ->
             flow {
-                val metadata = inputs.metadata
+                var metadata = inputs.metadata
+                if (metadata.isEmpty()) {
+                    val app = appContext.applicationContext as OneGalleryApplication
+                    metadata = app.galleryMetadataBootstrap.peekSnapshot().orEmpty()
+                }
                 val userAlbums = inputs.userAlbums
                 val localRevision = inputs.localRevision
-                val fingerprint = inputs.fingerprint
+                val fingerprint = GalleryCatalogFingerprint.from(metadata)
                 val cached = catalogSession.lastBundle
                 if (cached != null &&
                     cached.fingerprint == fingerprint &&
@@ -450,7 +454,6 @@ class GalleryViewModel(
             albumSort = controls.albumSort,
             fingerprint = fingerprint,
             deferCoverModels = deferAlbumCoverModels,
-            coverRevisionStamp = coverRevisionStamp,
         )
         val deferAlbumLists = catalogItems.size >= DEFER_ALBUM_LISTS_MIN_ITEMS
         val libraryItems = catalogSession.sortedLibraryItems(visibleItems, controls.order)

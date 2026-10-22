@@ -51,9 +51,9 @@ class GalleryMetadataBootstrap(
             snapshot
         }
         mutex.withLock {
-            if (!initialEmitDone) {
+            if (!initialEmitDone && !cached.isNullOrEmpty()) {
                 initialEmitDone = true
-                emit(cached ?: emptyList())
+                emit(cached)
             }
         }
     }

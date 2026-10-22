@@ -638,6 +638,7 @@ class SyncCoordinator(
         } else {
             merge(
                 bootstrap.initialMetadataFlow(),
+                galleryMetadataSource.take(1),
                 galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
             )
         }
