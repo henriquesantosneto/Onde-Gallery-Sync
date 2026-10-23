@@ -3659,7 +3659,7 @@ class SyncCoordinator(
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Capas dos álbuns…",
-                    "Uma miniatura por álbum (pastas e locais).",
+                    "Uma miniatura por álbum — fila local já terminou.",
                     alsoUpdateLastMessage = false,
                 )
                 ensureNotCancelled()
@@ -3901,6 +3901,15 @@ class SyncCoordinator(
         showProgress: Boolean = true,
     ) {
         ensureNotCancelled()
+        if (showProgress) {
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas locais no cache…",
+                "Procurando itens do aparelho sem preview salvo…",
+                alsoUpdateLastMessage = false,
+            )
+        }
+        yield()
         val rows = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
@@ -3911,7 +3920,17 @@ class SyncCoordinator(
             .sortedWith(missingThumbnailPrefetchComparator)
             .take(maxPerRun)
             .toList()
-        if (rows.isEmpty()) return
+        if (rows.isEmpty()) {
+            if (showProgress) {
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Miniaturas locais",
+                    "Nada pendente no aparelho · seguindo…",
+                    alsoUpdateLastMessage = false,
+                )
+            }
+            return
+        }
         warmLocalItemsForThumbnailPass()
         if (showProgress) {
             val videoCount = rows.count { GalleryMapper.isVideoFileName(it.displayName) }
@@ -3926,14 +3945,26 @@ class SyncCoordinator(
                 alsoUpdateLastMessage = false,
             )
         }
-        withThumbnailPrefetchUi {
-            setRunQueueFromEntities(rows, thumbnailQueue = true)
+        val cached = withThumbnailPrefetchUi {
+            if (showProgress) {
+                setRunQueueFromEntities(rows, thumbnailQueue = true)
+            }
             runMissingThumbnailPrefetch(
                 rows,
                 honorSyncCancel = true,
                 parallelSlots = PARALLEL_THUMB_PREFETCH,
                 localSourcesOnly = true,
                 progressHeadline = "Miniaturas locais no cache…",
+                publishUi = showProgress,
+            )
+        }
+        if (showProgress) {
+            clearRunQueueAndActiveTransfers()
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas locais concluídas",
+                "$cached JPEG gravado(s) de ${rows.size} · seguindo para OneDrive/capas…",
+                alsoUpdateLastMessage = false,
             )
         }
         notifyGalleryDisplayRefresh()
@@ -3945,6 +3976,13 @@ class SyncCoordinator(
     ) {
         ensureNotCancelled()
         if (!networkMonitor.isOnline() || syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return
+        setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Preparando fila OneDrive…",
+            "Varrendo o índice (pode levar um instante em bibliotecas grandes)…",
+            alsoUpdateLastMessage = false,
+        )
+        yield()
         val rows = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
@@ -3962,7 +4000,8 @@ class SyncCoordinator(
             "${rows.size} via Graph · grade usa cache; aparelho continua com preview local.",
             alsoUpdateLastMessage = false,
         )
-        withThumbnailPrefetchUi {
+        val cached = withThumbnailPrefetchUi {
+            setRunQueueFromEntities(rows, thumbnailQueue = true)
             runMissingThumbnailPrefetch(
                 rows,
                 honorSyncCancel = true,
@@ -3971,6 +4010,13 @@ class SyncCoordinator(
                 progressHeadline = "Miniaturas do OneDrive (Graph)…",
             )
         }
+        clearRunQueueAndActiveTransfers()
+        setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Leva OneDrive concluída",
+            "$cached preview(s) nesta passagem · completando restante do índice em seguida…",
+            alsoUpdateLastMessage = false,
+        )
         notifyGalleryDisplayRefresh()
     }
 
@@ -4175,10 +4221,12 @@ class SyncCoordinator(
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
         progressHeadline: String = "Completando cache da galeria…",
+        publishUi: Boolean = true,
     ): Int {
         if (rows.isEmpty()) return 0
         var total = 0
-        for (chunk in rows.chunked(THUMB_PREFETCH_RUN_CHUNK)) {
+        val chunks = rows.chunked(THUMB_PREFETCH_RUN_CHUNK)
+        chunks.forEachIndexed { index, chunk ->
             total += runMissingThumbnailPrefetchChunk(
                 chunk,
                 honorSyncCancel,
@@ -4186,7 +4234,16 @@ class SyncCoordinator(
                 localSourcesOnly,
                 cloudSourcesOnly,
                 progressHeadline,
+                publishUi,
             )
+            if (publishUi && shouldPublishSyncActivityUi() && index < chunks.lastIndex) {
+                setSyncProgress(
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    progressHeadline,
+                    "Leva ${index + 1}/${chunks.size} ok · preparando próxima…",
+                    alsoUpdateLastMessage = false,
+                )
+            }
         }
         return total
     }
@@ -4198,9 +4255,10 @@ class SyncCoordinator(
         localSourcesOnly: Boolean,
         cloudSourcesOnly: Boolean,
         progressHeadline: String,
+        publishUi: Boolean,
     ): Int {
         if (rows.isEmpty()) return 0
-        if (shouldPublishSyncActivityUi()) {
+        if (publishUi && shouldPublishSyncActivityUi()) {
             setRunQueueFromEntities(rows, thumbnailQueue = true)
         }
         val slots = parallelSlots.coerceIn(1, PARALLEL_THUMB_PREFETCH)
@@ -4217,7 +4275,7 @@ class SyncCoordinator(
                                 ensureNotCancelled()
                                 ensureSyncMayContinue()
                             }
-                            if (shouldPublishSyncActivityUi()) {
+                            if (publishUi && shouldPublishSyncActivityUi()) {
                                 upsertActiveSyncItem(
                                     ActiveSyncItem(
                                         canonicalPath = row.canonicalPath,
@@ -4256,7 +4314,7 @@ class SyncCoordinator(
                             }
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
-                            if (shouldPublishSyncActivityUi()) {
+                            if (publishUi && shouldPublishSyncActivityUi()) {
                                 setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                                     progressHeadline,
