@@ -55,6 +55,10 @@ class GalleryDisplayBuildCache(
         byPath.clear()
     }
 
+    fun invalidatePaths(paths: Collection<String>) {
+        paths.forEach { byPath.remove(it) }
+    }
+
     private fun SyncMetadataEntity.displaySignature(): Long {
         var h = canonicalPath.hashCode().toLong()
         h = h * 31L + (localMediaId ?: -1L)

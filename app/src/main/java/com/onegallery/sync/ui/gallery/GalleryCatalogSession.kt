@@ -39,6 +39,32 @@ class GalleryCatalogSession {
     private var placeAlbumsCacheKey: AlbumsCacheKey? = null
     private var cachedPlaceAlbums: List<MediaAlbum> = emptyList()
 
+    /** Remove itens da RAM da sessão (exclusão na galeria) sem esperar Room/debounce. */
+    fun removeCanonicalPaths(
+        paths: Set<String>,
+        activeSort: GallerySortOrder = GallerySortOrder.DATE_NEWEST,
+    ): SnapshotBundle? {
+        if (paths.isEmpty()) return lastBundle
+        val current = lastBundle ?: return null
+        val catalogItems = current.catalogItems.filter { it.canonicalPath !in paths }
+        val visibleItems = current.visibleItems.filter { it.canonicalPath !in paths }
+        if (catalogItems.size == current.catalogItems.size &&
+            visibleItems.size == current.visibleItems.size
+        ) {
+            return current
+        }
+        val fingerprint = GalleryCatalogFingerprint.fromDisplayPaths(
+            catalogItems.map { it.canonicalPath },
+        )
+        val next = current.copy(
+            catalogItems = catalogItems,
+            visibleItems = visibleItems,
+            fingerprint = fingerprint,
+        )
+        publish(next, activeSort)
+        return next
+    }
+
     fun publish(bundle: SnapshotBundle, activeSort: GallerySortOrder = GallerySortOrder.DATE_NEWEST) {
         lastBundle = bundle
         sortedLibraryCache = null

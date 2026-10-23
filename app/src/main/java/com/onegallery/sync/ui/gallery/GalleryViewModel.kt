@@ -165,6 +165,9 @@ class GalleryViewModel(
     private val galleryBootstrap = MutableStateFlow(restoreProcessCatalogSnapshot())
     private val indexHydrated = MutableStateFlow(galleryBootstrap.value != null)
 
+    /** Oculta itens na grade assim que o usuário exclui (antes do índice Room/debounce). */
+    private val optimisticRemovedPaths = MutableStateFlow<Set<String>>(emptySet())
+
     private data class DeferredAlbumLists(
         val albums: List<MediaAlbum> = emptyList(),
         val placeAlbums: List<MediaAlbum> = emptyList(),
@@ -241,8 +244,13 @@ class GalleryViewModel(
             loading.value = true
         }
         viewModelScope.launch {
-            syncCoordinator.galleryMetadata.collect {
+            syncCoordinator.galleryMetadata.collect { metadata ->
                 indexHydrated.value = true
+                if (optimisticRemovedPaths.value.isEmpty()) return@collect
+                val indexed = metadata.asSequence().map { it.canonicalPath }.toHashSet()
+                optimisticRemovedPaths.update { pending ->
+                    pending.filter { path -> path in indexed }.toSet()
+                }
             }
         }
         viewModelScope.launch {
@@ -455,19 +463,53 @@ class GalleryViewModel(
     private val effectiveLibrarySnapshot = combine(
         galleryBootstrap,
         librarySnapshotLive,
-    ) { bootstrap, live ->
-        val bootstrapVisible = bootstrap?.visibleItems?.size ?: 0
+        optimisticRemovedPaths,
+    ) { bootstrap, live, removed ->
+        val bootstrapFiltered = bootstrap?.let { filterRemovedFromLibrarySnapshot(it, removed) }
+        val liveFiltered = filterRemovedFromLibrarySnapshot(live, removed)
+        val bootstrapVisible = bootstrapFiltered?.visibleItems?.size ?: 0
         val liveVisible = when {
-            live.visibleItems.isNotEmpty() -> live.visibleItems.size
-            live.catalogItems.isNotEmpty() -> live.catalogItems.size
+            liveFiltered.visibleItems.isNotEmpty() -> liveFiltered.visibleItems.size
+            liveFiltered.catalogItems.isNotEmpty() -> liveFiltered.catalogItems.size
             else -> 0
         }
         when {
-            liveVisible > bootstrapVisible -> live
-            bootstrap != null && bootstrapVisible > 0 && liveVisible <= bootstrapVisible -> bootstrap
-            liveVisible > 0 -> live
-            else -> bootstrap ?: live
+            removed.isNotEmpty() -> {
+                when {
+                    liveFiltered.visibleItems.isNotEmpty() || liveFiltered.catalogItems.isNotEmpty() ->
+                        liveFiltered
+                    bootstrapFiltered != null -> bootstrapFiltered
+                    else -> liveFiltered
+                }
+            }
+            liveVisible > bootstrapVisible -> liveFiltered
+            bootstrapFiltered != null && bootstrapVisible > 0 && liveVisible <= bootstrapVisible ->
+                bootstrapFiltered
+            liveVisible > 0 -> liveFiltered
+            else -> bootstrapFiltered ?: liveFiltered
         }
+    }
+
+    private fun filterRemovedFromLibrarySnapshot(
+        snapshot: LibrarySnapshot,
+        removed: Set<String>,
+    ): LibrarySnapshot {
+        if (removed.isEmpty()) return snapshot
+        val catalogItems = snapshot.catalogItems.filter { it.canonicalPath !in removed }
+        val visibleItems = snapshot.visibleItems.filter { it.canonicalPath !in removed }
+        if (catalogItems.size == snapshot.catalogItems.size &&
+            visibleItems.size == snapshot.visibleItems.size
+        ) {
+            return snapshot
+        }
+        val fingerprint = GalleryCatalogFingerprint.fromDisplayPaths(
+            catalogItems.map { it.canonicalPath },
+        )
+        return snapshot.copy(
+            catalogItems = catalogItems,
+            visibleItems = visibleItems,
+            fingerprint = fingerprint,
+        )
     }
 
     init {
@@ -1471,6 +1513,8 @@ class GalleryViewModel(
     }
 
     private fun runDeleteImmediately(paths: List<String>, onSingleRemoved: (() -> Unit)? = null) {
+        if (paths.isEmpty()) return
+        applyImmediateGalleryRemoval(paths)
         viewModelScope.launch {
             syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
                 .onSuccess { count ->
@@ -1481,9 +1525,40 @@ class GalleryViewModel(
                         toast("$count item(ns) excluído(s).")
                         clearSelection()
                     }
+                    syncCoordinator.notifyGalleryDisplayRefresh()
                 }
-                .onFailure { toast(it.message) }
+                .onFailure {
+                    revertImmediateGalleryRemoval(paths)
+                    toast(it.message)
+                }
         }
+    }
+
+    private fun applyImmediateGalleryRemoval(paths: List<String>) {
+        val removed = paths.toSet()
+        optimisticRemovedPaths.update { it + removed }
+        displayBuildCache.invalidatePaths(removed)
+        val bundle = catalogSession.removeCanonicalPaths(removed, sortOrder.value)
+        if (bundle != null) {
+            val snapshot = bundle.toLibrarySnapshot()
+            galleryBootstrap.value = snapshot
+            persistProcessCatalog(bundle)
+            scheduleAlbumListsFromLocalCatalog(
+                catalogItems = snapshot.catalogItems,
+                visibleItems = snapshot.visibleItems,
+                fingerprint = bundle.fingerprint,
+                userAlbums = snapshot.userAlbums,
+                albumSort = albumListSort.value,
+                localRevision = bundle.localRevision,
+            )
+        }
+        syncCoordinator.notifyGalleryDisplayRefresh()
+    }
+
+    private fun revertImmediateGalleryRemoval(paths: List<String>) {
+        val removed = paths.toSet()
+        optimisticRemovedPaths.update { it - removed }
+        syncCoordinator.notifyGalleryDisplayRefresh()
     }
 
     fun releaseLocalSpaceSelected() {
