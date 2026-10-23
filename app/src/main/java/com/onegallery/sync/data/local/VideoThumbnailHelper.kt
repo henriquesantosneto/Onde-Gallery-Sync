@@ -283,7 +283,9 @@ object VideoThumbnailHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
                 val thumb = context.contentResolver.loadThumbnail(uri, Size(MAX_EDGE_PX, MAX_EDGE_PX), null)
-                if (!strictFrames || isAcceptableFrame(thumb)) return thumb
+                if (thumb.width > 0 && thumb.height > 0) {
+                    if (!strictFrames || isAcceptableFrame(thumb)) return thumb
+                }
                 thumb.recycle()
             }
         }

@@ -1772,7 +1772,7 @@ class SyncCoordinator(
         }
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         val hasLocalSource = localContentUri(row) != null
-        if (!isVideo && hasLocalSource) {
+        if (hasLocalSource) {
             mediaCacheRepository.committedThumbnailIncludingGiveUp(
                 row.canonicalPath,
                 row.oneDriveItemId,

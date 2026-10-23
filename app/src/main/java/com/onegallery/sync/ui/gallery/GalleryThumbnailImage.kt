@@ -56,7 +56,14 @@ fun GalleryThumbnailImage(
         mutableStateOf<Any?>(initialThumbnailDisplayData(item, mediaCacheRepository))
     }
     var resolvingThumb by remember(item.canonicalPath, sizePx) {
-        mutableStateOf(displayData == null && item.oneDriveItemId != null && syncCoordinator != null)
+        mutableStateOf(
+            displayData == null &&
+                syncCoordinator != null &&
+                (
+                    item.oneDriveItemId != null ||
+                        (item.kind == MediaKind.VIDEO && item.localUri != null)
+                    ),
+        )
     }
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
@@ -64,19 +71,16 @@ fun GalleryThumbnailImage(
             resolvingThumb = false
             return@LaunchedEffect
         }
-        resolvingThumb = item.oneDriveItemId != null && syncCoordinator != null
+        val isVideo = item.kind == MediaKind.VIDEO
+        val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
+            item.cloudState == CloudSyncState.PENDING_DOWNLOAD
+        resolvingThumb = syncCoordinator != null &&
+            (item.oneDriveItemId != null || (isVideo && item.localUri != null))
         try {
             withContext(Dispatchers.IO) {
-                if (item.localUri != null) {
-                    GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { local ->
-                        return@withContext local
-                    }
-                }
                 mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
                     ?.let { cached ->
-                        if (item.kind == MediaKind.VIDEO &&
-                            !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)
-                        ) {
+                        if (isVideo && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
                             mediaCacheRepository.invalidateCommittedThumbnail(
                                 item.canonicalPath,
                                 item.oneDriveItemId,
@@ -85,24 +89,28 @@ fun GalleryThumbnailImage(
                             return@withContext cached
                         }
                     }
-                val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
-                    item.cloudState == CloudSyncState.PENDING_DOWNLOAD
-                val isVideo = item.kind == MediaKind.VIDEO
+                if (isVideo && item.localUri != null && syncCoordinator != null) {
+                    syncCoordinator.ensureThumbnailCached(
+                        item.canonicalPath,
+                        preferCloudFirst = false,
+                        localSourcesOnly = true,
+                    ).getOrNull()
+                        ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
+                        ?.let { return@withContext it }
+                }
+                if (item.localUri != null) {
+                    GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { local ->
+                        return@withContext local
+                    }
+                    if (isVideo) {
+                        return@withContext item.localUri
+                    }
+                }
                 syncCoordinator?.ensureThumbnailCached(
                     item.canonicalPath,
                     preferCloudFirst = preferCloud,
                     cloudVideoAggressive = isVideo && preferCloud,
                 )?.getOrNull()
-                    ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
-                    ?: if (isVideo && item.localUri != null) {
-                        syncCoordinator?.ensureThumbnailCached(
-                            item.canonicalPath,
-                            preferCloudFirst = false,
-                            localSourcesOnly = true,
-                        )?.getOrNull()
-                    } else {
-                        null
-                    }
                     ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
                     ?.let { return@withContext it }
                 item.thumbnailModel
@@ -165,7 +173,7 @@ private fun initialThumbnailDisplayData(
     mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
 ): Any? {
     item.localUri?.let { uri ->
-        if (item.kind != MediaKind.VIDEO) return uri
+        return uri
     }
     mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)?.let { cached ->
         if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {

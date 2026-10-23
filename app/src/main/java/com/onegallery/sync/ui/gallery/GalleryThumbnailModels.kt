@@ -26,7 +26,7 @@ object GalleryThumbnailModels {
             if (item.kind == MediaKind.VIDEO) {
                 VideoThumbnailHelper.captureFromContentUri(context, uri, strictFrames = false)
                     ?.let { return it }
-                return null
+                return uri
             }
             return uri
         }
