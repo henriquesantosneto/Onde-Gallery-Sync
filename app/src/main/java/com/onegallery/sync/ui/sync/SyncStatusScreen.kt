@@ -62,6 +62,7 @@ import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.ui.gallery.formatFileSize
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
@@ -530,19 +531,31 @@ private fun StatsCard(
 private data class IndexMediaTypeSegment(
     val label: String,
     val count: Int,
+    val bytes: Long,
     val color: Color,
 )
 
 @Composable
 private fun IndexMediaTypeDistribution(stats: SyncStats) {
     val segments = listOf(
-        IndexMediaTypeSegment("Imagens", stats.images, IndexMediaTypeColors.images),
-        IndexMediaTypeSegment("Vídeos", stats.videos, IndexMediaTypeColors.videos),
-        IndexMediaTypeSegment("Áudio", stats.audio, IndexMediaTypeColors.audio),
-        IndexMediaTypeSegment("Documentos", stats.documents, IndexMediaTypeColors.documents),
-        IndexMediaTypeSegment("Outros", stats.otherTypes, IndexMediaTypeColors.other),
+        IndexMediaTypeSegment("Imagens", stats.images, stats.imageBytes, IndexMediaTypeColors.images),
+        IndexMediaTypeSegment("Vídeos", stats.videos, stats.videoBytes, IndexMediaTypeColors.videos),
+        IndexMediaTypeSegment("Áudio", stats.audio, stats.audioBytes, IndexMediaTypeColors.audio),
+        IndexMediaTypeSegment(
+            "Documentos",
+            stats.documents,
+            stats.documentBytes,
+            IndexMediaTypeColors.documents,
+        ),
+        IndexMediaTypeSegment("Outros", stats.otherTypes, stats.otherTypeBytes, IndexMediaTypeColors.other),
     )
-    val active = segments.filter { it.count > 0 }
+    val sizeTotal = stats.totalBytes.coerceAtLeast(0L)
+    val barBySize = sizeTotal > 0L
+    val active = if (barBySize) {
+        segments.filter { it.bytes > 0L }
+    } else {
+        segments.filter { it.count > 0 }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -550,10 +563,19 @@ private fun IndexMediaTypeDistribution(stats: SyncStats) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            "Por tipo (extensão do arquivo)",
+            "Por tipo (tamanho no índice)",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (sizeTotal > 0L) {
+            StatRow("Total estimado", formatFileSize(sizeTotal), emphasized = true)
+        } else {
+            Text(
+                "Tamanho ainda não indexado para todos os itens — barra por quantidade.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (active.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -562,9 +584,14 @@ private fun IndexMediaTypeDistribution(stats: SyncStats) {
                     .clip(RoundedCornerShape(8.dp)),
             ) {
                 active.forEach { segment ->
+                    val weight = if (barBySize) {
+                        segment.bytes.toFloat().coerceAtLeast(1f)
+                    } else {
+                        segment.count.toFloat().coerceAtLeast(1f)
+                    }
                     Box(
                         modifier = Modifier
-                            .weight(segment.count.toFloat().coerceAtLeast(1f))
+                            .weight(weight)
                             .fillMaxHeight()
                             .background(segment.color),
                     )
@@ -572,11 +599,12 @@ private fun IndexMediaTypeDistribution(stats: SyncStats) {
             }
         }
         segments.forEach { segment ->
-            val pct = if (stats.total > 0) {
-                segment.count * 100f / stats.total.toFloat()
-            } else {
-                0f
+            val pct = when {
+                barBySize && sizeTotal > 0L -> segment.bytes * 100f / sizeTotal.toFloat()
+                stats.total > 0 -> segment.count * 100f / stats.total.toFloat()
+                else -> 0f
             }
+            val sizeLabel = if (segment.bytes > 0L) formatFileSize(segment.bytes) else "—"
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -596,8 +624,8 @@ private fun IndexMediaTypeDistribution(stats: SyncStats) {
                     Text(segment.label, style = MaterialTheme.typography.bodyMedium)
                 }
                 Text(
-                    "${segment.count} (${formatIndexTypePercent(pct)})",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "$sizeLabel · ${segment.count} itens (${formatIndexTypePercent(pct)})",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -766,9 +794,15 @@ private data class SyncStats(
     val audio: Int,
     val documents: Int,
     val otherTypes: Int,
+    val totalBytes: Long,
+    val imageBytes: Long,
+    val videoBytes: Long,
+    val audioBytes: Long,
+    val documentBytes: Long,
+    val otherTypeBytes: Long,
 ) {
     companion object {
-        fun empty() = SyncStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        fun empty() = SyncStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     }
 }
 
@@ -787,6 +821,12 @@ private fun SyncIndexStatsRow.toSyncStats(): SyncStats = SyncStats(
     audio = audio,
     documents = documents,
     otherTypes = otherTypes,
+    totalBytes = totalBytes,
+    imageBytes = imageBytes,
+    videoBytes = videoBytes,
+    audioBytes = audioBytes,
+    documentBytes = documentBytes,
+    otherTypeBytes = otherTypeBytes,
 )
 
 private fun connectionHeadline(mode: SyncMode, coordinator: SyncCoordinator): String = when (mode) {

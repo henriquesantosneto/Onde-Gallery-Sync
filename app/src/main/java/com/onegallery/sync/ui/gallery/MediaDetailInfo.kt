@@ -52,7 +52,7 @@ internal fun formatFileSize(bytes: Long): String {
     if (bytes < 0L) return "—"
     if (bytes < 1024L) return "$bytes B"
     val units = arrayOf("KB", "MB", "GB", "TB")
-    val digitGroups = (ln(bytes.toDouble()) / ln(1024.0)).toInt().coerceIn(1, units.lastIndex)
+    val digitGroups = (ln(bytes.toDouble()) / ln(1024.0)).toInt().coerceIn(1, units.size)
     val value = bytes / 1024.0.pow(digitGroups.toDouble())
     return String.format(Locale.US, "%.1f %s", value, units[digitGroups - 1])
 }

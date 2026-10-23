@@ -19,4 +19,10 @@ data class SyncIndexStatsRow(
     @ColumnInfo(name = "audio") val audio: Int,
     @ColumnInfo(name = "documents") val documents: Int,
     @ColumnInfo(name = "otherTypes") val otherTypes: Int,
+    @ColumnInfo(name = "totalBytes") val totalBytes: Long,
+    @ColumnInfo(name = "imageBytes") val imageBytes: Long,
+    @ColumnInfo(name = "videoBytes") val videoBytes: Long,
+    @ColumnInfo(name = "audioBytes") val audioBytes: Long,
+    @ColumnInfo(name = "documentBytes") val documentBytes: Long,
+    @ColumnInfo(name = "otherTypeBytes") val otherTypeBytes: Long,
 )

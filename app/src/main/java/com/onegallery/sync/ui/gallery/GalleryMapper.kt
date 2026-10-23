@@ -160,6 +160,15 @@ object GalleryMapper {
         )
     }
 
+    /** Tamanho efetivo por linha: local se existir, senão remoto (evita somar os dois). */
+    private const val SQL_EFFECTIVE_SIZE_BYTES = """
+        CASE
+            WHEN localSizeBytes IS NOT NULL AND localSizeBytes > 0 THEN localSizeBytes
+            WHEN remoteSizeBytes IS NOT NULL AND remoteSizeBytes > 0 THEN remoteSizeBytes
+            ELSE 0
+        END
+    """
+
     /** SQL agregado para [com.onegallery.sync.data.local.db.SyncIndexStatsRow] (Room RawQuery). */
     fun buildSyncIndexStatsSql(): String {
         val video = sqlDisplayNameExtensionMatch(VIDEO_EXTENSIONS)
@@ -169,6 +178,7 @@ object GalleryMapper {
         val notVideo = "NOT ($video)"
         val notVideoImage = "$notVideo AND NOT ($image)"
         val notVideoImageAudio = "$notVideoImage AND NOT ($audio)"
+        val size = SQL_EFFECTIVE_SIZE_BYTES.trim()
         return """
             SELECT
                 (SELECT COUNT(*) FROM sync_metadata) AS total,
@@ -188,7 +198,13 @@ object GalleryMapper {
                 (SELECT COUNT(*) FROM sync_metadata WHERE ($video)) AS videos,
                 (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImage AND ($audio)) AS audio,
                 (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND ($document)) AS documents,
-                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND NOT ($document)) AS otherTypes
+                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND NOT ($document)) AS otherTypes,
+                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata) AS totalBytes,
+                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideo AND ($image)) AS imageBytes,
+                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE ($video)) AS videoBytes,
+                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideoImage AND ($audio)) AS audioBytes,
+                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideoImageAudio AND ($document)) AS documentBytes,
+                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideoImageAudio AND NOT ($document)) AS otherTypeBytes
         """.trimIndent()
     }
 }
