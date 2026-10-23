@@ -3321,7 +3321,7 @@ class SyncCoordinator(
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Capas dos álbuns…",
-                    "Uma miniatura por álbum (pastas e locais), antes de indexar GPS.",
+                    "Uma miniatura por álbum (pastas e locais).",
                     alsoUpdateLastMessage = false,
                 )
                 ensureNotCancelled()
@@ -3330,26 +3330,22 @@ class SyncCoordinator(
                 materializeNonVisualThumbnails()
                 ensureNotCancelled()
                 setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Miniaturas na galeria…",
-                    "Grade, mapa e itens restantes — originais completos sob demanda.",
+                    SyncProgressPhase.BACKFILL_GPS,
+                    "Indexando localização (GPS)…",
+                    "Antes das miniaturas em massa — mapa e Locais aparecem mais cedo.",
                     alsoUpdateLastMessage = false,
                 )
-                val thumbsStillMissing = runCompleteThumbnailPrefetchBeforeMetadata()
+                backfillMissingGpsLocations()
                 clearRunQueueAndActiveTransfers()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
                 setSyncProgress(
-                    SyncProgressPhase.BACKFILL_GPS,
-                    "Indexando localização (GPS)…",
-                    if (thumbsStillMissing > 0) {
-                        "~$thumbsStillMissing miniatura(s) seguem em 2º plano · GPS não depende delas."
-                    } else {
-                        "EXIF local e trechos na nuvem."
-                    },
+                    SyncProgressPhase.PREFETCH_THUMBNAILS,
+                    "Miniaturas na galeria…",
+                    "Grade e itens restantes — originais completos sob demanda.",
                     alsoUpdateLastMessage = false,
                 )
-                backfillMissingGpsLocations()
+                val thumbsStillMissing = runCompleteThumbnailPrefetchBeforeMetadata()
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_CAPTURE_DATE,
                     "Indexando data de captura…",
@@ -3836,6 +3832,7 @@ class SyncCoordinator(
                 "Localização GPS",
                 "$totalIndexed item(ns) indexado(s)$suffix",
             )
+            notifyGalleryDisplayRefresh()
         }
     }
 
