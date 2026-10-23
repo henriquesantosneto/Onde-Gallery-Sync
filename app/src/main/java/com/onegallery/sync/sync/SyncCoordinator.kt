@@ -822,6 +822,7 @@ class SyncCoordinator(
         entities: List<SyncMetadataEntity>,
         thumbnailQueue: Boolean = false,
     ) {
+        if (!_state.value.isRunning) return
         val rows = entities.map { entity ->
             if (thumbnailQueue) {
                 SyncQueueDisplayRow(
@@ -3532,6 +3533,7 @@ class SyncCoordinator(
                 )
             }
             } finally {
+                clearRunQueueAndActiveTransfers()
                 if (!_state.value.isRunning) {
                     _state.update {
                         it.copy(
@@ -3741,14 +3743,16 @@ class SyncCoordinator(
                                 ensureNotCancelled()
                                 ensureSyncMayContinue()
                             }
-                            upsertActiveSyncItem(
-                                ActiveSyncItem(
-                                    canonicalPath = row.canonicalPath,
-                                    displayName = row.displayName,
-                                    operationLabel = thumbnailOperationLabel(row),
-                                ),
-                                force = true,
-                            )
+                            if (_state.value.isRunning) {
+                                upsertActiveSyncItem(
+                                    ActiveSyncItem(
+                                        canonicalPath = row.canonicalPath,
+                                        displayName = row.displayName,
+                                        operationLabel = thumbnailOperationLabel(row),
+                                    ),
+                                    force = true,
+                                )
+                            }
                             var timedOut = false
                             try {
                                 withTimeout(THUMB_PREFETCH_ITEM_TIMEOUT_MS) {

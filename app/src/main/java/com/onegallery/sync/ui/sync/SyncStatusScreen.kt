@@ -98,9 +98,10 @@ fun SyncStatusScreen(
     }
     var clearingErrors by remember { mutableStateOf(false) }
     val showLiveActivity = coordinatorState.isRunning
-    val queueForUi = remember(coordinatorState.runQueue, syncQueue) {
+    val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
         when {
-            coordinatorState.runQueue.isNotEmpty() -> coordinatorState.runQueue
+            coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
+                coordinatorState.runQueue
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
     }
