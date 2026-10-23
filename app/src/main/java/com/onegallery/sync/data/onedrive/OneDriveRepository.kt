@@ -9,6 +9,7 @@ import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.sync.SyncPolicy
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
@@ -666,6 +667,50 @@ class OneDriveRepository(
             if (!destination.isFile || destination.length() <= 0L) {
                 error("Amostra vazia para miniatura de vídeo.")
             }
+        }
+    }
+
+    /** URLs do JSON `thumbnails` (funciona para muitos vídeos quando `/content` falha). */
+    suspend fun downloadBestListedThumbnailToFile(
+        itemId: String,
+        destination: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
+        return runWithToken { token ->
+            destination.parentFile?.mkdirs()
+            val auth = "Bearer $token"
+            val sets = graphApi.listItemThumbnails(auth, itemId).value
+            val candidates = sets.flatMap { set ->
+                listOfNotNull(set.source, set.large, set.medium, set.small)
+            }
+            for (candidate in candidates) {
+                val url = candidate.url?.takeIf { it.isNotBlank() } ?: continue
+                destination.delete()
+                val saved = runCatching {
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("Authorization", auth)
+                        .get()
+                        .build()
+                    graphHttpClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) return@runCatching false
+                        val body = response.body ?: return@runCatching false
+                        body.byteStream().use { input ->
+                            destination.outputStream().use { output ->
+                                copyStreamWithProgress(
+                                    input,
+                                    output,
+                                    body.contentLength(),
+                                    onProgress,
+                                )
+                            }
+                        }
+                        destination.isFile && destination.length() > 0L
+                    }
+                }.getOrDefault(false)
+                if (saved) return@runWithToken
+            }
+            error("Graph não listou miniatura utilizável.")
         }
     }
 

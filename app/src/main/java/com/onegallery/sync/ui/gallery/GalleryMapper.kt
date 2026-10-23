@@ -62,9 +62,10 @@ object GalleryMapper {
         val localUri = entity.localContentUri?.let { Uri.parse(it) }
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
-        val placeholderThumb = mediaCacheRepository.thumbnailFileForIndexBuild(
+        val placeholderThumb = mediaCacheRepository.galleryThumbnailResolved(
             entity.canonicalPath,
             entity.oneDriveItemId,
+            requireVideoAcceptable = kind == MediaKind.VIDEO,
         )
         val hasThumb = placeholderThumb != null
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }

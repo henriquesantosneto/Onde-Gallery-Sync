@@ -1705,6 +1705,8 @@ class SyncCoordinator(
         lightweightPrefetch: Boolean = false,
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
+        /** Grade / detalhe: amostras maiores do MP4 na nuvem. */
+        cloudVideoAggressive: Boolean = false,
     ): Result<File?> {
         val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
         return mutex.withLock {
@@ -1716,6 +1718,7 @@ class SyncCoordinator(
                     lightweightPrefetch,
                     localSourcesOnly,
                     cloudSourcesOnly,
+                    cloudVideoAggressive,
                 )
             }
         }
@@ -1748,6 +1751,7 @@ class SyncCoordinator(
         lightweightPrefetch: Boolean = false,
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
+        cloudVideoAggressive: Boolean = false,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
@@ -1803,23 +1807,11 @@ class SyncCoordinator(
         onProgress?.invoke(0L, null)
 
         fun commitIfReady(): File? {
-            if (isVideo) {
-                when {
-                    VideoThumbnailHelper.isAcceptableThumbnailFile(staging) &&
-                        mediaCacheRepository.isDisplayableGalleryThumbFile(staging) -> Unit
-                    VideoThumbnailHelper.isAcceptableThumbnailFile(staging) &&
-                        !reencodeFileToDisplayableThumbnail(staging, staging) -> {
-                        staging.delete()
-                        return null
-                    }
-                    !reencodeFileToDisplayableThumbnail(staging, staging) -> {
-                        staging.delete()
-                        return null
-                    }
+            if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
+                if (!reencodeFileToDisplayableThumbnail(staging, staging)) {
+                    staging.delete()
+                    return null
                 }
-            } else if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
-                staging.delete()
-                return null
             }
             return mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
         }
@@ -1840,10 +1832,21 @@ class SyncCoordinator(
             staging.delete()
             val thumbReady = try {
                 withTimeout(
-                    if (isVideo) CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS else CLOUD_THUMB_FETCH_TIMEOUT_MS,
+                    when {
+                        isVideo && (cloudVideoAggressive || !lightweightPrefetch) ->
+                            CLOUD_VIDEO_ON_DEMAND_FETCH_TIMEOUT_MS
+                        isVideo -> CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS
+                        else -> CLOUD_THUMB_FETCH_TIMEOUT_MS
+                    },
                 ) {
                     if (isVideo) {
-                        fetchCloudVideoThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)
+                        fetchCloudVideoThumbnail(
+                            itemId,
+                            staging,
+                            row.remoteSizeBytes,
+                            onProgress,
+                            aggressive = cloudVideoAggressive || !lightweightPrefetch,
+                        )
                     } else {
                         fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)
                     }
@@ -1959,26 +1962,50 @@ class SyncCoordinator(
         staging: File,
         remoteSizeBytes: Long?,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+        aggressive: Boolean = false,
     ): Boolean {
         staging.delete()
-        var ready = false
-        oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            ready = acceptDownloadedCloudThumbnail(staging, isVideo = false) ||
+        fun acceptCloudImageThumb(): Boolean {
+            return acceptDownloadedCloudThumbnail(staging, isVideo = false) ||
                 acceptDownloadedCloudVideoThumbnail(staging)
         }
-        if (ready) return true
+        var graphReady = false
+        oneDriveRepository.downloadBestListedThumbnailToFile(itemId, staging, onProgress).onSuccess {
+            graphReady = acceptCloudImageThumb()
+            if (!graphReady) staging.delete()
+        }
+        if (graphReady) return true
+        oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
+            graphReady = acceptCloudImageThumb()
+            if (!graphReady) staging.delete()
+        }
+        if (graphReady) return true
 
-        fun captureFromPartial(partial: File): Boolean {
+        fun captureFromPartial(partial: File, lenientOnly: Boolean): Boolean {
             if (!partial.isFile || partial.length() <= 0L) return false
             staging.delete()
-            return VideoThumbnailHelper.captureToFile(partial, staging).also { ok ->
-                if (!ok) staging.delete()
+            val ok = if (lenientOnly) {
+                VideoThumbnailHelper.captureLenientFileToFile(partial, staging)
+            } else {
+                VideoThumbnailHelper.captureToFile(partial, staging)
             }
+            if (!ok) staging.delete()
+            return ok && mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
         }
 
         val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
             ?: oneDriveRepository.fetchItemSizeBytes(itemId)
-        if (remoteSize != null && remoteSize <= CLOUD_VIDEO_FULL_FETCH_MAX_BYTES) {
+        val fullCap = if (aggressive) {
+            CLOUD_VIDEO_ON_DEMAND_FULL_FETCH_MAX_BYTES
+        } else {
+            CLOUD_VIDEO_FULL_FETCH_MAX_BYTES
+        }
+        val tailCap = if (aggressive) {
+            CLOUD_VIDEO_ON_DEMAND_TAIL_MAX_BYTES
+        } else {
+            CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES
+        }
+        if (remoteSize != null && remoteSize <= fullCap) {
             val full = File(staging.absolutePath + ".partial.full")
             full.delete()
             oneDriveRepository.downloadCappedContentForVideoThumbnail(
@@ -1988,9 +2015,10 @@ class SyncCoordinator(
                 knownSizeBytes = remoteSize,
                 onProgress = onProgress,
             ).onSuccess {
-                if (captureFromPartial(full)) return true
+                if (captureFromPartial(full, lenientOnly = true)) graphReady = true
             }
             full.delete()
+            if (graphReady) return true
         }
 
         val tail = File(staging.absolutePath + ".partial.vidtail")
@@ -1998,13 +2026,14 @@ class SyncCoordinator(
         oneDriveRepository.downloadFileSuffixForThumbnail(
             itemId,
             tail,
-            maxBytes = CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES,
+            maxBytes = tailCap,
             knownSizeBytes = remoteSize,
             onProgress = onProgress,
         ).onSuccess {
-            if (captureFromPartial(tail)) return true
+            if (captureFromPartial(tail, lenientOnly = true)) graphReady = true
         }
         tail.delete()
+        if (graphReady) return true
 
         val head = File(staging.absolutePath + ".partial.vidhead")
         head.delete()
@@ -2015,9 +2044,10 @@ class SyncCoordinator(
             knownSizeBytes = remoteSize,
             onProgress = onProgress,
         ).onSuccess {
-            if (captureFromPartial(head)) return true
+            if (captureFromPartial(head, lenientOnly = true)) graphReady = true
         }
         head.delete()
+        if (graphReady) return true
         staging.delete()
         return false
     }
@@ -5304,10 +5334,13 @@ class SyncCoordinator(
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
+        const val CLOUD_VIDEO_ON_DEMAND_FETCH_TIMEOUT_MS = 180_000L
         const val CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES = 48L * 1024L * 1024L
-        const val CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES = 16L * 1024L * 1024L
+        const val CLOUD_VIDEO_ON_DEMAND_TAIL_MAX_BYTES = 96L * 1024L * 1024L
+        const val CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES = 24L * 1024L * 1024L
         /** Vídeos pequenos na nuvem: baixa inteiro e extrai frame (mais confiável que trecho). */
         const val CLOUD_VIDEO_FULL_FETCH_MAX_BYTES = 25L * 1024L * 1024L
+        const val CLOUD_VIDEO_ON_DEMAND_FULL_FETCH_MAX_BYTES = 120L * 1024L * 1024L
         const val POST_UPLOAD_VIDEO_THUMB_ATTEMPTS = 5
         const val POST_UPLOAD_VIDEO_THUMB_RETRY_DELAY_MS = 6_000L
         const val POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS = 45_000L

@@ -87,9 +87,11 @@ fun GalleryThumbnailImage(
                     }
                 val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
                     item.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                val cloudVideoAggressive = item.kind == MediaKind.VIDEO && preferCloud
                 syncCoordinator?.ensureThumbnailCached(
                     item.canonicalPath,
                     preferCloudFirst = preferCloud,
+                    cloudVideoAggressive = cloudVideoAggressive,
                 )?.getOrNull()
                     ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
                     ?.let { return@withContext it }

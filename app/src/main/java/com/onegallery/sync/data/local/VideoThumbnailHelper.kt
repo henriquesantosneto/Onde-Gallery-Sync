@@ -52,6 +52,13 @@ object VideoThumbnailHelper {
         }) {
             return true
         }
+        return captureLenientFileToFile(source, destination)
+    }
+
+    /** MP4 parcial da nuvem — evita descartar frame por “preto” quando só há trecho do arquivo. */
+    fun captureLenientFileToFile(source: File, destination: File): Boolean {
+        if (!source.isFile || source.length() <= 0L) return false
+        destination.parentFile?.mkdirs()
         return captureToFileWithRetriever(destination, strictFrames = false) {
             it.setDataSource(source.absolutePath)
         }

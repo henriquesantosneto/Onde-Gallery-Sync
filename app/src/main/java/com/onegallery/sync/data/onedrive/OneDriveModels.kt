@@ -49,3 +49,22 @@ data class ParentReference(
     val name: String? = null,
     val path: String?,
 )
+
+/** Resposta de `GET .../items/{id}/thumbnails` (URLs pré-assinadas + fallback /content). */
+data class DriveItemThumbnailSetCollection(
+    val value: List<DriveItemThumbnailSet> = emptyList(),
+)
+
+data class DriveItemThumbnailSet(
+    val id: String? = null,
+    val large: ThumbnailSize? = null,
+    val medium: ThumbnailSize? = null,
+    val small: ThumbnailSize? = null,
+    val source: ThumbnailSize? = null,
+)
+
+data class ThumbnailSize(
+    val width: Int? = null,
+    val height: Int? = null,
+    val url: String? = null,
+)
