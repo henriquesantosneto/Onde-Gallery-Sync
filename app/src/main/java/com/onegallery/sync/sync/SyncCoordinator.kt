@@ -1679,12 +1679,22 @@ class SyncCoordinator(
         staging.delete()
         onProgress?.invoke(0L, null)
 
-        fun commitIfReady(): File? =
-            mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
+        fun commitIfReady(): File? {
+            if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
+                staging.delete()
+                return null
+            }
+            return mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
+        }
 
         localContentUri(row)?.let { uri ->
             val ok = if (isVideo) {
-                VideoThumbnailHelper.captureToFile(appContext, uri, staging)
+                VideoThumbnailHelper.captureToFile(
+                    appContext,
+                    uri,
+                    staging,
+                    localMediaId = row.localMediaId,
+                )
             } else {
                 cacheImageThumbnailFromUri(uri, staging)
             }
@@ -1693,6 +1703,27 @@ class SyncCoordinator(
                     syncPreferences.clearThumbnailFailure(canonicalPath)
                     onProgress?.invoke(1L, 1L)
                     return Result.success(file)
+                }
+            }
+        }
+
+        if (isVideo && row.localMediaId != null) {
+            val item = indexPassLocalItemsById[row.localMediaId]
+                ?: localMediaRepository.findById(row.localMediaId)
+            if (item != null) {
+                val temp = localMediaRepository.materializeToTempFile(item)
+                if (temp != null) {
+                    try {
+                        if (VideoThumbnailHelper.captureToFile(temp, staging)) {
+                            commitIfReady()?.let { file ->
+                                syncPreferences.clearThumbnailFailure(canonicalPath)
+                                onProgress?.invoke(1L, 1L)
+                                return Result.success(file)
+                            }
+                        }
+                    } finally {
+                        temp.delete()
+                    }
                 }
             }
         }
@@ -2110,7 +2141,12 @@ class SyncCoordinator(
     private fun localOriginalPresent(row: SyncMetadataEntity): Boolean {
         if (row.localReleasedForSpace) return false
         row.localMediaId?.let { id ->
-            if (localMediaRepository.contentUriForMediaId(id) != null) return true
+            val kind = if (GalleryMapper.isVideoFileName(row.displayName)) {
+                com.onegallery.sync.data.local.MediaKind.VIDEO
+            } else {
+                com.onegallery.sync.data.local.MediaKind.IMAGE
+            }
+            if (localMediaRepository.contentUriForMediaId(id, kind) != null) return true
         }
         row.localContentUri?.let { parsed ->
             val uri = Uri.parse(parsed)
@@ -2682,12 +2718,17 @@ class SyncCoordinator(
     }
 
     private fun localContentUri(row: SyncMetadataEntity): Uri? {
-        row.localMediaId?.let { id ->
-            localMediaRepository.contentUriForMediaId(id)?.let { return it }
-        }
         row.localContentUri?.let { parsed ->
             val uri = Uri.parse(parsed)
             if (mediaDeleteRequestRouter.uriExists(appContext, uri)) return uri
+        }
+        row.localMediaId?.let { id ->
+            val kind = if (GalleryMapper.isVideoFileName(row.displayName)) {
+                com.onegallery.sync.data.local.MediaKind.VIDEO
+            } else {
+                com.onegallery.sync.data.local.MediaKind.IMAGE
+            }
+            localMediaRepository.contentUriForMediaId(id, kind)?.let { return it }
         }
         return null
     }
@@ -3213,7 +3254,12 @@ class SyncCoordinator(
         val target = mediaCacheRepository.thumbFile(row.canonicalPath)
         localContentUri(row)?.let { uri ->
             val ok = if (GalleryMapper.isVideoFileName(row.displayName)) {
-                VideoThumbnailHelper.captureToFile(appContext, uri, target)
+                VideoThumbnailHelper.captureToFile(
+                    appContext,
+                    uri,
+                    target,
+                    localMediaId = row.localMediaId,
+                )
             } else {
                 cacheImageThumbnailFromUri(uri, target)
             }

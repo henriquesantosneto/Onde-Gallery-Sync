@@ -77,11 +77,16 @@ class LocalMediaRepository(private val context: Context) {
         return loadAllMedia().firstOrNull { it.id == mediaId }
     }
 
-    fun contentUriForMediaId(mediaId: Long): Uri? {
-        val imageUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
-        if (uriExists(imageUri)) return imageUri
-        val videoUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId)
-        if (uriExists(videoUri)) return videoUri
+    fun contentUriForMediaId(mediaId: Long, preferredKind: MediaKind? = null): Uri? {
+        val kinds = when (preferredKind) {
+            MediaKind.VIDEO -> listOf(MediaKind.VIDEO, MediaKind.IMAGE)
+            MediaKind.IMAGE -> listOf(MediaKind.IMAGE, MediaKind.VIDEO)
+            null -> listOf(MediaKind.IMAGE, MediaKind.VIDEO)
+        }
+        for (kind in kinds) {
+            val uri = ContentUris.withAppendedId(mediaCollectionUri(kind), mediaId)
+            if (uriExists(uri)) return uri
+        }
         return null
     }
 

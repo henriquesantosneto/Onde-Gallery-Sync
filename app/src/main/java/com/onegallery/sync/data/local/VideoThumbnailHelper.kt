@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import android.util.Size
 import androidx.core.graphics.scale
 import java.io.File
@@ -16,11 +17,11 @@ object VideoThumbnailHelper {
     private const val MAX_EDGE_PX = 512
     private const val JPEG_QUALITY = 85
     private const val LUMA_SAMPLE_EDGE = 16
-    /** Acima desta fração de pixels escuros, descarta o frame. */
-    private const val MOSTLY_BLACK_RATIO = 0.90f
-    private const val DARK_LUMA_THRESHOLD = 28.0
+    private const val MOSTLY_BLACK_RATIO = 0.92f
+    private const val DARK_LUMA_THRESHOLD = 22.0
 
     private val FRAME_TIMES_US = longArrayOf(
+        0L,
         500_000L,
         1_000_000L,
         2_000_000L,
@@ -32,48 +33,34 @@ object VideoThumbnailHelper {
         30_000_000L,
     )
 
-    fun captureToFile(context: Context, uri: Uri, destination: File): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            runCatching {
-                val bitmap = context.contentResolver.loadThumbnail(
-                    uri,
-                    Size(MAX_EDGE_PX, MAX_EDGE_PX),
-                    null,
-                )
-                if (isAcceptableFrame(bitmap)) {
-                    writeBitmap(destination, downscale(bitmap))
-                    return true
-                }
-            }
-        }
-        captureFromContentUri(context, uri)?.let { bitmap ->
-            writeBitmap(destination, downscale(bitmap))
-            return true
-        }
-        return captureToFileWithRetriever(destination) { it.setDataSource(context, uri) }
+    fun captureToFile(
+        context: Context,
+        uri: Uri,
+        destination: File,
+        localMediaId: Long? = null,
+    ): Boolean {
+        if (tryCaptureStrict(context, uri, destination, localMediaId)) return true
+        return tryCaptureLenient(context, uri, destination, localMediaId)
     }
 
     fun captureToFile(source: File, destination: File): Boolean {
         if (!source.isFile || source.length() <= 0L) return false
-        return captureToFileWithRetriever(destination) { it.setDataSource(source.absolutePath) }
+        if (captureToFileWithRetriever(destination, strictFrames = true) {
+            it.setDataSource(source.absolutePath)
+        }) {
+            return true
+        }
+        return captureToFileWithRetriever(destination, strictFrames = false) {
+            it.setDataSource(source.absolutePath)
+        }
     }
 
-    /** Miniatura JPEG já gravada — rejeita frames quase pretos commitados por versões antigas. */
+    /** JPEG em cache: só precisa ser decodificável (não reaplicar filtro de “preto”). */
     fun isAcceptableThumbnailFile(file: File): Boolean {
         if (!file.isFile || file.length() < 128L) return false
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
-        val sample = max(
-            1,
-            min(bounds.outWidth, bounds.outHeight) / LUMA_SAMPLE_EDGE,
-        )
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.RGB_565
-        }
-        val bitmap = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return false
-        return isAcceptableFrame(bitmap).also { bitmap.recycle() }
+        return bounds.outWidth > 0 && bounds.outHeight > 0
     }
 
     fun isAcceptableFrame(bitmap: Bitmap): Boolean {
@@ -86,14 +73,122 @@ object VideoThumbnailHelper {
         }
     }
 
+    private fun tryCaptureStrict(
+        context: Context,
+        uri: Uri,
+        destination: File,
+        localMediaId: Long?,
+    ): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                val bitmap = context.contentResolver.loadThumbnail(
+                    uri,
+                    Size(MAX_EDGE_PX, MAX_EDGE_PX),
+                    null,
+                )
+                if (isAcceptableFrame(bitmap)) {
+                    writeBitmap(destination, downscale(bitmap))
+                    return true
+                }
+                bitmap.recycle()
+            }
+        }
+        loadMediaStoreVideoThumbnail(context, localMediaId, strict = true)?.let { bitmap ->
+            if (writeBitmapIfValid(destination, bitmap, strict = true)) return true
+        }
+        captureFromContentUri(context, uri, strictFrames = true)?.let { bitmap ->
+            writeBitmap(destination, downscale(bitmap))
+            return destination.length() > 0L
+        }
+        return captureToFileWithRetriever(destination, strictFrames = true) {
+            it.setDataSource(context, uri)
+        }
+    }
+
+    private fun tryCaptureLenient(
+        context: Context,
+        uri: Uri,
+        destination: File,
+        localMediaId: Long?,
+    ): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                val bitmap = context.contentResolver.loadThumbnail(
+                    uri,
+                    Size(MAX_EDGE_PX, MAX_EDGE_PX),
+                    null,
+                )
+                if (writeBitmapIfValid(destination, bitmap, strict = false)) return true
+            }
+        }
+        loadMediaStoreVideoThumbnail(context, localMediaId, strict = false)?.let { bitmap ->
+            if (writeBitmapIfValid(destination, bitmap, strict = false)) return true
+        }
+        captureFromContentUri(context, uri, strictFrames = false)?.let { bitmap ->
+            writeBitmap(destination, downscale(bitmap))
+            return destination.length() > 0L
+        }
+        return captureToFileWithRetriever(destination, strictFrames = false) {
+            it.setDataSource(context, uri)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadMediaStoreVideoThumbnail(
+        context: Context,
+        localMediaId: Long?,
+        strict: Boolean,
+    ): Bitmap? {
+        if (localMediaId == null) return null
+        val kinds = intArrayOf(
+            MediaStore.Video.Thumbnails.MINI_KIND,
+            MediaStore.Video.Thumbnails.MICRO_KIND,
+            MediaStore.Video.Thumbnails.FULL_SCREEN_KIND,
+        )
+        for (kind in kinds) {
+            val bitmap = runCatching {
+                MediaStore.Video.Thumbnails.getThumbnail(
+                    context.contentResolver,
+                    localMediaId,
+                    kind,
+                    null,
+                )
+            }.getOrNull() ?: continue
+            if (bitmap.width > 0 && bitmap.height > 0) {
+                if (!strict || isAcceptableFrame(bitmap)) return bitmap
+                bitmap.recycle()
+            }
+        }
+        return null
+    }
+
+    private fun writeBitmapIfValid(
+        destination: File,
+        bitmap: Bitmap,
+        strict: Boolean,
+    ): Boolean {
+        if (bitmap.width <= 0 || bitmap.height <= 0) {
+            bitmap.recycle()
+            return false
+        }
+        if (strict && !isAcceptableFrame(bitmap)) {
+            bitmap.recycle()
+            return false
+        }
+        writeBitmap(destination, downscale(bitmap))
+        bitmap.recycle()
+        return destination.length() > 0L
+    }
+
     private inline fun captureToFileWithRetriever(
         destination: File,
+        strictFrames: Boolean,
         setSource: (MediaMetadataRetriever) -> Unit,
     ): Boolean {
         val retriever = MediaMetadataRetriever()
         return runCatching {
             setSource(retriever)
-            extractFrameBitmap(retriever)?.let { frame ->
+            extractFrameBitmap(retriever, strictFrames = strictFrames)?.let { frame ->
                 writeBitmap(destination, downscale(frame))
                 true
             } ?: false
@@ -102,10 +197,13 @@ object VideoThumbnailHelper {
         }
     }
 
-    private fun extractFrameBitmap(retriever: MediaMetadataRetriever): Bitmap? {
+    private fun extractFrameBitmap(
+        retriever: MediaMetadataRetriever,
+        strictFrames: Boolean,
+    ): Bitmap? {
         retriever.embeddedPicture?.takeIf { it.isNotEmpty() }?.let { bytes ->
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.takeIf { bmp ->
-                bmp.width > 0 && bmp.height > 0 && isAcceptableFrame(bmp)
+                bmp.width > 0 && bmp.height > 0 && (!strictFrames || isAcceptableFrame(bmp))
             }?.let { return it }
         }
         val durationUs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
@@ -113,15 +211,19 @@ object VideoThumbnailHelper {
             ?.times(1_000L)
             ?: 0L
         val times = buildFrameTimesUs(durationUs)
+        var fallback: Bitmap? = null
         for (timeUs in times) {
             val frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
-            if (frame != null && frame.width > 0 && frame.height > 0 && isAcceptableFrame(frame)) {
-                return frame
+            if (frame == null || frame.width <= 0 || frame.height <= 0) {
+                frame?.recycle()
+                continue
             }
-            frame?.recycle()
+            if (!strictFrames) return frame
+            if (isAcceptableFrame(frame)) return frame
+            if (fallback == null) fallback = frame else frame.recycle()
         }
-        return null
+        return fallback
     }
 
     private fun buildFrameTimesUs(durationUs: Long): LongArray {
@@ -159,27 +261,38 @@ object VideoThumbnailHelper {
         return dark.toFloat() / total.toFloat() >= MOSTLY_BLACK_RATIO
     }
 
-    fun captureFromContentUri(context: Context, uri: Uri): Bitmap? {
+    fun captureFromContentUri(
+        context: Context,
+        uri: Uri,
+        strictFrames: Boolean = true,
+    ): Bitmap? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
                 val thumb = context.contentResolver.loadThumbnail(uri, Size(MAX_EDGE_PX, MAX_EDGE_PX), null)
-                if (isAcceptableFrame(thumb)) return thumb
+                if (!strictFrames || isAcceptableFrame(thumb)) return thumb
                 thumb.recycle()
             }
         }
         val retriever = MediaMetadataRetriever()
         return runCatching {
             retriever.setDataSource(context, uri)
-            extractFrameBitmap(retriever)?.let(::downscale)
+            extractFrameBitmap(retriever, strictFrames = strictFrames)?.let(::downscale)
         }.getOrNull().also {
             runCatching { retriever.release() }
         }
     }
 
+    private const val MIN_WRITE_EDGE_PX = 128
+
     private fun downscale(source: Bitmap): Bitmap {
         val max = maxOf(source.width, source.height)
-        if (max <= MAX_EDGE_PX) return source
-        val scale = MAX_EDGE_PX.toFloat() / max
+        val targetMax = when {
+            max > MAX_EDGE_PX -> MAX_EDGE_PX
+            max < MIN_WRITE_EDGE_PX -> MIN_WRITE_EDGE_PX
+            else -> max
+        }
+        if (targetMax == max) return source
+        val scale = targetMax.toFloat() / max
         val w = (source.width * scale).toInt().coerceAtLeast(1)
         val h = (source.height * scale).toInt().coerceAtLeast(1)
         return source.scale(w, h)
