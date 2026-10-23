@@ -1653,89 +1653,10 @@ class SyncCoordinator(
 
         val itemId = row.oneDriveItemId
         if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
-            var thumbReady = false
-            oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-                thumbReady = acceptDownloadedCloudThumbnail(staging, isVideo)
-                if (!thumbReady) staging.delete()
-            }
-            if (!thumbReady) {
-                val partial = File(staging.absolutePath + ".partial")
-                partial.delete()
-                val remoteSize = row.remoteSizeBytes?.takeIf { it > 0L }
-                val prefixBytes = if (isVideo) 12L * 1024L * 1024L else 4L * 1024L * 1024L
-                oneDriveRepository.downloadImagePrefixForThumbnail(
-                    itemId,
-                    partial,
-                    maxBytes = prefixBytes,
-                    onProgress = onProgress,
-                ).onSuccess {
-                    if (partial.isFile && partial.length() > 0L) {
-                        thumbReady = if (isVideo) {
-                            VideoThumbnailHelper.captureToFile(partial, staging)
-                        } else {
-                            cacheImageThumbnailFromUri(Uri.fromFile(partial), staging) ||
-                                reencodeFileToDisplayableThumbnail(partial, staging)
-                        }
-                    }
-                }
-                if (!thumbReady && !isVideo) {
-                    val tail = File(staging.absolutePath + ".partial.imgtail")
-                    tail.delete()
-                    oneDriveRepository.downloadFileSuffixForThumbnail(
-                        itemId,
-                        tail,
-                        maxBytes = 2L * 1024L * 1024L,
-                        knownSizeBytes = remoteSize,
-                        onProgress = onProgress,
-                    ).onSuccess {
-                        if (tail.isFile && tail.length() > 0L) {
-                            thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(tail), staging) ||
-                                reencodeFileToDisplayableThumbnail(tail, staging)
-                        }
-                    }
-                    tail.delete()
-                }
-                if (!thumbReady && isVideo) {
-                    val tail = File(staging.absolutePath + ".partial.tail")
-                    tail.delete()
-                    oneDriveRepository.downloadFileSuffixForThumbnail(
-                        itemId,
-                        tail,
-                        knownSizeBytes = remoteSize,
-                        onProgress = onProgress,
-                    ).onSuccess {
-                        if (tail.isFile && tail.length() > 0L) {
-                            thumbReady = VideoThumbnailHelper.captureToFile(tail, staging)
-                        }
-                    }
-                    tail.delete()
-                }
-                if (!thumbReady && isVideo) {
-                    val sample = File(staging.absolutePath + ".partial.sample")
-                    sample.delete()
-                    val sampleMaxBytes = when {
-                        remoteSize == null -> VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES
-                        remoteSize <= VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES -> remoteSize
-                        else -> VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES
-                    }
-                    oneDriveRepository.downloadCappedContentForVideoThumbnail(
-                        itemId,
-                        sample,
-                        maxBytes = sampleMaxBytes,
-                        knownSizeBytes = remoteSize,
-                        onProgress = onProgress,
-                    ).onSuccess {
-                        if (sample.isFile && sample.length() > 0L) {
-                            thumbReady = VideoThumbnailHelper.captureToFile(sample, staging)
-                        }
-                    }
-                    sample.delete()
-                }
-                partial.delete()
-            }
-            if (thumbReady && isVideo && !VideoThumbnailHelper.isAcceptableThumbnailFile(staging)) {
-                thumbReady = false
-                staging.delete()
+            val thumbReady = if (isVideo) {
+                fetchCloudVideoNativeThumbnail(itemId, staging, onProgress)
+            } else {
+                fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)
             }
             if (thumbReady) {
                 commitIfReady()?.let {
@@ -1748,12 +1669,76 @@ class SyncCoordinator(
         staging.delete()
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
         if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
-            persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(placeholder)
+            if (!isVideo) {
+                persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
+                    syncPreferences.clearThumbnailFailure(canonicalPath)
+                    return Result.success(placeholder)
+                }
             }
         }
         return Result.success(null)
+    }
+
+    /** Vídeo na nuvem: só miniatura nativa do Graph (large/medium) — sem baixar trechos do MP4. */
+    private suspend fun fetchCloudVideoNativeThumbnail(
+        itemId: String,
+        staging: File,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+    ): Boolean {
+        staging.delete()
+        var ready = false
+        oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
+            ready = acceptDownloadedCloudThumbnail(staging, isVideo = true)
+            if (!ready) staging.delete()
+        }
+        return ready
+    }
+
+    private suspend fun fetchCloudImageThumbnail(
+        itemId: String,
+        staging: File,
+        remoteSizeBytes: Long?,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+    ): Boolean {
+        var thumbReady = false
+        oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
+            thumbReady = acceptDownloadedCloudThumbnail(staging, isVideo = false)
+            if (!thumbReady) staging.delete()
+        }
+        if (thumbReady) return true
+        val partial = File(staging.absolutePath + ".partial")
+        partial.delete()
+        val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
+        oneDriveRepository.downloadImagePrefixForThumbnail(
+            itemId,
+            partial,
+            maxBytes = 4L * 1024L * 1024L,
+            onProgress = onProgress,
+        ).onSuccess {
+            if (partial.isFile && partial.length() > 0L) {
+                thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(partial), staging) ||
+                    reencodeFileToDisplayableThumbnail(partial, staging)
+            }
+        }
+        if (!thumbReady) {
+            val tail = File(staging.absolutePath + ".partial.imgtail")
+            tail.delete()
+            oneDriveRepository.downloadFileSuffixForThumbnail(
+                itemId,
+                tail,
+                maxBytes = 2L * 1024L * 1024L,
+                knownSizeBytes = remoteSize,
+                onProgress = onProgress,
+            ).onSuccess {
+                if (tail.isFile && tail.length() > 0L) {
+                    thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(tail), staging) ||
+                        reencodeFileToDisplayableThumbnail(tail, staging)
+                }
+            }
+            tail.delete()
+        }
+        partial.delete()
+        return thumbReady
     }
 
     private fun isStagingDisplayableThumbnail(staging: File): Boolean {
@@ -3823,6 +3808,7 @@ class SyncCoordinator(
     /** Itens que a nuvem não decodifica ficam com placeholder — encerra o pós-sync. */
     private suspend fun forcePlaceholderForStubbornMissingThumbnails() {
         val stubborn = buildMissingThumbnailEntities(maxPerRun = THUMB_STUBBORN_PLACEHOLDER_CAP)
+            .filter { !GalleryMapper.isVideoFileName(it.displayName) }
         if (stubborn.isEmpty()) return
         stubborn.forEach { row ->
             persistMinimalPlaceholderThumbnail(row)
@@ -4558,8 +4544,6 @@ class SyncCoordinator(
         const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 5
         const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 5
-        /** Vídeos só na nuvem: baixa até este tamanho antes de desistir (moov no fim / faststart). */
-        const val VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES = 48L * 1024L * 1024L
         /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
         const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 120_000L
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
