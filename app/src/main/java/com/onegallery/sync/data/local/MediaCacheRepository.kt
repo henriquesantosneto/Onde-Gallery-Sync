@@ -139,6 +139,7 @@ class MediaCacheRepository(context: Context) {
     ): File? {
         val file = thumbnailIfCached(canonicalPath, oneDriveItemId) ?: return null
         if (isSyncStubPlaceholderThumbnail(file)) return null
+        if (isSyncFailurePlaceholderThumbnail(file)) return null
         return file.takeIf { isDisplayableGalleryThumb(it) }
     }
 
@@ -153,12 +154,30 @@ class MediaCacheRepository(context: Context) {
         return file.takeIf { VideoThumbnailHelper.isAcceptableThumbnailFile(it) }
     }
 
+    /** Miniatura em disco incluindo cinza 96×96 (estatísticas / fila). */
+    fun committedThumbnailIncludingGiveUp(
+        canonicalPath: String,
+        oneDriveItemId: String? = null,
+    ): File? {
+        val file = thumbnailIfCached(canonicalPath, oneDriveItemId) ?: return null
+        if (isSyncStubPlaceholderThumbnail(file)) return null
+        return file.takeIf { isDisplayableGalleryThumb(it) }
+    }
+
     /** Placeholder cinza de sync (32×32) — não conta como miniatura real. */
     fun isSyncStubPlaceholderThumbnail(file: File): Boolean {
         if (!file.isFile || file.length() <= 0L) return false
         if (file.length() > SYNC_STUB_PLACEHOLDER_MAX_BYTES) return false
         val (w, h) = decodeBounds(file) ?: return false
         return w == MIN_DISPLAYABLE_THUMB_EDGE_PX && h == MIN_DISPLAYABLE_THUMB_EDGE_PX
+    }
+
+    /** Cinza 96×96 após desistência de prefetch — não substitui foto ainda no aparelho. */
+    fun isSyncFailurePlaceholderThumbnail(file: File): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        if (isSyncStubPlaceholderThumbnail(file)) return false
+        val (w, h) = decodeBounds(file) ?: return false
+        return w == SYNC_FAILURE_PLACEHOLDER_EDGE_PX && h == SYNC_FAILURE_PLACEHOLDER_EDGE_PX
     }
 
     private fun rememberThumbOnDisk(canonicalPath: String, file: File) {

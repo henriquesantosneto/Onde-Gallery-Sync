@@ -1361,6 +1361,7 @@ class GalleryViewModel(
         ) {
             return false
         }
+        if (!isVideo && item.localUri != null) return false
         if (item.oneDriveItemId != null) return true
         if (item.localMediaId != null) return true
         if (item.localUri != null) return true

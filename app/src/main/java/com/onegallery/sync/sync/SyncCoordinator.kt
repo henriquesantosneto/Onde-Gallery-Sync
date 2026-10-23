@@ -1772,6 +1772,16 @@ class SyncCoordinator(
         }
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         val hasLocalSource = localContentUri(row) != null
+        if (!isVideo && hasLocalSource) {
+            mediaCacheRepository.committedThumbnailIncludingGiveUp(
+                row.canonicalPath,
+                row.oneDriveItemId,
+            )?.let { cached ->
+                if (mediaCacheRepository.isSyncFailurePlaceholderThumbnail(cached)) {
+                    mediaCacheRepository.invalidateCommittedThumbnail(row.canonicalPath, row.oneDriveItemId)
+                }
+            }
+        }
         val syncedOnGraph = !row.oneDriveItemId.isNullOrBlank() &&
             syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
         val cloudEligible = syncedOnGraph && networkMonitor.isOnline()
@@ -1957,6 +1967,10 @@ class SyncCoordinator(
 
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
         if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
+            if (!isVideo && hasLocalSource) {
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(null)
+            }
             persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
                 syncPreferences.clearThumbnailFailure(canonicalPath)
                 return Result.success(placeholder)
@@ -3193,11 +3207,20 @@ class SyncCoordinator(
 
     private fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean {
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
-        return mediaCacheRepository.galleryThumbnailResolved(
-            row.canonicalPath,
-            row.oneDriveItemId,
-            requireVideoAcceptable = isVideo,
-        ) != null
+        if (
+            mediaCacheRepository.galleryThumbnailResolved(
+                row.canonicalPath,
+                row.oneDriveItemId,
+                requireVideoAcceptable = isVideo,
+            ) != null
+        ) {
+            return true
+        }
+        // Fotos no aparelho: preview via MediaStore — não exige JPEG no cache.
+        if (!isVideo && hasLocalThumbnailSource(row) && localContentUri(row) != null) {
+            return true
+        }
+        return false
     }
 
     private fun rowNeedsThumbnailPrefetch(row: SyncMetadataEntity): Boolean {
@@ -4567,6 +4590,9 @@ class SyncCoordinator(
         val stubborn = syncMetadataDao.getAll()
             .asSequence()
             .filter { row -> rowNeedsThumbnailPrefetch(row) }
+            .filter { row ->
+                GalleryMapper.isVideoFileName(row.displayName) || !hasLocalThumbnailSource(row)
+            }
             .sortedWith(missingThumbnailPrefetchComparator)
             .take(maxItems)
             .toList()

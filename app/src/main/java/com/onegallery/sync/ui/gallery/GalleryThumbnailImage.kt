@@ -60,7 +60,7 @@ fun GalleryThumbnailImage(
     }
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
-        if (displayData != null) {
+        if (displayData != null && !isStaleThumbnailDisplayData(item, displayData, mediaCacheRepository)) {
             resolvingThumb = false
             return@LaunchedEffect
         }
@@ -150,10 +150,23 @@ fun GalleryThumbnailImage(
     }
 }
 
+private fun isStaleThumbnailDisplayData(
+    item: GalleryDisplayItem,
+    displayData: Any?,
+    mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
+): Boolean {
+    val file = displayData as? java.io.File ?: return false
+    if (!mediaCacheRepository.isSyncFailurePlaceholderThumbnail(file)) return false
+    return item.localUri != null && item.kind != MediaKind.VIDEO
+}
+
 private fun initialThumbnailDisplayData(
     item: GalleryDisplayItem,
     mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
 ): Any? {
+    item.localUri?.let { uri ->
+        if (item.kind != MediaKind.VIDEO) return uri
+    }
     mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)?.let { cached ->
         if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
             mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
@@ -164,9 +177,6 @@ private fun initialThumbnailDisplayData(
     val thumb = item.cachedPlaceholderThumb
     if (thumb != null && mediaCacheRepository.isDisplayableGalleryThumbFile(thumb)) {
         return thumb
-    }
-    item.localUri?.let { uri ->
-        if (item.kind != MediaKind.VIDEO) return uri
     }
     if (item.kind == MediaKind.VIDEO) {
         return null
