@@ -9,6 +9,7 @@ import coil.fetch.SourceResult
 import coil.request.Options
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.VideoThumbnailHelper
+import com.onegallery.sync.data.onedrive.CloudThumbnailStaging
 import com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader
 import okio.Path.Companion.toOkioPath
 import java.io.File
@@ -50,10 +51,18 @@ class OneDriveCloudThumbnailFetcher(
             staging.delete()
             error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
         }
+        val fromGraphPoster = loaded == CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
+        val displayFile = CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
+            staging,
+            app.mediaCacheRepository,
+            key.canonicalPath,
+            key.oneDriveItemId,
+            fromGraphPoster,
+        ) ?: staging
         return SourceResult(
-            source = ImageSource(file = staging.toOkioPath()),
+            source = ImageSource(file = displayFile.toOkioPath()),
             mimeType = "image/jpeg",
-            dataSource = DataSource.NETWORK,
+            dataSource = if (fromGraphPoster) DataSource.NETWORK else DataSource.DISK,
         )
     }
 

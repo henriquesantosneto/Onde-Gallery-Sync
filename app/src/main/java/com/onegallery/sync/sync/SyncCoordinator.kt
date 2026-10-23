@@ -212,6 +212,7 @@ class SyncCoordinator(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
     private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
+    private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(ThumbnailPrefetchHostBridge())
     /** Retriever/loadThumbnail bloqueiam — no máximo 2 threads dedicadas na fila. */
     private val thumbnailPrefetchBlocking = Executors.newFixedThreadPool(2).asCoroutineDispatcher()
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
@@ -1831,6 +1832,15 @@ class SyncCoordinator(
         onProgress?.invoke(0L, null)
 
         fun commitIfReady(allowGraphVideoPoster: Boolean = false): File? {
+            if (isVideo) {
+                return CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
+                    staging,
+                    mediaCacheRepository,
+                    canonicalPath,
+                    row.oneDriveItemId,
+                    fromGraphPoster = allowGraphVideoPoster,
+                )
+            }
             if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
                 if (!CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
                         staging,
@@ -1838,15 +1848,6 @@ class SyncCoordinator(
                         mediaCacheRepository,
                     )
                 ) {
-                    staging.delete()
-                    return null
-                }
-            }
-            if (isVideo) {
-                val frameOk = VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
-                val posterOk = allowGraphVideoPoster &&
-                    VideoThumbnailHelper.isCloudPosterThumbnailFile(staging)
-                if (!frameOk && !posterOk) {
                     staging.delete()
                     return null
                 }
@@ -3896,7 +3897,11 @@ class SyncCoordinator(
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_GPS,
                     "Indexando localização (GPS)…",
-                    "Miniaturas em andamento ou concluídas — mapa e Locais.",
+                    if (thumbsStillMissing == 0) {
+                        "Miniaturas concluídas — mapa e Locais."
+                    } else {
+                        "~$thumbsStillMissing ainda sem JPEG no cache — mapa e Locais."
+                    },
                     alsoUpdateLastMessage = false,
                 )
                 backfillMissingGpsLocations()
@@ -4240,22 +4245,6 @@ class SyncCoordinator(
             !row.cachedFilePath.isNullOrBlank()
     }
 
-    /** Vídeo na nuvem precisa de mais tempo (Graph + amostra parcial) que JPEG local. */
-    private fun thumbPrefetchItemTimeoutMs(
-        row: SyncMetadataEntity,
-        cloudSourcesOnly: Boolean,
-        localSourcesOnly: Boolean,
-    ): Long {
-        when {
-            cloudSourcesOnly -> return CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS
-            localSourcesOnly && GalleryMapper.isVideoFileName(row.displayName) ->
-                return THUMB_PREFETCH_LOCAL_VIDEO_TIMEOUT_MS
-            GalleryMapper.isVideoFileName(row.displayName) ->
-                return THUMB_PREFETCH_VIDEO_TIMEOUT_MS
-        }
-        return THUMB_PREFETCH_ITEM_TIMEOUT_MS
-    }
-
     private suspend fun ensureAlbumCoverThumbnails() {
         ensureNotCancelled()
         val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
@@ -4488,148 +4477,15 @@ class SyncCoordinator(
         cloudSourcesOnly: Boolean = false,
         progressHeadline: String = "Completando cache da galeria…",
         publishUi: Boolean = true,
-    ): Int {
-        if (rows.isEmpty()) return 0
-        if (honorSyncCancel && syncCancelRequested.get()) return 0
-        val globalTotalAtStart = if (publishUi && shouldPublishSyncActivityUi()) {
-            publishFullPendingThumbnailQueueToUi().coerceAtLeast(rows.size)
-        } else {
-            rows.size
-        }
-        var total = 0
-        val chunks = rows.chunked(THUMB_PREFETCH_RUN_CHUNK)
-        chunks.forEachIndexed { index, chunk ->
-            if (honorSyncCancel && syncCancelRequested.get()) return total
-            total += runMissingThumbnailPrefetchChunk(
-                chunk,
-                honorSyncCancel,
-                parallelSlots,
-                localSourcesOnly,
-                cloudSourcesOnly,
-                progressHeadline,
-                publishUi,
-                globalTotalAtStart = globalTotalAtStart,
-                chunkIndex = index,
-                chunkCount = chunks.size,
-            )
-            if (publishUi && shouldPublishSyncActivityUi() && index < chunks.lastIndex) {
-                val remaining = missingThumbnailCountForProgress()
-                val done = (globalTotalAtStart - remaining).coerceIn(0, globalTotalAtStart)
-                setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    progressHeadline,
-                    "$done/$globalTotalAtStart · faltam ~$remaining · leva ${index + 1}/${chunks.size} ok · " +
-                        "preparando próxima…",
-                    alsoUpdateLastMessage = false,
-                )
-            }
-        }
-        return total
-    }
-
-    private suspend fun runMissingThumbnailPrefetchChunk(
-        rows: List<SyncMetadataEntity>,
-        honorSyncCancel: Boolean,
-        parallelSlots: Int,
-        localSourcesOnly: Boolean,
-        cloudSourcesOnly: Boolean,
-        progressHeadline: String,
-        publishUi: Boolean,
-        globalTotalAtStart: Int,
-        chunkIndex: Int,
-        chunkCount: Int,
-    ): Int {
-        if (rows.isEmpty()) return 0
-        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMB_PREFETCH)
-        val semaphore = Semaphore(slots)
-        val completed = AtomicInteger(0)
-        val cachedCount = AtomicInteger(0)
-        return supervisorScope {
-            rows.map { row ->
-                async {
-                    semaphore.withPermit {
-                        try {
-                            if (honorSyncCancel) {
-                                coroutineContext.ensureActive()
-                                ensureNotCancelled()
-                                ensureSyncMayContinue()
-                            }
-                            if (publishUi && shouldPublishSyncActivityUi()) {
-                                upsertActiveSyncItem(
-                                    ActiveSyncItem(
-                                        canonicalPath = row.canonicalPath,
-                                        displayName = row.displayName,
-                                        operationLabel = thumbnailOperationLabel(row),
-                                    ),
-                                    force = true,
-                                )
-                            }
-                            try {
-                                val itemTimeoutMs = thumbPrefetchItemTimeoutMs(
-                                    row,
-                                    cloudSourcesOnly,
-                                    localSourcesOnly,
-                                )
-                                withContext(thumbnailPrefetchBlocking) {
-                                    withTimeout(itemTimeoutMs) {
-                                        ensureThumbnailCached(
-                                            row.canonicalPath,
-                                            activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
-                                            lightweightPrefetch = !localSourcesOnly && !cloudSourcesOnly,
-                                            localSourcesOnly = localSourcesOnly,
-                                            cloudSourcesOnly = cloudSourcesOnly,
-                                            cloudVideoAggressive = cloudSourcesOnly &&
-                                                GalleryMapper.isVideoFileName(row.displayName),
-                                        )
-                                    }
-                                }
-                            } catch (_: TimeoutCancellationException) {
-                                syncPreferences.incrementThumbnailFailure(row.canonicalPath)
-                            }
-                            var hit = rowHasGalleryThumbnail(row)
-                            if (!hit) {
-                                thumbPrefetchAttemptsThisSession.merge(
-                                    row.canonicalPath,
-                                    1,
-                                ) { left, _ -> left + 1 }
-                            } else {
-                                thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
-                            }
-                            if (hit) cachedCount.incrementAndGet()
-                            val done = completed.incrementAndGet()
-                            if (publishUi && shouldPublishSyncActivityUi() &&
-                                (done % 8 == 0 || done == rows.size)
-                            ) {
-                                val remaining = missingThumbnailCountForProgress()
-                                val globalDone = (globalTotalAtStart - remaining).coerceIn(0, globalTotalAtStart)
-                                setSyncProgress(
-                                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                                    progressHeadline,
-                                    "$globalDone/$globalTotalAtStart · faltam ~$remaining · " +
-                                        "${cachedCount.get()} JPEG nesta leva · " +
-                                        "leva ${chunkIndex + 1}/$chunkCount ($done/${rows.size}) · " +
-                                        "até $slots em paralelo. " +
-                                        thumbnailPrefetchProgressDetailSuffix(
-                                            localSourcesOnly,
-                                            cloudSourcesOnly,
-                                        ),
-                                    alsoUpdateLastMessage = false,
-                                )
-                            }
-                            if (hit) 1 else 0
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Throwable) {
-                            0
-                        } finally {
-                            removeActiveSyncItem(row.canonicalPath)
-                            removeFromRunQueue(row.canonicalPath)
-                        }
-                    }
-                }
-            }.awaitAll().sum()
-        }
-    }
+    ): Int = thumbnailPrefetchRunner.runMissingThumbnailPrefetch(
+        rows = rows,
+        honorSyncCancel = honorSyncCancel,
+        parallelSlots = parallelSlots,
+        localSourcesOnly = localSourcesOnly,
+        cloudSourcesOnly = cloudSourcesOnly,
+        progressHeadline = progressHeadline,
+        publishUi = publishUi,
+    )
 
     private suspend fun backfillMissingGpsLocations(
         maxRounds: Int = GPS_BACKFILL_ROUNDS,
@@ -5300,6 +5156,94 @@ class SyncCoordinator(
                 backend.deleteRemoteItem(remoteId)
             }
             SyncMode.LOCAL_ONLY -> Result.success(Unit)
+        }
+    }
+
+    private inner class ThumbnailPrefetchHostBridge : ThumbnailPrefetchHost {
+        override val thumbnailPrefetchBlocking get() = this@SyncCoordinator.thumbnailPrefetchBlocking
+
+        override fun isSyncCancelRequested(): Boolean = syncCancelRequested.get()
+
+        override suspend fun ensureNotCancelled() = this@SyncCoordinator.ensureNotCancelled()
+
+        override suspend fun ensureSyncMayContinue() = this@SyncCoordinator.ensureSyncMayContinue()
+
+        override fun shouldPublishSyncActivityUi(): Boolean =
+            this@SyncCoordinator.shouldPublishSyncActivityUi()
+
+        override suspend fun publishFullPendingThumbnailQueueToUi(): Int =
+            this@SyncCoordinator.publishFullPendingThumbnailQueueToUi()
+
+        override fun upsertActiveSyncItem(item: ActiveSyncItem, force: Boolean) {
+            this@SyncCoordinator.upsertActiveSyncItem(item, force)
+        }
+
+        override fun removeActiveSyncItem(canonicalPath: String) {
+            this@SyncCoordinator.removeActiveSyncItem(canonicalPath)
+        }
+
+        override fun removeFromRunQueue(canonicalPath: String) {
+            this@SyncCoordinator.removeFromRunQueue(canonicalPath)
+        }
+
+        override suspend fun setSyncProgress(
+            phase: SyncProgressPhase,
+            headline: String,
+            detail: String,
+            alsoUpdateLastMessage: Boolean,
+        ) {
+            this@SyncCoordinator.setSyncProgress(phase, headline, detail, alsoUpdateLastMessage)
+        }
+
+        override suspend fun missingThumbnailCountForProgress(): Int =
+            this@SyncCoordinator.missingThumbnailCountForProgress()
+
+        override fun thumbnailOperationLabel(row: SyncMetadataEntity): String =
+            this@SyncCoordinator.thumbnailOperationLabel(row)
+
+        override fun activeSyncProgressCallback(
+            row: SyncMetadataEntity,
+            operationLabel: String,
+        ): ((Long, Long?) -> Unit)? =
+            this@SyncCoordinator.activeSyncProgressCallback(row, operationLabel)
+
+        override fun thumbnailPrefetchProgressDetailSuffix(
+            localSourcesOnly: Boolean,
+            cloudSourcesOnly: Boolean,
+        ): String = this@SyncCoordinator.thumbnailPrefetchProgressDetailSuffix(
+            localSourcesOnly,
+            cloudSourcesOnly,
+        )
+
+        override suspend fun ensureThumbnailCached(
+            canonicalPath: String,
+            onProgress: ((Long, Long?) -> Unit)?,
+            lightweightPrefetch: Boolean,
+            localSourcesOnly: Boolean,
+            cloudSourcesOnly: Boolean,
+            cloudVideoAggressive: Boolean,
+        ): Result<File?> = this@SyncCoordinator.ensureThumbnailCached(
+            canonicalPath,
+            onProgress,
+            lightweightPrefetch = lightweightPrefetch,
+            localSourcesOnly = localSourcesOnly,
+            cloudSourcesOnly = cloudSourcesOnly,
+            cloudVideoAggressive = cloudVideoAggressive,
+        )
+
+        override fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean =
+            this@SyncCoordinator.rowHasGalleryThumbnail(row)
+
+        override fun incrementThumbnailFailure(canonicalPath: String) {
+            syncPreferences.incrementThumbnailFailure(canonicalPath)
+        }
+
+        override fun recordThumbPrefetchAttempt(canonicalPath: String) {
+            thumbPrefetchAttemptsThisSession.merge(canonicalPath, 1) { left, _ -> left + 1 }
+        }
+
+        override fun clearThumbPrefetchAttempt(canonicalPath: String) {
+            thumbPrefetchAttemptsThisSession.remove(canonicalPath)
         }
     }
 

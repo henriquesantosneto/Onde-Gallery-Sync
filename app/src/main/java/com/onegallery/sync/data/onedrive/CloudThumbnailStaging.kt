@@ -96,6 +96,32 @@ object CloudThumbnailStaging {
             mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
     }
 
+    /**
+     * Valida e grava miniatura de vídeo (poster Graph ou frame extraído).
+     * @return arquivo commitado ou null se inválido.
+     */
+    fun commitGalleryVideoThumbnailIfValid(
+        staging: File,
+        mediaCacheRepository: MediaCacheRepository,
+        canonicalPath: String,
+        oneDriveItemId: String?,
+        fromGraphPoster: Boolean,
+    ): File? {
+        if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
+            if (!reencodeFileToDisplayableThumbnail(staging, staging, mediaCacheRepository)) {
+                staging.delete()
+                return null
+            }
+        }
+        val frameOk = VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
+        val posterOk = fromGraphPoster && VideoThumbnailHelper.isCloudPosterThumbnailFile(staging)
+        if (!frameOk && !posterOk) {
+            staging.delete()
+            return null
+        }
+        return mediaCacheRepository.commitThumbnail(staging, canonicalPath, oneDriveItemId)
+    }
+
     fun thumbnailInSampleSize(width: Int, height: Int, maxSidePx: Int): Int {
         var sample = 1
         while (width / sample > maxSidePx || height / sample > maxSidePx) {
