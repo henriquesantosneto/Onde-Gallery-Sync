@@ -1629,11 +1629,17 @@ class SyncCoordinator(
         canonicalPath: String,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
         preferCloudFirst: Boolean = false,
+        lightweightPrefetch: Boolean = false,
     ): Result<File?> {
         val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
         return mutex.withLock {
             withContext(Dispatchers.IO) {
-                ensureThumbnailCachedOnIo(canonicalPath, onProgress, preferCloudFirst)
+                ensureThumbnailCachedOnIo(
+                    canonicalPath,
+                    onProgress,
+                    preferCloudFirst,
+                    lightweightPrefetch,
+                )
             }
         }
     }
@@ -1662,6 +1668,7 @@ class SyncCoordinator(
         canonicalPath: String,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
         preferCloudFirst: Boolean = false,
+        lightweightPrefetch: Boolean = false,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
@@ -1755,7 +1762,7 @@ class SyncCoordinator(
                 }
             }
 
-            if (isVideo && row.localMediaId != null) {
+            if (!lightweightPrefetch && isVideo && row.localMediaId != null) {
                 val item = indexPassLocalItemsById[row.localMediaId]
                     ?: localMediaRepository.findById(row.localMediaId)
                 if (item != null) {
@@ -2941,12 +2948,19 @@ class SyncCoordinator(
         }
     }
 
+    private suspend fun warmLocalItemsForThumbnailPass() {
+        if (indexPassLocalItemsById.isNotEmpty()) return
+        indexPassLocalItemsById = localMediaRepository.loadLocalGallerySnapshot().associateBy { it.id }
+    }
+
     private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
         val missing = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
                 mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
-                    rowCanBuildThumbnail(row)
+                    rowCanBuildThumbnail(row) &&
+                    (thumbPrefetchAttemptsThisSession[row.canonicalPath] ?: 0) <
+                    THUMB_PREFETCH_MAX_SESSION_ATTEMPTS
             }
             .sortedWith(missingThumbnailPrefetchComparator)
             .toList()
@@ -3837,6 +3851,7 @@ class SyncCoordinator(
             .take(maxPerRun)
             .toList()
         if (rows.isEmpty()) return
+        warmLocalItemsForThumbnailPass()
         if (showProgress) {
             val videoCount = rows.count { GalleryMapper.isVideoFileName(it.displayName) }
             setSyncProgress(
@@ -3939,6 +3954,7 @@ class SyncCoordinator(
     ) {
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
+        warmLocalItemsForThumbnailPass()
         bulkThumbnailPrefetchDepth.incrementAndGet()
         refreshThumbnailPrefetchUiFlag()
         var totalCached = 0
@@ -4053,6 +4069,19 @@ class SyncCoordinator(
         parallelSlots: Int = PARALLEL_THUMBNAILS,
     ): Int {
         if (rows.isEmpty()) return 0
+        var total = 0
+        for (chunk in rows.chunked(THUMB_PREFETCH_RUN_CHUNK)) {
+            total += runMissingThumbnailPrefetchChunk(chunk, honorSyncCancel, parallelSlots)
+        }
+        return total
+    }
+
+    private suspend fun runMissingThumbnailPrefetchChunk(
+        rows: List<SyncMetadataEntity>,
+        honorSyncCancel: Boolean,
+        parallelSlots: Int,
+    ): Int {
+        if (rows.isEmpty()) return 0
         val slots = parallelSlots.coerceIn(1, PARALLEL_THUMBNAILS)
         val semaphore = Semaphore(slots)
         val completed = AtomicInteger(0)
@@ -4082,6 +4111,7 @@ class SyncCoordinator(
                                     ensureThumbnailCached(
                                         row.canonicalPath,
                                         activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
+                                        lightweightPrefetch = true,
                                     )
                                 }
                             } catch (_: TimeoutCancellationException) {
@@ -4101,14 +4131,12 @@ class SyncCoordinator(
                             }
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
-                            if (shouldPublishSyncActivityUi() &&
-                                (done == rows.size || done == 1 || done % 4 == 0)
-                            ) {
+                            if (shouldPublishSyncActivityUi()) {
                                 setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                                     "Gerando e baixando miniaturas…",
                                     "$done/${rows.size} nesta leva · " +
-                                        "${cachedCount.get()} salvas em cache · " +
+                                        "${cachedCount.get()} salvas · " +
                                         "até $slots em paralelo.",
                                     alsoUpdateLastMessage = false,
                                 )
@@ -4792,7 +4820,11 @@ class SyncCoordinator(
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
         const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
         /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
-        const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 120_000L
+        const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 45_000L
+        /** Evita milhares de coroutines e fila “congelada” após os primeiros itens. */
+        const val THUMB_PREFETCH_RUN_CHUNK = 32
+        /** Depois disso o item sai da leva nesta sessão (grade tenta de novo sob demanda). */
+        const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 3
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
