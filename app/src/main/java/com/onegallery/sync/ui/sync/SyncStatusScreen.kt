@@ -262,7 +262,7 @@ fun SyncStatusScreen(
                 if (showLiveActivity && queueTotal > 0) {
                     SectionTitle(
                         if (coordinatorState.prefetchingThumbnails) {
-                            "Fila desta execução ($queueTotal pendente(s))"
+                            "Miniaturas pendentes no índice ($queueTotal)"
                         } else {
                             "Fila de sincronismo ($queueTotal pendente(s))"
                         },
