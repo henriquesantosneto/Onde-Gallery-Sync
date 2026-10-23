@@ -1652,12 +1652,17 @@ class SyncCoordinator(
         if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
             var thumbReady = false
             oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-                if (staging.length() > 0L) thumbReady = true
+                if (isStagingDisplayableThumbnail(staging)) {
+                    thumbReady = true
+                } else {
+                    staging.delete()
+                }
             }
             if (!thumbReady) {
                 val partial = File(staging.absolutePath + ".partial")
                 partial.delete()
-                val prefixBytes = if (isVideo) 4L * 1024L * 1024L else 2L * 1024L * 1024L
+                val remoteSize = row.remoteSizeBytes?.takeIf { it > 0L }
+                val prefixBytes = if (isVideo) 12L * 1024L * 1024L else 2L * 1024L * 1024L
                 oneDriveRepository.downloadImagePrefixForThumbnail(
                     itemId,
                     partial,
@@ -1678,6 +1683,7 @@ class SyncCoordinator(
                     oneDriveRepository.downloadFileSuffixForThumbnail(
                         itemId,
                         tail,
+                        knownSizeBytes = remoteSize,
                         onProgress = onProgress,
                     ).onSuccess {
                         if (tail.isFile && tail.length() > 0L) {
@@ -1685,6 +1691,27 @@ class SyncCoordinator(
                         }
                     }
                     tail.delete()
+                }
+                if (!thumbReady && isVideo) {
+                    val sample = File(staging.absolutePath + ".partial.sample")
+                    sample.delete()
+                    val sampleMaxBytes = when {
+                        remoteSize == null -> VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES
+                        remoteSize <= VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES -> remoteSize
+                        else -> VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES
+                    }
+                    oneDriveRepository.downloadCappedContentForVideoThumbnail(
+                        itemId,
+                        sample,
+                        maxBytes = sampleMaxBytes,
+                        knownSizeBytes = remoteSize,
+                        onProgress = onProgress,
+                    ).onSuccess {
+                        if (sample.isFile && sample.length() > 0L) {
+                            thumbReady = VideoThumbnailHelper.captureToFile(sample, staging)
+                        }
+                    }
+                    sample.delete()
                 }
                 partial.delete()
             }
@@ -1697,13 +1724,20 @@ class SyncCoordinator(
             }
         }
         staging.delete()
-        if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= THUMB_MAX_FAILURE_ATTEMPTS) {
+        val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
+        if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
             persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
                 syncPreferences.clearThumbnailFailure(canonicalPath)
                 return Result.success(placeholder)
             }
         }
         return Result.success(null)
+    }
+
+    private fun isStagingDisplayableThumbnail(staging: File): Boolean {
+        return staging.isFile &&
+            staging.length() > 0L &&
+            mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
     }
 
     private suspend fun ensureGraphSessionOnMain(): Result<Unit> {
@@ -4456,6 +4490,9 @@ class SyncCoordinator(
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
         const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 2
+        const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 5
+        /** Vídeos só na nuvem: baixa até este tamanho antes de desistir (moov no fim / faststart). */
+        const val VIDEO_THUMB_CAPPED_DOWNLOAD_MAX_BYTES = 48L * 1024L * 1024L
         /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
         const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 120_000L
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64

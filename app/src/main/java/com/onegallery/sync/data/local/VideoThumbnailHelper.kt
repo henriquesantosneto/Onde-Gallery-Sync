@@ -2,6 +2,7 @@ package com.onegallery.sync.data.local
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -13,7 +14,15 @@ object VideoThumbnailHelper {
     private const val MAX_EDGE_PX = 512
     private const val JPEG_QUALITY = 85
     /** Vários instantes — frame 0 costuma falhar (preto / codec). */
-    private val FRAME_TIMES_US = longArrayOf(0L, 1_000_000L, 3_000_000L, 8_000_000L)
+    private val FRAME_TIMES_US = longArrayOf(
+        0L,
+        500_000L,
+        1_000_000L,
+        3_000_000L,
+        8_000_000L,
+        15_000_000L,
+        30_000_000L,
+    )
 
     fun captureToFile(context: Context, uri: Uri, destination: File): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -56,6 +65,11 @@ object VideoThumbnailHelper {
     }
 
     private fun extractFrameBitmap(retriever: MediaMetadataRetriever): Bitmap? {
+        retriever.embeddedPicture?.takeIf { it.isNotEmpty() }?.let { bytes ->
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.takeIf { bmp ->
+                bmp.width > 0 && bmp.height > 0
+            }?.let { return it }
+        }
         for (timeUs in FRAME_TIMES_US) {
             val frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)

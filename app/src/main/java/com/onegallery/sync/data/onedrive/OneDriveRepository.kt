@@ -605,22 +605,66 @@ class OneDriveRepository(
     suspend fun downloadFileSuffixForThumbnail(
         itemId: String,
         destination: File,
-        maxBytes: Long = 6L * 1024L * 1024L,
+        maxBytes: Long = 20L * 1024L * 1024L,
+        knownSizeBytes: Long? = null,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
     ): Result<Unit> {
         return runWithToken { token ->
             destination.parentFile?.mkdirs()
             val auth = "Bearer $token"
+            val size = knownSizeBytes?.takeIf { it > 0L }
+                ?: graphApi.getDriveItem(auth, itemId).size?.takeIf { it > 0L }
+            val rangeHeader = if (size != null) {
+                val tail = maxBytes.coerceAtMost(size)
+                val start = (size - tail).coerceAtLeast(0L)
+                "bytes=$start-${size - 1L}"
+            } else {
+                "bytes=-$maxBytes"
+            }
+            val hint = size?.let { minOf(maxBytes, it) } ?: maxBytes
             resumableTransfer.downloadByteRange(
                 authorization = auth,
                 itemId = itemId,
-                rangeHeader = "bytes=-$maxBytes",
+                rangeHeader = rangeHeader,
                 destination = destination,
-                totalBytesHint = maxBytes,
+                totalBytesHint = hint,
                 onProgress = onProgress,
             )
             if (!destination.isFile || destination.length() <= 0L) {
                 error("Sufixo vazio para miniatura de vídeo.")
+            }
+        }
+    }
+
+    /** Baixa até [maxBytes] do início (ou o arquivo inteiro se for menor) para decodificar frame de vídeo. */
+    suspend fun downloadCappedContentForVideoThumbnail(
+        itemId: String,
+        destination: File,
+        maxBytes: Long = 48L * 1024L * 1024L,
+        knownSizeBytes: Long? = null,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
+        return runWithToken { token ->
+            destination.parentFile?.mkdirs()
+            val auth = "Bearer $token"
+            val size = knownSizeBytes?.takeIf { it > 0L }
+                ?: graphApi.getDriveItem(auth, itemId).size?.takeIf { it > 0L }
+            val bytesToFetch = when {
+                size == null -> maxBytes
+                size <= maxBytes -> size
+                else -> maxBytes
+            }
+            val end = (bytesToFetch - 1L).coerceAtLeast(0L)
+            resumableTransfer.downloadByteRange(
+                authorization = auth,
+                itemId = itemId,
+                rangeHeader = "bytes=0-$end",
+                destination = destination,
+                totalBytesHint = bytesToFetch,
+                onProgress = onProgress,
+            )
+            if (!destination.isFile || destination.length() <= 0L) {
+                error("Amostra vazia para miniatura de vídeo.")
             }
         }
     }
