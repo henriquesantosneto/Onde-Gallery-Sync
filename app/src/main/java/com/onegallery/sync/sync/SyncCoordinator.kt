@@ -2004,118 +2004,24 @@ class SyncCoordinator(
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
         aggressive: Boolean = false,
     ): CloudVideoThumbSource {
-        staging.delete()
-        fun acceptCloudImageThumb(): Boolean {
-            return acceptDownloadedCloudVideoThumbnail(staging) ||
-                acceptDownloadedCloudThumbnail(staging, isVideo = false)
-        }
-        fun captureFromPartial(partial: File): Boolean {
-            if (!partial.isFile || partial.length() <= 0L) return false
-            staging.delete()
-            val ok = VideoThumbnailHelper.captureToFile(partial, staging) ||
-                VideoThumbnailHelper.captureLenientFileToFile(partial, staging)
-            if (!ok) {
-                staging.delete()
-                return false
-            }
-            if (!VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)) {
-                staging.delete()
-                return false
-            }
-            return mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
-        }
-
-        var graphPoster = false
-        oneDriveRepository.downloadBestListedThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            graphPoster = acceptCloudImageThumb()
-            if (!graphPoster) staging.delete()
-        }
-        if (graphPoster) return CloudVideoThumbSource.GRAPH_POSTER
-
-        oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            graphPoster = acceptCloudImageThumb()
-            if (!graphPoster) staging.delete()
-        }
-        if (graphPoster) return CloudVideoThumbSource.GRAPH_POSTER
-
-        val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
-            ?: oneDriveRepository.fetchItemSizeBytes(itemId)
-        val fullCap = if (aggressive) {
-            CLOUD_VIDEO_ON_DEMAND_FULL_FETCH_MAX_BYTES
-        } else {
-            CLOUD_VIDEO_FULL_FETCH_MAX_BYTES
-        }
-        val tailCap = if (aggressive) {
-            CLOUD_VIDEO_ON_DEMAND_TAIL_MAX_BYTES
-        } else {
-            CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES
-        }
-        if (remoteSize != null && remoteSize <= fullCap) {
-            val full = File(staging.absolutePath + ".partial.full")
-            full.delete()
-            var extracted = false
-            oneDriveRepository.downloadCappedContentForVideoThumbnail(
+        return when (
+            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.loadIntoFile(
+                oneDriveRepository,
+                mediaCacheRepository,
                 itemId,
-                full,
-                maxBytes = remoteSize,
-                knownSizeBytes = remoteSize,
-                onProgress = onProgress,
-            ).onSuccess {
-                extracted = captureFromPartial(full)
-            }
-            full.delete()
-            if (extracted) return CloudVideoThumbSource.EXTRACTED_FRAME
+                staging,
+                remoteSizeBytes,
+                aggressive,
+                onProgress,
+            )
+        ) {
+            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER ->
+                CloudVideoThumbSource.GRAPH_POSTER
+            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.Outcome.EXTRACTED_FRAME ->
+                CloudVideoThumbSource.EXTRACTED_FRAME
+            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.Outcome.NONE ->
+                CloudVideoThumbSource.NONE
         }
-
-        val tail = File(staging.absolutePath + ".partial.vidtail")
-        tail.delete()
-        var tailOk = false
-        oneDriveRepository.downloadFileSuffixForThumbnail(
-            itemId,
-            tail,
-            maxBytes = tailCap,
-            knownSizeBytes = remoteSize,
-            onProgress = onProgress,
-        ).onSuccess {
-            tailOk = captureFromPartial(tail)
-        }
-        tail.delete()
-        if (tailOk) return CloudVideoThumbSource.EXTRACTED_FRAME
-
-        val head = File(staging.absolutePath + ".partial.vidhead")
-        head.delete()
-        var headOk = false
-        oneDriveRepository.downloadCappedContentForVideoThumbnail(
-            itemId,
-            head,
-            maxBytes = CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES,
-            knownSizeBytes = remoteSize,
-            onProgress = onProgress,
-        ).onSuccess {
-            headOk = captureFromPartial(head)
-        }
-        head.delete()
-        if (headOk) return CloudVideoThumbSource.EXTRACTED_FRAME
-
-        if (remoteSize != null && remoteSize > CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES * 2L) {
-            val mid = File(staging.absolutePath + ".partial.vidmid")
-            mid.delete()
-            var midOk = false
-            oneDriveRepository.downloadMiddleRangeForVideoThumbnail(
-                itemId,
-                mid,
-                maxBytes = CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES,
-                knownSizeBytes = remoteSize,
-                onProgress = onProgress,
-            ).onSuccess {
-                midOk = captureFromPartial(mid)
-            }
-            mid.delete()
-            if (midOk) return CloudVideoThumbSource.EXTRACTED_FRAME
-        }
-
-        staging.delete()
-        return CloudVideoThumbSource.NONE
     }
 
     private suspend fun fetchCloudImageThumbnail(

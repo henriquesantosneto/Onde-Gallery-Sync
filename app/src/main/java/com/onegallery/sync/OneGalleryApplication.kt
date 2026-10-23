@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
+import com.onegallery.sync.ui.gallery.OneDriveCloudThumbnailFetcher
 import com.onegallery.sync.sync.MediaLibraryChangeWatcher
 import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.BuildConfig
@@ -113,6 +114,7 @@ class OneGalleryApplication : Application() {
             ImageLoader.Builder(this)
                 .components {
                     add(VideoFrameDecoder.Factory())
+                    add(OneDriveCloudThumbnailFetcher.Factory(this@OneGalleryApplication))
                 }
                 .crossfade(false)
                 .build(),

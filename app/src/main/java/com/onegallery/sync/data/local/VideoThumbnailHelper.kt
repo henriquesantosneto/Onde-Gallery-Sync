@@ -20,7 +20,7 @@ object VideoThumbnailHelper {
     private const val MOSTLY_BLACK_RATIO = 0.92f
     private const val DARK_LUMA_THRESHOLD = 22.0
     /** Poster Graph (OneDrive): não aplicar filtro de letterbox/preto de frame extraído. */
-    private const val CLOUD_POSTER_MIN_EDGE_PX = 100
+    private const val CLOUD_POSTER_MIN_EDGE_PX = 64
 
     private val FRAME_TIMES_US = longArrayOf(
         0L,
@@ -85,7 +85,17 @@ object VideoThumbnailHelper {
 
     /** Grade: frame extraído (filtro de preto) ou poster Graph. */
     fun isGalleryVideoThumbnailFile(file: File): Boolean {
+        if (isSyncGiveUpPlaceholderFile(file)) return false
         return isDisplayableVideoThumbnailFile(file) || isCloudPosterThumbnailFile(file)
+    }
+
+    /** Placeholder cinza 96×96 — não confundir com poster Graph pequeno. */
+    private fun isSyncGiveUpPlaceholderFile(file: File): Boolean {
+        if (!isAcceptableThumbnailFile(file)) return false
+        if (file.length() > 6_000L) return false
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        return bounds.outWidth == 96 && bounds.outHeight == 96
     }
 
     /** Grade / commit: descarta JPEG decodificável porém quase todo preto (comum em MP4 parcial na nuvem). */

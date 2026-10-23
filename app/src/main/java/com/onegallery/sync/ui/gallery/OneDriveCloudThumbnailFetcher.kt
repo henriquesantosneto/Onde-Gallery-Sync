@@ -1,0 +1,71 @@
+package com.onegallery.sync.ui.gallery
+
+import coil.ImageLoader
+import coil.decode.DataSource
+import coil.decode.ImageSource
+import coil.fetch.FetchResult
+import coil.fetch.Fetcher
+import coil.fetch.SourceResult
+import coil.request.Options
+import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.data.local.VideoThumbnailHelper
+import com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader
+import okio.Path.Companion.toOkioPath
+import java.io.File
+
+class OneDriveCloudThumbnailFetcher(
+    private val key: OneDriveCloudThumbnailKey,
+    private val app: OneGalleryApplication,
+) : Fetcher {
+
+    override suspend fun fetch(): FetchResult {
+        app.mediaCacheRepository.galleryThumbnailResolved(
+            key.canonicalPath,
+            key.oneDriveItemId,
+            requireVideoAcceptable = true,
+        )?.let { cached ->
+            return SourceResult(
+                source = ImageSource(file = cached.toOkioPath()),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK,
+            )
+        }
+        val staging = File(
+            app.cacheDir,
+            "coil-cloud-vid-${key.oneDriveItemId.hashCode()}.jpg",
+        )
+        staging.delete()
+        val loaded = CloudVideoThumbnailLoader.loadIntoFile(
+            repository = app.oneDriveRepository,
+            mediaCacheRepository = app.mediaCacheRepository,
+            itemId = key.oneDriveItemId,
+            staging = staging,
+            remoteSizeBytes = null,
+            aggressive = true,
+            onProgress = null,
+        )
+        if (loaded == CloudVideoThumbnailLoader.Outcome.NONE ||
+            !VideoThumbnailHelper.isGalleryVideoThumbnailFile(staging)
+        ) {
+            staging.delete()
+            error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
+        }
+        return SourceResult(
+            source = ImageSource(file = staging.toOkioPath()),
+            mimeType = "image/jpeg",
+            dataSource = DataSource.NETWORK,
+        )
+    }
+
+    class Factory(
+        private val app: OneGalleryApplication,
+    ) : Fetcher.Factory<OneDriveCloudThumbnailKey> {
+        override fun create(
+            data: OneDriveCloudThumbnailKey,
+            options: Options,
+            imageLoader: ImageLoader,
+        ): Fetcher {
+            return OneDriveCloudThumbnailFetcher(data, app)
+        }
+    }
+}
