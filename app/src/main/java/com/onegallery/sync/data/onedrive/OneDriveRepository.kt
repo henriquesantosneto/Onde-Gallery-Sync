@@ -570,6 +570,30 @@ class OneDriveRepository(
         }
     }
 
+    /** MP4/MOV: metadados (moov) costumam ficar no fim — tentar cauda para extrair frame. */
+    suspend fun downloadFileSuffixForThumbnail(
+        itemId: String,
+        destination: File,
+        maxBytes: Long = 6L * 1024L * 1024L,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
+        return runWithToken { token ->
+            destination.parentFile?.mkdirs()
+            val auth = "Bearer $token"
+            resumableTransfer.downloadByteRange(
+                authorization = auth,
+                itemId = itemId,
+                rangeHeader = "bytes=-$maxBytes",
+                destination = destination,
+                totalBytesHint = maxBytes,
+                onProgress = onProgress,
+            )
+            if (!destination.isFile || destination.length() <= 0L) {
+                error("Sufixo vazio para miniatura de vídeo.")
+            }
+        }
+    }
+
     suspend fun downloadThumbnailToFile(
         itemId: String,
         destination: File,

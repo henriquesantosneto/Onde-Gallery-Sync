@@ -39,16 +39,26 @@ object GalleryThumbnailModels {
                 context.contentResolver.loadThumbnail(uri, Size(sizePx, sizePx), null)
             }.getOrNull()
         }
-        if (kind == MediaKind.IMAGE && localMediaId != null) {
+        if (localMediaId != null) {
             @Suppress("DEPRECATION")
-            return runCatching {
-                MediaStore.Images.Thumbnails.getThumbnail(
-                    context.contentResolver,
-                    localMediaId,
-                    MediaStore.Images.Thumbnails.MINI_KIND,
-                    null,
-                )
-            }.getOrNull()
+            return when (kind) {
+                MediaKind.IMAGE -> runCatching {
+                    MediaStore.Images.Thumbnails.getThumbnail(
+                        context.contentResolver,
+                        localMediaId,
+                        MediaStore.Images.Thumbnails.MINI_KIND,
+                        null,
+                    )
+                }.getOrNull()
+                MediaKind.VIDEO -> runCatching {
+                    MediaStore.Video.Thumbnails.getThumbnail(
+                        context.contentResolver,
+                        localMediaId,
+                        MediaStore.Video.Thumbnails.MINI_KIND,
+                        null,
+                    )
+                }.getOrNull()
+            }
         }
         return null
     }

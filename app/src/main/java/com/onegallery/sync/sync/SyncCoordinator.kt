@@ -1647,7 +1647,13 @@ class SyncCoordinator(
             if (!thumbReady) {
                 val partial = File(staging.absolutePath + ".partial")
                 partial.delete()
-                oneDriveRepository.downloadImagePrefixForThumbnail(itemId, partial, onProgress = onProgress).onSuccess {
+                val prefixBytes = if (isVideo) 4L * 1024L * 1024L else 2L * 1024L * 1024L
+                oneDriveRepository.downloadImagePrefixForThumbnail(
+                    itemId,
+                    partial,
+                    maxBytes = prefixBytes,
+                    onProgress = onProgress,
+                ).onSuccess {
                     if (partial.isFile && partial.length() > 0L) {
                         thumbReady = if (isVideo) {
                             VideoThumbnailHelper.captureToFile(partial, staging)
@@ -1655,6 +1661,20 @@ class SyncCoordinator(
                             cacheImageThumbnailFromUri(Uri.fromFile(partial), staging)
                         }
                     }
+                }
+                if (!thumbReady && isVideo) {
+                    val tail = File(staging.absolutePath + ".partial.tail")
+                    tail.delete()
+                    oneDriveRepository.downloadFileSuffixForThumbnail(
+                        itemId,
+                        tail,
+                        onProgress = onProgress,
+                    ).onSuccess {
+                        if (tail.isFile && tail.length() > 0L) {
+                            thumbReady = VideoThumbnailHelper.captureToFile(tail, staging)
+                        }
+                    }
+                    tail.delete()
                 }
                 partial.delete()
             }
