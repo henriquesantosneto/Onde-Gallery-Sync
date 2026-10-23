@@ -301,6 +301,11 @@ fun GalleryScreen(
                 val dateTimeline = isDateTimelineSort(state.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val gridState = rememberLazyGridState()
+                val galleryScrollToTop by viewModel.galleryScrollToTopRequests.collectAsStateWithLifecycle()
+                LaunchedEffect(galleryScrollToTop) {
+                    if (galleryScrollToTop == 0) return@LaunchedEffect
+                    gridState.scrollToItem(0)
+                }
                 val timelinePresorted = isDateTimelineSort(state.sortOrder)
                 val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping, timelinePresorted) {
                     buildGalleryGridEntries(

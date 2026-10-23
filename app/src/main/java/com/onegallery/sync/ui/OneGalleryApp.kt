@@ -334,6 +334,19 @@ fun OneGalleryApp(
                                 else -> currentRoute == tab.route
                             },
                             onClick = {
+                                when (tab) {
+                                    MainTab.Gallery -> {
+                                        if (currentRoute == MainTab.Gallery.route) {
+                                            galleryViewModel.requestGalleryScrollToTop()
+                                        }
+                                    }
+                                    MainTab.Albums -> {
+                                        if (albumsTabSelected(currentRoute)) {
+                                            galleryViewModel.requestAlbumsScrollToTop()
+                                        }
+                                    }
+                                    MainTab.Settings -> Unit
+                                }
                                 navController.openMainTab(tab) {
                                     galleryViewModel.clearBrowseFilters()
                                 }

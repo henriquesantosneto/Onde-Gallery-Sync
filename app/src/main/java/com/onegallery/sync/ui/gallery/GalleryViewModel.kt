@@ -182,6 +182,12 @@ class GalleryViewModel(
 
     private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
 
+    private val _galleryScrollToTopRequests = MutableStateFlow(0)
+    val galleryScrollToTopRequests: StateFlow<Int> = _galleryScrollToTopRequests
+
+    private val _albumsScrollToTopRequests = MutableStateFlow(0)
+    val albumsScrollToTopRequests: StateFlow<Int> = _albumsScrollToTopRequests
+
     private fun restoreDeferredAlbumListsFromSession(): DeferredAlbumLists {
         val app = appContext.applicationContext as OneGalleryApplication
         val albumEntry = app.galleryProcessAlbumListsCache.peek() ?: return DeferredAlbumLists()
@@ -1140,6 +1146,16 @@ class GalleryViewModel(
     fun clearBrowseFilters() {
         browseFilter.value = GalleryBrowseFilter.All
         clearSelection()
+    }
+
+    /** Aba Fotos já aberta — barra inferior tocada de novo. */
+    fun requestGalleryScrollToTop() {
+        _galleryScrollToTopRequests.update { it + 1 }
+    }
+
+    /** Aba Álbuns já aberta — barra inferior tocada de novo. */
+    fun requestAlbumsScrollToTop() {
+        _albumsScrollToTopRequests.update { it + 1 }
     }
 
     fun requestPlacesMapFocus(latitude: Double, longitude: Double) {

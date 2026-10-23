@@ -275,6 +275,11 @@ fun AlbumsScreen(
             }
             else -> {
                 val albumGridState = rememberLazyGridState()
+                val albumsScrollToTop by viewModel.albumsScrollToTopRequests.collectAsStateWithLifecycle()
+                LaunchedEffect(albumsScrollToTop) {
+                    if (albumsScrollToTop == 0) return@LaunchedEffect
+                    albumGridState.scrollToItem(0)
+                }
                 val railAlbums = when (selectedTab) {
                     AlbumsBrowseTab.ALBUMS -> state.albums
                     AlbumsBrowseTab.PLACES -> state.placeAlbums
