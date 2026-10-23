@@ -105,6 +105,13 @@ interface GraphApiService {
         @Path("itemId") itemId: String,
     ): ResponseBody
 
+    @GET("v1.0/me/drive/items/{itemId}/thumbnails/0/small/content")
+    @Streaming
+    suspend fun downloadItemThumbnailSmall(
+        @Header("Authorization") authorization: String,
+        @Path("itemId") itemId: String,
+    ): ResponseBody
+
     @DELETE("v1.0/me/drive/items/{itemId}")
     suspend fun deleteItem(
         @Header("Authorization") authorization: String,

@@ -1792,7 +1792,21 @@ class SyncCoordinator(
         onProgress?.invoke(0L, null)
 
         fun commitIfReady(): File? {
-            if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
+            if (isVideo) {
+                when {
+                    VideoThumbnailHelper.isAcceptableThumbnailFile(staging) &&
+                        mediaCacheRepository.isDisplayableGalleryThumbFile(staging) -> Unit
+                    VideoThumbnailHelper.isAcceptableThumbnailFile(staging) &&
+                        !reencodeFileToDisplayableThumbnail(staging, staging) -> {
+                        staging.delete()
+                        return null
+                    }
+                    !reencodeFileToDisplayableThumbnail(staging, staging) -> {
+                        staging.delete()
+                        return null
+                    }
+                }
+            } else if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
                 staging.delete()
                 return null
             }
@@ -1841,7 +1855,7 @@ class SyncCoordinator(
                         uri,
                         staging,
                         localMediaId = row.localMediaId,
-                        mediaStoreOnly = lightweightPrefetch,
+                        mediaStoreOnly = lightweightPrefetch && !isVideo,
                     )
                 } else {
                     cacheImageThumbnailFromUri(uri, staging)
@@ -1938,8 +1952,7 @@ class SyncCoordinator(
         staging.delete()
         var ready = false
         oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            ready = acceptDownloadedCloudThumbnail(staging, isVideo = true)
-            if (!ready) staging.delete()
+            ready = acceptDownloadedCloudVideoThumbnail(staging)
         }
         if (ready) return true
 
@@ -1951,13 +1964,30 @@ class SyncCoordinator(
             }
         }
 
+        val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
+            ?: oneDriveRepository.fetchItemSizeBytes(itemId)
+        if (remoteSize != null && remoteSize <= CLOUD_VIDEO_FULL_FETCH_MAX_BYTES) {
+            val full = File(staging.absolutePath + ".partial.full")
+            full.delete()
+            oneDriveRepository.downloadCappedContentForVideoThumbnail(
+                itemId,
+                full,
+                maxBytes = remoteSize,
+                knownSizeBytes = remoteSize,
+                onProgress = onProgress,
+            ).onSuccess {
+                if (captureFromPartial(full)) return true
+            }
+            full.delete()
+        }
+
         val tail = File(staging.absolutePath + ".partial.vidtail")
         tail.delete()
         oneDriveRepository.downloadFileSuffixForThumbnail(
             itemId,
             tail,
             maxBytes = CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES,
-            knownSizeBytes = remoteSizeBytes,
+            knownSizeBytes = remoteSize,
             onProgress = onProgress,
         ).onSuccess {
             if (captureFromPartial(tail)) return true
@@ -1970,7 +2000,7 @@ class SyncCoordinator(
             itemId,
             head,
             maxBytes = CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES,
-            knownSizeBytes = remoteSizeBytes,
+            knownSizeBytes = remoteSize,
             onProgress = onProgress,
         ).onSuccess {
             if (captureFromPartial(head)) return true
@@ -2040,6 +2070,17 @@ class SyncCoordinator(
         }
         if (isStagingDisplayableThumbnail(staging)) return true
         return reencodeFileToDisplayableThumbnail(staging, staging)
+    }
+
+    private fun acceptDownloadedCloudVideoThumbnail(staging: File): Boolean {
+        if (acceptDownloadedCloudThumbnail(staging, isVideo = true)) return true
+        if (reencodeFileToDisplayableThumbnail(staging, staging) &&
+            VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
+        ) {
+            return true
+        }
+        staging.delete()
+        return false
     }
 
     private fun reencodeFileToDisplayableThumbnail(source: File, destination: File): Boolean {
@@ -3027,9 +3068,22 @@ class SyncCoordinator(
     private fun schedulePostUploadThumbnailRefresh(canonicalPath: String) {
         val scope = backgroundScope ?: return
         scope.launch(Dispatchers.IO) {
-            runCatching {
-                withTimeout(POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS) {
-                    ensureThumbnailCached(canonicalPath)
+            val row = syncMetadataDao.getByCanonicalPath(canonicalPath)
+            val isVideo = row != null && GalleryMapper.isVideoFileName(row.displayName)
+            val attempts = if (isVideo) POST_UPLOAD_VIDEO_THUMB_ATTEMPTS else 1
+            repeat(attempts) { attempt ->
+                if (attempt > 0) delay(POST_UPLOAD_VIDEO_THUMB_RETRY_DELAY_MS * attempt)
+                val hit = runCatching {
+                    withTimeout(POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS) {
+                        ensureThumbnailCached(
+                            canonicalPath,
+                            preferCloudFirst = true,
+                        ).getOrNull()
+                    }
+                }.getOrNull()
+                if (hit != null && mediaCacheRepository.isDisplayableGalleryThumbFile(hit)) {
+                    notifyGalleryDisplayRefresh()
+                    return@launch
                 }
             }
         }
@@ -5173,7 +5227,7 @@ class SyncCoordinator(
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
         const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 5
-        const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 5
+        const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 12
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
         const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
         /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
@@ -5188,8 +5242,12 @@ class SyncCoordinator(
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
-        const val CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES = 12L * 1024L * 1024L
-        const val CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES = 10L * 1024L * 1024L
+        const val CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES = 32L * 1024L * 1024L
+        const val CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES = 16L * 1024L * 1024L
+        /** Vídeos pequenos na nuvem: baixa inteiro e extrai frame (mais confiável que trecho). */
+        const val CLOUD_VIDEO_FULL_FETCH_MAX_BYTES = 25L * 1024L * 1024L
+        const val POST_UPLOAD_VIDEO_THUMB_ATTEMPTS = 5
+        const val POST_UPLOAD_VIDEO_THUMB_RETRY_DELAY_MS = 6_000L
         const val POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS = 45_000L
         const val CLOUD_THUMB_PREFETCH_MAX_PER_PASS = 2_000
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64

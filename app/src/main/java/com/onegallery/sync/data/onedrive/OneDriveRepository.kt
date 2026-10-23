@@ -686,12 +686,27 @@ class OneDriveRepository(
             }
             if (large.isSuccess && destination.length() > 0L) return@runWithToken
             destination.delete()
-            graphApi.downloadItemThumbnailMedium(auth, itemId).use { body ->
+            val medium = runCatching {
+                graphApi.downloadItemThumbnailMedium(auth, itemId).use { body ->
+                    destination.outputStream().use { out ->
+                        copyStreamWithProgress(body.byteStream(), out, body.contentLength(), onProgress)
+                    }
+                }
+            }
+            if (medium.isSuccess && destination.length() > 0L) return@runWithToken
+            destination.delete()
+            graphApi.downloadItemThumbnailSmall(auth, itemId).use { body ->
                 destination.outputStream().use { out ->
                     copyStreamWithProgress(body.byteStream(), out, body.contentLength(), onProgress)
                 }
             }
         }
+    }
+
+    suspend fun fetchItemSizeBytes(itemId: String): Long? {
+        return runWithToken { token ->
+            graphApi.getDriveItem("Bearer $token", itemId).size?.takeIf { it > 0L }
+        }.getOrNull()
     }
 
     /**
