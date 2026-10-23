@@ -359,15 +359,17 @@ class SyncCoordinator(
             syncPreferences.pauseAutoSyncAfterUserCancel()
         }
         BackgroundSyncScheduler.cancelPendingSyncWork(appContext)
-        _state.value = _state.value.copy(
-            isRunning = false,
-            progressPhase = SyncProgressPhase.IDLE,
-            lastMessage = inProgressMessage,
-            activityHeadline = inProgressMessage,
-            activityDetail = "",
-            runQueue = emptyList(),
-            activeItems = emptyList(),
-        )
+        stopThumbnailPrefetchForCancel(inProgressMessage)
+        _state.update {
+            it.copy(
+                isRunning = false,
+                progressPhase = SyncProgressPhase.IDLE,
+                activityHeadline = inProgressMessage,
+                activityDetail = "",
+                runQueue = emptyList(),
+                activeItems = emptyList(),
+            )
+        }
         cancelAllManagedSyncJobs(inProgressMessage)
         bulkGalleryDisplayRefreshJob?.cancel()
         val job = activeLongTaskJob.get()
@@ -384,6 +386,25 @@ class SyncCoordinator(
             if (job.isActive) {
                 job.cancel(cancelError)
             }
+        }
+    }
+
+    /** Para prefetch de miniaturas ao cancelar — evita isSyncBusy preso e fila fantasma. */
+    private fun stopThumbnailPrefetchForCancel(inProgressMessage: String) {
+        backgroundThumbPrefetchJob?.cancel()
+        backgroundThumbPrefetchJob = null
+        while (bulkThumbnailPrefetchDepth.get() > 0) {
+            bulkThumbnailPrefetchDepth.decrementAndGet()
+        }
+        clearRunQueueAndActiveTransfers()
+        _state.update {
+            it.copy(
+                prefetchingThumbnails = false,
+                progressPhase = SyncProgressPhase.IDLE,
+                activityHeadline = inProgressMessage,
+                activityDetail = "",
+                lastMessage = "$inProgressMessage\nMiniaturas interrompidas — sincronize de novo para continuar.",
+            )
         }
     }
 
@@ -3099,8 +3120,18 @@ class SyncCoordinator(
     private suspend fun publishFullPendingThumbnailQueueToUi(): Int {
         if (!shouldPublishSyncActivityUi()) return 0
         val rows = allPendingThumbnailEntitiesForUi()
-        setRunQueueFromEntities(rows, thumbnailQueue = true)
-        return rows.size
+        val total = rows.size
+        val capped = if (rows.size > THUMB_RUN_QUEUE_UI_CAP) {
+            rows.take(THUMB_RUN_QUEUE_UI_CAP)
+        } else {
+            rows
+        }
+        setRunQueueFromEntities(capped, thumbnailQueue = true)
+        return total
+    }
+
+    private suspend fun missingThumbnailCountForProgress(): Int {
+        return countIndexedMissingThumbnails()
     }
 
     private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
@@ -3916,6 +3947,7 @@ class SyncCoordinator(
             var stalledPasses = 0
             try {
             repeat(THUMB_BACKGROUND_CONTINUE_PASSES) {
+                if (syncCancelRequested.get()) return@launch
                 if (_state.value.isRunning) return@launch
                 if (countIndexedMissingThumbnails() == 0) return@launch
                 val idleForeground = appForegroundState.isInForeground() &&
@@ -4230,6 +4262,7 @@ class SyncCoordinator(
         var stoppedByCap = false
         try {
             while (round < maxRounds) {
+                if (syncCancelRequested.get()) break
                 if (honorUserSyncCancel) {
                     ensureNotCancelled()
                     ensureSyncMayContinue()
@@ -4245,8 +4278,17 @@ class SyncCoordinator(
                     remainingEstimate = countIndexedMissingThumbnails()
                 }
                 if (remainingEstimate == 0) break
-                val rows = buildMissingThumbnailEntities(batchSize)
-                if (rows.isEmpty()) break
+                var rows = buildMissingThumbnailEntities(batchSize)
+                if (rows.isEmpty() && countIndexedMissingThumbnails() > 0) {
+                    thumbPrefetchAttemptsThisSession.clear()
+                    rows = buildMissingThumbnailEntities(batchSize)
+                }
+                if (rows.isEmpty()) {
+                    consecutiveEmptyBatches++
+                    if (consecutiveEmptyBatches >= emptyBatchGiveUp) break
+                    round++
+                    continue
+                }
                 if (shouldPublishSyncActivityUi()) {
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
@@ -4329,6 +4371,7 @@ class SyncCoordinator(
         publishUi: Boolean = true,
     ): Int {
         if (rows.isEmpty()) return 0
+        if (honorSyncCancel && syncCancelRequested.get()) return 0
         val globalTotalAtStart = if (publishUi && shouldPublishSyncActivityUi()) {
             publishFullPendingThumbnailQueueToUi().coerceAtLeast(rows.size)
         } else {
@@ -4337,6 +4380,7 @@ class SyncCoordinator(
         var total = 0
         val chunks = rows.chunked(THUMB_PREFETCH_RUN_CHUNK)
         chunks.forEachIndexed { index, chunk ->
+            if (honorSyncCancel && syncCancelRequested.get()) return total
             total += runMissingThumbnailPrefetchChunk(
                 chunk,
                 honorSyncCancel,
@@ -4350,12 +4394,12 @@ class SyncCoordinator(
                 chunkCount = chunks.size,
             )
             if (publishUi && shouldPublishSyncActivityUi() && index < chunks.lastIndex) {
-                val remaining = _state.value.runQueue.size
+                val remaining = missingThumbnailCountForProgress()
                 val done = (globalTotalAtStart - remaining).coerceIn(0, globalTotalAtStart)
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     progressHeadline,
-                    "$done/$globalTotalAtStart · faltam $remaining · leva ${index + 1}/${chunks.size} ok · " +
+                    "$done/$globalTotalAtStart · faltam ~$remaining · leva ${index + 1}/${chunks.size} ok · " +
                         "preparando próxima…",
                     alsoUpdateLastMessage = false,
                 )
@@ -4435,13 +4479,15 @@ class SyncCoordinator(
                             }
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
-                            if (publishUi && shouldPublishSyncActivityUi()) {
-                                val remaining = _state.value.runQueue.size
+                            if (publishUi && shouldPublishSyncActivityUi() &&
+                                (done % 8 == 0 || done == rows.size)
+                            ) {
+                                val remaining = missingThumbnailCountForProgress()
                                 val globalDone = (globalTotalAtStart - remaining).coerceIn(0, globalTotalAtStart)
                                 setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                                     progressHeadline,
-                                    "$globalDone/$globalTotalAtStart · faltam $remaining · " +
+                                    "$globalDone/$globalTotalAtStart · faltam ~$remaining · " +
                                         "${cachedCount.get()} JPEG nesta leva · " +
                                         "leva ${chunkIndex + 1}/$chunkCount ($done/${rows.size}) · " +
                                         "até $slots em paralelo. " +
@@ -5135,7 +5181,9 @@ class SyncCoordinator(
         /** Evita milhares de coroutines e fila “congelada” após os primeiros itens. */
         const val THUMB_PREFETCH_RUN_CHUNK = 16
         /** Depois disso o item sai da leva nesta sessão (grade tenta de novo sob demanda). */
-        const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 3
+        const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 8
+        /** Lista na tela Sync — evita OOM com dezenas de milhares pendentes. */
+        const val THUMB_RUN_QUEUE_UI_CAP = 1_500
         const val PARALLEL_THUMB_PREFETCH = 2
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
