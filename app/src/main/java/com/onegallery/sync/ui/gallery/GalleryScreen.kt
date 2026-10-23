@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -40,8 +41,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
@@ -300,11 +303,18 @@ fun GalleryScreen(
             else -> {
                 val dateTimeline = isDateTimelineSort(state.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
-                val gridState = rememberLazyGridState()
+                val gridState = rememberSaveable(saver = LazyGridState.Saver) {
+                    LazyGridState()
+                }
                 val galleryScrollToTop by viewModel.galleryScrollToTopRequests.collectAsStateWithLifecycle()
+                var lastGalleryScrollToTopHandled by remember {
+                    mutableIntStateOf(galleryScrollToTop)
+                }
                 LaunchedEffect(galleryScrollToTop) {
-                    if (galleryScrollToTop == 0) return@LaunchedEffect
-                    gridState.scrollToItem(0)
+                    if (galleryScrollToTop > lastGalleryScrollToTopHandled) {
+                        lastGalleryScrollToTopHandled = galleryScrollToTop
+                        gridState.scrollToItem(0)
+                    }
                 }
                 val timelinePresorted = isDateTimelineSort(state.sortOrder)
                 val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping, timelinePresorted) {
