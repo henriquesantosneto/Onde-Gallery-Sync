@@ -1628,11 +1628,12 @@ class SyncCoordinator(
     suspend fun ensureThumbnailCached(
         canonicalPath: String,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+        preferCloudFirst: Boolean = false,
     ): Result<File?> {
         val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
         return mutex.withLock {
             withContext(Dispatchers.IO) {
-                ensureThumbnailCachedOnIo(canonicalPath, onProgress)
+                ensureThumbnailCachedOnIo(canonicalPath, onProgress, preferCloudFirst)
             }
         }
     }
@@ -1660,6 +1661,7 @@ class SyncCoordinator(
     private suspend fun ensureThumbnailCachedOnIo(
         canonicalPath: String,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+        preferCloudFirst: Boolean = false,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
@@ -1667,14 +1669,37 @@ class SyncCoordinator(
             return Result.success(null)
         }
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
-        mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
-            ?.let { cached ->
-                if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
-                    syncPreferences.clearThumbnailFailure(canonicalPath)
-                    return Result.success(cached)
+        val hasLocalSource = localContentUri(row) != null
+        val cloudEligible = row.oneDriveItemId != null &&
+            networkMonitor.isOnline() &&
+            syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
+        /** Local enquanto o arquivo está no aparelho; nuvem quando só remoto ou após upload. */
+        val cloudFirst = preferCloudFirst || (cloudEligible && !hasLocalSource)
+
+        fun existingCachedThumb(): File? =
+            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
+                ?.takeIf { cached ->
+                    !isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)
                 }
-                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-            }
+
+        if (!cloudFirst) {
+            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
+                ?.let { cached ->
+                    if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
+                        syncPreferences.clearThumbnailFailure(canonicalPath)
+                        return Result.success(cached)
+                    }
+                    mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
+                }
+        } else {
+            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
+                ?.let { cached ->
+                    if (isVideo && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
+                        mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
+                    }
+                }
+        }
+
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
         staging.delete()
         onProgress?.invoke(0L, null)
@@ -1687,81 +1712,97 @@ class SyncCoordinator(
             return mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
         }
 
-        localContentUri(row)?.let { uri ->
-            val ok = if (isVideo) {
-                VideoThumbnailHelper.captureToFile(
-                    appContext,
-                    uri,
-                    staging,
-                    localMediaId = row.localMediaId,
-                )
-            } else {
-                cacheImageThumbnailFromUri(uri, staging)
+        fun successFromStaging(): Result<File?> {
+            commitIfReady()?.let { file ->
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                onProgress?.invoke(file.length(), file.length())
+                return Result.success(file)
             }
-            if (ok) {
-                commitIfReady()?.let { file ->
-                    syncPreferences.clearThumbnailFailure(canonicalPath)
-                    onProgress?.invoke(1L, 1L)
-                    return Result.success(file)
-                }
-            }
+            staging.delete()
+            return Result.success(null)
         }
 
-        if (isVideo && row.localMediaId != null) {
-            val item = indexPassLocalItemsById[row.localMediaId]
-                ?: localMediaRepository.findById(row.localMediaId)
-            if (item != null) {
-                val temp = localMediaRepository.materializeToTempFile(item)
-                if (temp != null) {
-                    try {
-                        if (VideoThumbnailHelper.captureToFile(temp, staging)) {
-                            commitIfReady()?.let { file ->
-                                syncPreferences.clearThumbnailFailure(canonicalPath)
-                                onProgress?.invoke(1L, 1L)
-                                return Result.success(file)
-                            }
-                        }
-                    } finally {
-                        temp.delete()
-                    }
-                }
-            }
-        }
-
-        row.cachedFilePath?.let { path ->
-            val cached = File(path)
-            if (cached.isFile && cached.length() > 0L) {
-                val ok = if (isVideo) {
-                    VideoThumbnailHelper.captureToFile(cached, staging)
-                } else {
-                    cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
-                }
-                if (ok) {
-                    commitIfReady()?.let { file ->
-                        syncPreferences.clearThumbnailFailure(canonicalPath)
-                        onProgress?.invoke(1L, 1L)
-                        return Result.success(file)
-                    }
-                }
-            }
-        }
-
-        val itemId = row.oneDriveItemId
-        if (itemId != null && networkMonitor.isOnline() && syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+        suspend fun tryCloudSource(): Result<File?>? {
+            val itemId = row.oneDriveItemId ?: return null
+            if (!cloudEligible) return null
+            staging.delete()
             val thumbReady = if (isVideo) {
                 fetchCloudVideoNativeThumbnail(itemId, staging, onProgress)
             } else {
                 fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)
             }
-            if (thumbReady) {
-                commitIfReady()?.let {
-                    syncPreferences.clearThumbnailFailure(canonicalPath)
-                    onProgress?.invoke(it.length(), it.length())
-                    return Result.success(it)
+            if (!thumbReady) {
+                staging.delete()
+                return null
+            }
+            return successFromStaging().takeIf { it.getOrNull() != null }
+        }
+
+        fun tryLocalSources(): Result<File?>? {
+            localContentUri(row)?.let { uri ->
+                val ok = if (isVideo) {
+                    VideoThumbnailHelper.captureToFile(
+                        appContext,
+                        uri,
+                        staging,
+                        localMediaId = row.localMediaId,
+                    )
+                } else {
+                    cacheImageThumbnailFromUri(uri, staging)
+                }
+                if (ok) {
+                    successFromStaging().getOrNull()?.let { return Result.success(it) }
                 }
             }
+
+            if (isVideo && row.localMediaId != null) {
+                val item = indexPassLocalItemsById[row.localMediaId]
+                    ?: localMediaRepository.findById(row.localMediaId)
+                if (item != null) {
+                    val temp = localMediaRepository.materializeToTempFile(item)
+                    if (temp != null) {
+                        try {
+                            if (VideoThumbnailHelper.captureToFile(temp, staging)) {
+                                successFromStaging().getOrNull()?.let { return Result.success(it) }
+                            }
+                        } finally {
+                            temp.delete()
+                        }
+                    }
+                }
+            }
+
+            row.cachedFilePath?.let { path ->
+                val cached = File(path)
+                if (cached.isFile && cached.length() > 0L) {
+                    val ok = if (isVideo) {
+                        VideoThumbnailHelper.captureToFile(cached, staging)
+                    } else {
+                        cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
+                    }
+                    if (ok) {
+                        successFromStaging().getOrNull()?.let { return Result.success(it) }
+                    }
+                }
+            }
+            staging.delete()
+            return null
         }
+
+        if (cloudFirst) {
+            tryCloudSource()?.let { return it }
+            tryLocalSources()?.let { return it }
+        } else {
+            tryLocalSources()?.let { return it }
+            tryCloudSource()?.let { return it }
+        }
+
         staging.delete()
+        existingCachedThumb()?.let { cached ->
+            syncPreferences.clearThumbnailFailure(canonicalPath)
+            return Result.success(cached)
+        }
+
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
         if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
             if (!isVideo) {
@@ -2813,6 +2854,10 @@ class SyncCoordinator(
             )
             syncMetadataDao.upsert(synced)
             pathsUploadedThisSync.add(row.canonicalPath)
+            ensureThumbnailCachedOnIo(
+                synced.canonicalPath,
+                preferCloudFirst = true,
+            )
             if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
                 releaseLocalSpaceForRows(
                     listOf(synced),
