@@ -846,11 +846,32 @@ class SyncCoordinator(
         }
     }
 
+    private fun clearRunQueueOnly() {
+        val apply = { _state.value = _state.value.copy(runQueue = emptyList()) }
+        if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
+    }
+
     /** Evita UI presa com 1–2 miniaturas após timeout ou ao seguir para GPS. */
     private fun clearRunQueueAndActiveTransfers() {
         clearActiveSyncItems()
-        val apply = { _state.value = _state.value.copy(runQueue = emptyList()) }
-        if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
+        clearRunQueueOnly()
+    }
+
+    private fun markSyncProcessingItem(
+        row: SyncMetadataEntity,
+        operationLabel: String,
+        showTransferProgress: Boolean = false,
+    ) {
+        if (!_state.value.isRunning) return
+        upsertActiveSyncItem(
+            ActiveSyncItem(
+                canonicalPath = row.canonicalPath,
+                displayName = row.displayName,
+                operationLabel = operationLabel,
+                showTransferProgress = showTransferProgress,
+            ),
+            force = true,
+        )
     }
 
     private fun planUploadsForSync(
@@ -1265,6 +1286,8 @@ class SyncCoordinator(
                     for (row in rowsProcessingOrder) {
                         ensureSyncMayContinue()
                         localPassIndex++
+                        markSyncProcessingItem(row, "Comparando com a nuvem…")
+                        try {
                         if (localPassIndex == 1 || localPassIndex % 96 == 0 || localPassIndex == localPassTotal) {
                             setSyncProgress(
                                 SyncProgressPhase.RECONCILING_LOCAL,
@@ -1326,6 +1349,9 @@ class SyncCoordinator(
                         if (upsertBatch.size >= ROOM_UPSERT_CHUNK) {
                             flushReconcileUpserts()
                         }
+                        } finally {
+                            removeActiveSyncItem(row.canonicalPath)
+                        }
                     }
                     flushReconcileUpserts()
                     healStalePendingDownloads(remoteByPath)
@@ -1351,6 +1377,17 @@ class SyncCoordinator(
                         ensureSyncMayContinue()
                         if (path in knownPaths) return@forEach
                         cloudOnlyProcessed++
+                        if (_state.value.isRunning) {
+                            upsertActiveSyncItem(
+                                ActiveSyncItem(
+                                    canonicalPath = path,
+                                    displayName = remote.name,
+                                    operationLabel = "Registrando só na nuvem…",
+                                ),
+                                force = true,
+                            )
+                        }
+                        try {
                         if (cloudOnlyProcessed == 1 || cloudOnlyProcessed % 128 == 0) {
                             setSyncProgress(
                                 SyncProgressPhase.REGISTERING_CLOUD_ONLY,
@@ -1402,6 +1439,9 @@ class SyncCoordinator(
                                 )
                                 cloudOnly++
                             }
+                        }
+                        } finally {
+                            removeActiveSyncItem(path)
                         }
                     }
                     (cloudOnlyInserts + cloudOnlyUpdates).chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
@@ -1588,6 +1628,7 @@ class SyncCoordinator(
                     operationLabel = operationLabel,
                     bytesCompleted = done,
                     totalBytes = total,
+                    showTransferProgress = false,
                 ),
                 force = done == 0L || (total != null && done >= total),
             )
@@ -2636,7 +2677,9 @@ class SyncCoordinator(
                 canonicalPath = row.canonicalPath,
                 displayName = row.displayName,
                 operationLabel = "Enviando para OneDrive…",
+                showTransferProgress = true,
             ),
+            force = true,
         )
         val localId = row.localMediaId ?: return 0.also { removeActiveSyncItem(row.canonicalPath) }
         val item = indexPassLocalItemsById[localId]
@@ -3443,7 +3486,7 @@ class SyncCoordinator(
                     alsoUpdateLastMessage = false,
                 )
                 backfillMissingGpsLocations()
-                clearRunQueueAndActiveTransfers()
+                clearRunQueueOnly()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
                 setSyncProgress(
@@ -4089,6 +4132,13 @@ class SyncCoordinator(
                         try {
                             ensureNotCancelled()
                             coroutineContext.ensureActive()
+                            markSyncProcessingItem(
+                                item.row,
+                                when (item.probeKind) {
+                                    GpsBackfillProbeKind.LOCAL -> "Lendo GPS no aparelho…"
+                                    GpsBackfillProbeKind.CLOUD -> "Lendo GPS na nuvem…"
+                                },
+                            )
                             val index = analyzedCount.incrementAndGet()
                             if (index % 16 == 0 && _state.value.isRunning) {
                                 setSyncProgress(
@@ -4119,6 +4169,8 @@ class SyncCoordinator(
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (_: Throwable) {
+                        } finally {
+                            removeActiveSyncItem(item.row.canonicalPath)
                         }
                     }
                 }
@@ -4192,6 +4244,8 @@ class SyncCoordinator(
         val candidates = rows.size
         rows.sortedByDescending { it.remoteModifiedAt ?: it.localModifiedAt ?: 0L }
             .forEachIndexed { index, row ->
+                markSyncProcessingItem(row, "Lendo data de captura…")
+                try {
                 if (index % 16 == 0) {
                     ensureNotCancelled()
                     coroutineContext.ensureActive()
@@ -4223,6 +4277,9 @@ class SyncCoordinator(
                     row.copy(capturedAtSeconds = resolved),
                 )
                 indexed++
+                } finally {
+                    removeActiveSyncItem(row.canonicalPath)
+                }
             }
         if (indexed > 0) {
             val suffix = if (cloudProbes >= maxCloudProbesPerRun) {
@@ -4505,6 +4562,7 @@ class SyncCoordinator(
                                 operationLabel = operationLabel,
                                 bytesCompleted = done,
                                 totalBytes = total,
+                                showTransferProgress = true,
                             ),
                         )
                     }
@@ -4548,6 +4606,7 @@ class SyncCoordinator(
                                 operationLabel = operationLabel,
                                 bytesCompleted = done,
                                 totalBytes = total,
+                                showTransferProgress = true,
                             ),
                         )
                     }

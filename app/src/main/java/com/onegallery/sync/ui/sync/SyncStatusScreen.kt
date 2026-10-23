@@ -518,25 +518,17 @@ private fun StatRow(label: String, value: String, emphasized: Boolean = false) {
 
 @Composable
 private fun SyncActiveTransferRow(activeItem: ActiveSyncItem) {
-    Column(Modifier.fillMaxWidth()) {
-        Text(
-            activeItem.displayName,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
-        Text(
-            activeItem.operationLabel,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-        )
-        SyncTransferProgressBar(activeItem = activeItem)
-    }
+    SyncProcessingItemRow(
+        displayName = activeItem.displayName,
+        operationLabel = activeItem.operationLabel,
+        activeItem = activeItem,
+        emphasize = true,
+    )
 }
 
 @Composable
 private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
+    if (!activeItem.showTransferProgress) return
     val fraction = activeItem.progressFraction
     val byteLabel = activeItem.progressByteLabel()
     if (fraction != null) {
@@ -565,6 +557,36 @@ private fun SyncTransferProgressBar(activeItem: ActiveSyncItem) {
 }
 
 @Composable
+private fun SyncProcessingItemRow(
+    displayName: String,
+    operationLabel: String,
+    activeItem: ActiveSyncItem?,
+    emphasize: Boolean,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            displayName,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = if (emphasize) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+        )
+        Text(
+            operationLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (emphasize) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 1,
+        )
+        if (activeItem != null) {
+            SyncTransferProgressBar(activeItem = activeItem)
+        }
+    }
+}
+
+@Composable
 private fun SyncQueueItemRow(
     row: SyncQueueDisplayRow,
     activeItems: List<ActiveSyncItem>,
@@ -572,40 +594,16 @@ private fun SyncQueueItemRow(
 ) {
     val activeItem = activeItems.firstOrNull { it.canonicalPath == row.canonicalPath }
     val isActive = isRunning && activeItem != null
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (isActive) {
-                    Modifier.padding(8.dp)
-                } else {
-                    Modifier
-                },
-            ),
-    ) {
-        Text(
-            row.displayName,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
-        )
-        Text(
-            if (isActive) {
-                activeItem?.operationLabel ?: row.statusLabel
-            } else {
-                row.statusLabel
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isActive) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-        if (isActive && activeItem != null) {
-            SyncTransferProgressBar(activeItem = activeItem)
-        }
-    }
+    SyncProcessingItemRow(
+        displayName = row.displayName,
+        operationLabel = if (isActive) {
+            activeItem?.operationLabel ?: row.statusLabel
+        } else {
+            row.statusLabel
+        },
+        activeItem = if (isActive) activeItem else null,
+        emphasize = isActive,
+    )
 }
 
 @Composable

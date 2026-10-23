@@ -31,6 +31,8 @@ data class ActiveSyncItem(
     val operationLabel: String,
     val bytesCompleted: Long = 0L,
     val totalBytes: Long? = null,
+    /** Barra de progresso na tela Sync — só envio/download de arquivo completo. */
+    val showTransferProgress: Boolean = false,
 ) {
     val progressFraction: Float?
         get() {
