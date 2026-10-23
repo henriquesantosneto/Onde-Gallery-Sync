@@ -23,7 +23,7 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.CloudSyncState
-import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.ui.theme.OneDriveBlue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -38,8 +38,8 @@ enum class GalleryThumbnailStyle {
 @Composable
 fun GalleryThumbnailImage(
     item: GalleryDisplayItem,
-    syncCoordinator: SyncCoordinator?,
     contentDescription: String?,
+    thumbnailCache: GalleryThumbnailCache? = null,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
@@ -47,15 +47,15 @@ fun GalleryThumbnailImage(
     onContentAspectRatio: ((Float) -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    val mediaCacheRepository = remember(context) {
-        (context.applicationContext as OneGalleryApplication).mediaCacheRepository
-    }
+    val app = remember(context) { context.applicationContext as OneGalleryApplication }
+    val mediaCacheRepository = remember(app) { app.mediaCacheRepository }
+    val thumbCache = thumbnailCache ?: app.galleryThumbnailCache
     var displayData by remember(item.canonicalPath, sizePx) {
         mutableStateOf<Any?>(GalleryThumbnailResolver.initialDisplayData(item, mediaCacheRepository))
     }
     var resolvingThumb by remember(item.canonicalPath, sizePx) {
         mutableStateOf(
-            GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, syncCoordinator, item),
+            GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
         )
     }
 
@@ -69,7 +69,7 @@ fun GalleryThumbnailImage(
         if (displayData !is OneDriveCloudThumbnailKey) {
             resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(
                 displayData,
-                syncCoordinator,
+                thumbCache,
                 item,
             )
         }
@@ -78,7 +78,7 @@ fun GalleryThumbnailImage(
                 GalleryThumbnailResolver.resolveForGrid(
                     context = context,
                     item = item,
-                    syncCoordinator = syncCoordinator,
+                    thumbnailCache = thumbCache,
                     mediaCacheRepository = mediaCacheRepository,
                     sizePx = sizePx,
                 )
@@ -86,7 +86,7 @@ fun GalleryThumbnailImage(
                 displayData = resolved
             }
         } finally {
-            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, syncCoordinator, item)
+            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
         }
     }
 

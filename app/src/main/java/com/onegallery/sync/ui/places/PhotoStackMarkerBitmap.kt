@@ -12,7 +12,7 @@ import coil.ImageLoader
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.size.Size
-import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.ui.gallery.GalleryDisplayItem
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +25,7 @@ object PhotoStackMarkerBitmap {
     suspend fun create(
         context: Context,
         items: List<GalleryDisplayItem>,
-        syncCoordinator: SyncCoordinator,
+        thumbnailCache: GalleryThumbnailCache,
     ): Bitmap = withContext(Dispatchers.Default) {
         if (items.size == 1) {
             val path = items.first().canonicalPath
@@ -42,7 +42,7 @@ object PhotoStackMarkerBitmap {
         val cy = canvasSize / 2f + 4f * density
 
         val stackItems = items.take(MAX_VISIBLE)
-        val photos = stackItems.map { item -> loadThumbBitmap(context, item, syncCoordinator) }
+        val photos = stackItems.map { item -> loadThumbBitmap(context, item, thumbnailCache) }
 
         val layouts = stackLayout(photos.size, density)
         photos.forEachIndexed { index, bitmap ->
@@ -94,12 +94,12 @@ object PhotoStackMarkerBitmap {
     private suspend fun loadThumbBitmap(
         context: Context,
         item: GalleryDisplayItem,
-        syncCoordinator: SyncCoordinator,
+        thumbnailCache: GalleryThumbnailCache,
     ): Bitmap? {
         item.thumbnailModel?.let { model ->
             decodeModel(context, model)?.let { return it }
         }
-        val cached = syncCoordinator.ensureThumbnailCached(item.canonicalPath).getOrNull()
+        val cached = thumbnailCache.ensureThumbnailCached(item.canonicalPath).getOrNull()
         if (cached != null) {
             decodeModel(context, cached)?.let { return it }
         }

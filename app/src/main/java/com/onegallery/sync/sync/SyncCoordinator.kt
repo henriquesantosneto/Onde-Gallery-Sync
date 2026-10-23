@@ -228,16 +228,18 @@ class SyncCoordinator(
         thumbnails = galleryThumbnailService,
         thumbPrefetchAttemptsThisSession = thumbPrefetchAttemptsThisSession,
     )
-    private val thumbnailSyncPipelineHost = SyncCoordinatorThumbnailPipelineHost()
+    private val thumbnailSyncHost = SyncCoordinatorThumbnailSyncHost()
     private val thumbnailSyncPipeline = ThumbnailSyncPipeline(
         syncMetadataDao = syncMetadataDao,
         mediaCacheRepository = mediaCacheRepository,
         thumbnails = galleryThumbnailService,
-        host = thumbnailSyncPipelineHost,
+        host = thumbnailSyncHost,
     )
-    private val thumbnailHost = SyncCoordinatorThumbnailHost()
-    private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(thumbnailHost)
-    private val thumbnailPostSyncEngine = ThumbnailPostSyncEngine(thumbnailHost, thumbnailPrefetchRunner)
+    private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(thumbnailSyncHost)
+    private val thumbnailPostSyncEngine = ThumbnailPostSyncEngine(thumbnailSyncHost, thumbnailPrefetchRunner)
+
+    val thumbnailCache: GalleryThumbnailCache
+        get() = galleryThumbnailService
     /** Retriever/loadThumbnail bloqueiam — no máximo 2 threads dedicadas na fila. */
     private val thumbnailPrefetchBlocking = Executors.newFixedThreadPool(2).asCoroutineDispatcher()
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
@@ -952,7 +954,7 @@ class SyncCoordinator(
                 thumbnailQueue -> SyncQueueDisplayRow(
                     canonicalPath = entity.canonicalPath,
                     displayName = entity.displayName,
-                    statusLabel = thumbnailOperationLabel(entity),
+                    statusLabel = GalleryThumbnailLabels.operationLabel(entity),
                 )
                 gpsQueue -> SyncQueueDisplayRow(
                     canonicalPath = entity.canonicalPath,
@@ -2866,14 +2868,6 @@ class SyncCoordinator(
         return syncMetadataDao.getAll().count { row -> rowNeedsGpsBackfill(row) }
     }
 
-    private fun thumbnailOperationLabel(row: SyncMetadataEntity): String =
-        GalleryThumbnailLabels.operationLabel(row)
-
-    private fun thumbnailPrefetchProgressDetailSuffix(
-        localSourcesOnly: Boolean,
-        cloudSourcesOnly: Boolean,
-    ): String = GalleryThumbnailLabels.prefetchProgressDetailSuffix(localSourcesOnly, cloudSourcesOnly)
-
     /**
      * Corrige [CloudSyncState.PENDING_DOWNLOAD] fantasma (hash na listagem delta incompleto,
      * fingerprint local desatualizado, miniatura já em cache).
@@ -4371,58 +4365,10 @@ class SyncCoordinator(
         }
     }
 
-    private inner class SyncCoordinatorThumbnailPipelineHost : ThumbnailSyncPipelineHost {
-        override suspend fun ensureNotCancelled() = this@SyncCoordinator.ensureNotCancelled()
-
-        override suspend fun setSyncProgress(
-            phase: SyncProgressPhase,
-            headline: String,
-            detail: String,
-            alsoUpdateLastMessage: Boolean,
-        ) = this@SyncCoordinator.setSyncProgress(phase, headline, detail, alsoUpdateLastMessage)
-
-        override suspend fun publishFullPendingThumbnailQueueToUi(): Int =
-            this@SyncCoordinator.publishFullPendingThumbnailQueueToUi()
-
-        override fun clearActiveSyncItems() = this@SyncCoordinator.clearActiveSyncItems()
-
-        override suspend fun notifyGalleryDisplayRefresh() =
-            this@SyncCoordinator.notifyGalleryDisplayRefresh()
-
-        override suspend fun warmLocalItemsForThumbnailPass() =
-            this@SyncCoordinator.warmLocalItemsForThumbnailPass()
-
-        override suspend fun ensureAllLocalMediaPresentInIndex() =
-            this@SyncCoordinator.ensureAllLocalMediaPresentInIndex()
-
-        override suspend fun <T> withThumbnailPrefetchUi(block: suspend () -> T): T =
-            this@SyncCoordinator.withThumbnailPrefetchUi(block)
-
-        override suspend fun runMissingThumbnailPrefetch(
-            rows: List<SyncMetadataEntity>,
-            honorSyncCancel: Boolean,
-            parallelSlots: Int,
-            localSourcesOnly: Boolean,
-            cloudSourcesOnly: Boolean,
-            progressHeadline: String,
-            publishUi: Boolean,
-        ): Int = this@SyncCoordinator.runMissingThumbnailPrefetch(
-            rows,
-            honorSyncCancel,
-            parallelSlots,
-            localSourcesOnly,
-            cloudSourcesOnly,
-            progressHeadline,
-            publishUi,
-        )
-
-        override fun isOnline(): Boolean = networkMonitor.isOnline()
-
-        override fun isOneDriveGraphMode(): Boolean =
-            syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
-    }
-
-    private inner class SyncCoordinatorThumbnailHost : ThumbnailPrefetchHost, ThumbnailPostSyncHost {
+    private inner class SyncCoordinatorThumbnailSyncHost :
+        ThumbnailPrefetchHost,
+        ThumbnailPostSyncHost,
+        ThumbnailSyncPipelineHost {
         override val thumbnailPrefetchBlocking get() = this@SyncCoordinator.thumbnailPrefetchBlocking
 
         override fun isSyncCancelRequested(): Boolean = syncCancelRequested.get()
@@ -4459,10 +4405,10 @@ class SyncCoordinator(
         }
 
         override suspend fun missingThumbnailCountForProgress(): Int =
-            this@SyncCoordinator.missingThumbnailCountForProgress()
+            galleryThumbnailIndex.countMissing()
 
         override fun thumbnailOperationLabel(row: SyncMetadataEntity): String =
-            this@SyncCoordinator.thumbnailOperationLabel(row)
+            GalleryThumbnailLabels.operationLabel(row)
 
         override fun activeSyncProgressCallback(
             row: SyncMetadataEntity,
@@ -4473,7 +4419,7 @@ class SyncCoordinator(
         override fun thumbnailPrefetchProgressDetailSuffix(
             localSourcesOnly: Boolean,
             cloudSourcesOnly: Boolean,
-        ): String = this@SyncCoordinator.thumbnailPrefetchProgressDetailSuffix(
+        ): String = GalleryThumbnailLabels.prefetchProgressDetailSuffix(
             localSourcesOnly,
             cloudSourcesOnly,
         )
@@ -4485,7 +4431,7 @@ class SyncCoordinator(
             localSourcesOnly: Boolean,
             cloudSourcesOnly: Boolean,
             cloudVideoAggressive: Boolean,
-        ): Result<File?> = this@SyncCoordinator.ensureThumbnailCached(
+        ): Result<File?> = galleryThumbnailService.ensureThumbnailCached(
             canonicalPath,
             onProgress,
             lightweightPrefetch = lightweightPrefetch,
@@ -4495,7 +4441,7 @@ class SyncCoordinator(
         )
 
         override fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean =
-            this@SyncCoordinator.rowHasGalleryThumbnail(row)
+            galleryThumbnailService.rowHasGalleryThumbnail(row)
 
         override fun incrementThumbnailFailure(canonicalPath: String) {
             syncPreferences.incrementThumbnailFailure(canonicalPath)
@@ -4510,10 +4456,10 @@ class SyncCoordinator(
         }
 
         override suspend fun countIndexedMissingThumbnails(): Int =
-            this@SyncCoordinator.countIndexedMissingThumbnails()
+            galleryThumbnailIndex.countMissing()
 
         override suspend fun buildMissingThumbnailBatch(batchSize: Int): List<SyncMetadataEntity> =
-            this@SyncCoordinator.buildMissingThumbnailEntities(batchSize)
+            galleryThumbnailIndex.buildMissingBatch(batchSize)
 
         override suspend fun warmLocalItemsForThumbnailPass() =
             this@SyncCoordinator.warmLocalItemsForThumbnailPass()
@@ -4546,6 +4492,37 @@ class SyncCoordinator(
 
         override suspend fun giveUpStubbornThumbnailsBatch(maxItems: Int): Int =
             this@SyncCoordinator.giveUpStubbornThumbnailsBatch(maxItems)
+
+        override fun clearActiveSyncItems() = this@SyncCoordinator.clearActiveSyncItems()
+
+        override suspend fun ensureAllLocalMediaPresentInIndex() =
+            this@SyncCoordinator.ensureAllLocalMediaPresentInIndex()
+
+        override suspend fun <T> withThumbnailPrefetchUi(block: suspend () -> T): T =
+            this@SyncCoordinator.withThumbnailPrefetchUi(block)
+
+        override suspend fun runMissingThumbnailPrefetch(
+            rows: List<SyncMetadataEntity>,
+            honorSyncCancel: Boolean,
+            parallelSlots: Int,
+            localSourcesOnly: Boolean,
+            cloudSourcesOnly: Boolean,
+            progressHeadline: String,
+            publishUi: Boolean,
+        ): Int = this@SyncCoordinator.runMissingThumbnailPrefetch(
+            rows,
+            honorSyncCancel,
+            parallelSlots,
+            localSourcesOnly,
+            cloudSourcesOnly,
+            progressHeadline,
+            publishUi,
+        )
+
+        override fun isOnline(): Boolean = networkMonitor.isOnline()
+
+        override fun isOneDriveGraphMode(): Boolean =
+            syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
     }
 
     private companion object {

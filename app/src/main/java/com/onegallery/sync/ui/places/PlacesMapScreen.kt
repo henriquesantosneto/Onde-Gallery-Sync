@@ -52,6 +52,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.data.local.MediaAccessPermissions
+import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.ui.gallery.GalleryViewModel
@@ -81,6 +82,9 @@ fun PlacesMapScreen(
     onOpenItem: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val thumbnailCache = remember(context) {
+        (context.applicationContext as com.onegallery.sync.OneGalleryApplication).galleryThumbnailCache
+    }
     val hasMediaLocation = MediaAccessPermissions.hasMediaLocationAccess(context)
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle()
     val mediaLocationPermissionLauncher = rememberLauncherForActivityResult(
@@ -204,6 +208,7 @@ fun PlacesMapScreen(
                         pinSignature = pinSignature,
                         initialFocus = initialFocus,
                         syncCoordinator = syncCoordinator,
+                        thumbnailCache = thumbnailCache,
                         deviceLocationGranted = deviceLocationGranted,
                         locateUserRequest = locateUserRequest,
                         onPinSelected = { pin ->
@@ -324,6 +329,7 @@ private fun PlacesMapView(
     pinSignature: String,
     initialFocus: PlacesMapFocus?,
     syncCoordinator: SyncCoordinator,
+    thumbnailCache: GalleryThumbnailCache,
     deviceLocationGranted: Boolean,
     locateUserRequest: Int,
     onPinSelected: (PhotoMapPin) -> Unit,
@@ -434,7 +440,7 @@ private fun PlacesMapView(
                     val bitmap = PhotoStackMarkerBitmap.create(
                         context = context,
                         items = listOf(pin.item),
-                        syncCoordinator = syncCoordinator,
+                        thumbnailCache = thumbnailCache,
                     )
                     pin to bitmap
                 }

@@ -5,13 +5,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import com.onegallery.sync.sync.SyncCoordinator
 import java.io.File
 
 @Composable
 fun MediaThumbnailImage(
     item: GalleryDisplayItem,
-    syncCoordinator: SyncCoordinator?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
@@ -23,7 +21,6 @@ fun MediaThumbnailImage(
     }
     GalleryThumbnailImage(
         item = item,
-        syncCoordinator = syncCoordinator,
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale,

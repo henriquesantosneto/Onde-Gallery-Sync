@@ -627,7 +627,6 @@ private fun MediaThumbnail(
     ) {
         GalleryThumbnailImage(
             item = item,
-            syncCoordinator = syncCoordinator,
             contentDescription = item.displayName,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,

@@ -22,6 +22,7 @@ import android.content.Context
 import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.worker.BackgroundSyncScheduler
@@ -115,6 +116,7 @@ private data class UiControls(
 class GalleryViewModel(
     private val localMediaRepository: LocalMediaRepository,
     private val syncCoordinator: SyncCoordinator,
+    private val galleryThumbnailCache: GalleryThumbnailCache,
     private val galleryPreferences: GalleryPreferences,
     private val mediaCacheRepository: MediaCacheRepository,
     private val userMessages: AppUserMessages,
@@ -1331,7 +1333,7 @@ class GalleryViewModel(
             paths.map { path ->
                 async {
                     semaphore.withPermit {
-                        syncCoordinator.ensureThumbnailCached(path).getOrNull()
+                        galleryThumbnailCache.ensureThumbnailCached(path).getOrNull()
                         val hit = mediaCacheRepository.displayableThumbnailIfCached(path) != null
                         if (hit) cachedAny = true
                     }
@@ -1748,6 +1750,7 @@ internal fun sortPlaceAlbums(albums: List<MediaAlbum>, sort: AlbumListSort): Lis
 class GalleryViewModelFactory(
     private val localMediaRepository: LocalMediaRepository,
     private val syncCoordinator: SyncCoordinator,
+    private val galleryThumbnailCache: GalleryThumbnailCache,
     private val galleryPreferences: GalleryPreferences,
     private val mediaCacheRepository: MediaCacheRepository,
     private val userMessages: AppUserMessages,
@@ -1759,6 +1762,7 @@ class GalleryViewModelFactory(
             return GalleryViewModel(
                 localMediaRepository,
                 syncCoordinator,
+                galleryThumbnailCache,
                 galleryPreferences,
                 mediaCacheRepository,
                 userMessages,

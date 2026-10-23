@@ -25,7 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Cache de miniatura por item: local, Graph e placeholders. */
-internal class GalleryThumbnailService(
+class GalleryThumbnailService(
     private val appContext: Context,
     private val syncMetadataDao: SyncMetadataDao,
     private val mediaCacheRepository: MediaCacheRepository,
@@ -35,17 +35,17 @@ internal class GalleryThumbnailService(
     private val networkMonitor: NetworkMonitor,
     private val mediaDeleteRequestRouter: MediaDeleteRequestRouter,
     private val localIndexPassItems: () -> Map<Long, LocalMediaItem>,
-) {
+) : GalleryThumbnailCache {
     private val thumbnailMutexes = ConcurrentHashMap<String, Mutex>()
 
-    suspend fun ensureThumbnailCached(
+    override suspend fun ensureThumbnailCached(
         canonicalPath: String,
-        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
-        preferCloudFirst: Boolean = false,
-        lightweightPrefetch: Boolean = false,
-        localSourcesOnly: Boolean = false,
-        cloudSourcesOnly: Boolean = false,
-        cloudVideoAggressive: Boolean = false,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+        preferCloudFirst: Boolean,
+        lightweightPrefetch: Boolean,
+        localSourcesOnly: Boolean,
+        cloudSourcesOnly: Boolean,
+        cloudVideoAggressive: Boolean,
     ): Result<File?> {
         val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
         return mutex.withLock {

@@ -769,6 +769,9 @@ private fun MediaDetailPage(
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
     var contentAspectRatio by remember(canonicalPath) { mutableStateOf<Float?>(null) }
     val viewContext = LocalContext.current
+    val thumbnailCache = remember(viewContext) {
+        (viewContext.applicationContext as OneGalleryApplication).galleryThumbnailCache
+    }
     if (isActivePage) {
         SideEffect { onRecallingChanged(loadingFull) }
     }
@@ -861,7 +864,7 @@ private fun MediaDetailPage(
             }
             if (item != null) loading = false
             withContext(Dispatchers.IO) {
-                syncCoordinator.ensureThumbnailCached(canonicalPath)
+                thumbnailCache.ensureThumbnailCached(canonicalPath)
             }
             val afterThumb = loadDisplayItem() ?: item
             if (afterThumb != null) {
@@ -978,7 +981,6 @@ private fun MediaDetailPage(
                                 ) {
                                     MediaThumbnailImage(
                                         item = display,
-                                        syncCoordinator = syncCoordinator,
                                         contentDescription = display.displayName,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Fit,
@@ -1016,7 +1018,6 @@ private fun MediaDetailPage(
                                 ) {
                                     MediaThumbnailImage(
                                         item = display,
-                                        syncCoordinator = syncCoordinator,
                                         contentDescription = display.displayName,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Fit,

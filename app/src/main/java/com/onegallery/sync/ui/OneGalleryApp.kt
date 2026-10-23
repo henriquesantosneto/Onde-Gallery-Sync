@@ -304,6 +304,7 @@ fun OneGalleryApp(
         factory = GalleryViewModelFactory(
             localMediaRepository,
             syncCoordinator,
+            appContext.galleryThumbnailCache,
             galleryPreferences,
             mediaCacheRepository,
             appContext.userMessages,

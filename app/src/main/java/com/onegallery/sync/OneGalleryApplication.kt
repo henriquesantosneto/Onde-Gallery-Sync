@@ -8,6 +8,7 @@ import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
 import com.onegallery.sync.ui.gallery.OneDriveCloudThumbnailFetcher
+import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.sync.MediaLibraryChangeWatcher
 import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.BuildConfig
@@ -63,6 +64,10 @@ class OneGalleryApplication : Application() {
 
     lateinit var syncCoordinator: SyncCoordinator
         private set
+
+    /** Miniaturas (grade/detalhe/mapa) — mesma instância usada pelo [syncCoordinator]. */
+    val galleryThumbnailCache: GalleryThumbnailCache
+        get() = syncCoordinator.thumbnailCache
 
     lateinit var syncPreferences: SyncPreferences
         private set

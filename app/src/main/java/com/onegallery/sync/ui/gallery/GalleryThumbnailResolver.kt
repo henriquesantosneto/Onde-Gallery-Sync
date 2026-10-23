@@ -5,7 +5,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.sync.CloudSyncState
-import com.onegallery.sync.sync.SyncCoordinator
+import com.onegallery.sync.sync.GalleryThumbnailCache
 
 object GalleryThumbnailResolver {
 
@@ -57,12 +57,12 @@ object GalleryThumbnailResolver {
 
     fun shouldShowResolvingSpinner(
         displayData: Any?,
-        syncCoordinator: SyncCoordinator?,
+        thumbnailCache: GalleryThumbnailCache?,
         item: GalleryDisplayItem,
     ): Boolean {
         if (displayData is OneDriveCloudThumbnailKey) return false
         if (displayData != null) return false
-        if (syncCoordinator == null) return false
+        if (thumbnailCache == null) return false
         return item.oneDriveItemId != null ||
             (item.kind == MediaKind.VIDEO && item.localUri != null)
     }
@@ -70,7 +70,7 @@ object GalleryThumbnailResolver {
     suspend fun resolveForGrid(
         context: Context,
         item: GalleryDisplayItem,
-        syncCoordinator: SyncCoordinator?,
+        thumbnailCache: GalleryThumbnailCache?,
         mediaCacheRepository: MediaCacheRepository,
         sizePx: Int,
     ): Any? {
@@ -88,8 +88,8 @@ object GalleryThumbnailResolver {
                     return cached
                 }
             }
-        if (isVideo && preferCloud && syncCoordinator != null) {
-            syncCoordinator.ensureThumbnailCached(
+        if (isVideo && preferCloud && thumbnailCache != null) {
+            thumbnailCache.ensureThumbnailCached(
                 item.canonicalPath,
                 preferCloudFirst = true,
                 cloudSourcesOnly = !item.oneDriveItemId.isNullOrBlank(),
@@ -98,8 +98,8 @@ object GalleryThumbnailResolver {
                 ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
                 ?.let { return it }
         }
-        if (isVideo && item.localUri != null && syncCoordinator != null) {
-            syncCoordinator.ensureThumbnailCached(
+        if (isVideo && item.localUri != null && thumbnailCache != null) {
+            thumbnailCache.ensureThumbnailCached(
                 item.canonicalPath,
                 preferCloudFirst = false,
                 localSourcesOnly = true,
@@ -113,7 +113,7 @@ object GalleryThumbnailResolver {
                 return item.localUri
             }
         }
-        syncCoordinator?.ensureThumbnailCached(
+        thumbnailCache?.ensureThumbnailCached(
             item.canonicalPath,
             preferCloudFirst = preferCloud,
             cloudSourcesOnly = isVideo && preferCloud && !item.oneDriveItemId.isNullOrBlank(),
