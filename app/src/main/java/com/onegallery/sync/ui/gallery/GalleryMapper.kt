@@ -11,13 +11,20 @@ import com.onegallery.sync.sync.CloudSyncState
 import java.io.File
 
 object GalleryMapper {
-    private val videoExtensions = setOf("mp4", "mkv", "webm", "mov", "3gp", "avi", "m4v")
-    private val imageExtensions = setOf(
+    val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "mov", "3gp", "avi", "m4v")
+    val IMAGE_EXTENSIONS = setOf(
         "jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp", "tif", "tiff", "dng", "raw",
     )
-    private val audioExtensions = setOf(
+    val AUDIO_EXTENSIONS = setOf(
         "opus", "ogg", "oga", "mp3", "m4a", "aac", "wav", "flac", "amr", "3ga", "aiff", "aif", "wma",
     )
+    val DOCUMENT_EXTENSIONS = setOf(
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "apk",
+    )
+
+    private val videoExtensions = VIDEO_EXTENSIONS
+    private val imageExtensions = IMAGE_EXTENSIONS
+    private val audioExtensions = AUDIO_EXTENSIONS
 
     fun isVideoFileName(displayName: String): Boolean {
         return fileExtension(displayName) in videoExtensions
@@ -36,9 +43,13 @@ object GalleryMapper {
         return ext.isNotBlank() && ext !in documentLikeExtensions
     }
 
-    private val documentLikeExtensions = setOf(
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "apk",
-    )
+    private val documentLikeExtensions = DOCUMENT_EXTENSIONS
+
+    /** Predicado SQL: `LOWER(displayName) LIKE '%.ext'` para estatísticas do índice (Room). */
+    fun sqlDisplayNameExtensionMatch(extensions: Collection<String>): String =
+        extensions.joinToString(separator = " OR ") { ext ->
+            "LOWER(displayName) LIKE '%.${ext.lowercase()}'"
+        }
 
     private fun fileExtension(displayName: String): String =
         displayName.substringAfterLast('.', "").lowercase()
@@ -147,5 +158,37 @@ object GalleryMapper {
             localReleasedForSpace = false,
             showInBrowseGrid = true,
         )
+    }
+
+    /** SQL agregado para [com.onegallery.sync.data.local.db.SyncIndexStatsRow] (Room RawQuery). */
+    fun buildSyncIndexStatsSql(): String {
+        val video = sqlDisplayNameExtensionMatch(VIDEO_EXTENSIONS)
+        val image = sqlDisplayNameExtensionMatch(IMAGE_EXTENSIONS)
+        val audio = sqlDisplayNameExtensionMatch(AUDIO_EXTENSIONS)
+        val document = sqlDisplayNameExtensionMatch(DOCUMENT_EXTENSIONS)
+        val notVideo = "NOT ($video)"
+        val notVideoImage = "$notVideo AND NOT ($image)"
+        val notVideoImageAudio = "$notVideoImage AND NOT ($audio)"
+        return """
+            SELECT
+                (SELECT COUNT(*) FROM sync_metadata) AS total,
+                (SELECT COUNT(*) FROM sync_metadata WHERE localMediaId IS NOT NULL) AS withLocal,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'SYNCED') AS synced,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_UPLOAD') AS pendingUpload,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_DOWNLOAD') AS pendingDownload,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CLOUD_ONLY') AS cloudOnly,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'LOCAL_ONLY') AS localOnly,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR') AS errors,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CONFLICT'
+                    OR pendingDeleteTarget != 'NONE') AS conflicts,
+                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR'
+                    OR cloudState = 'CONFLICT'
+                    OR (lastError IS NOT NULL AND TRIM(lastError) != '')) AS attention,
+                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideo AND ($image)) AS images,
+                (SELECT COUNT(*) FROM sync_metadata WHERE ($video)) AS videos,
+                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImage AND ($audio)) AS audio,
+                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND ($document)) AS documents,
+                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND NOT ($document)) AS otherTypes
+        """.trimIndent()
     }
 }

@@ -14,4 +14,9 @@ data class SyncIndexStatsRow(
     @ColumnInfo(name = "errors") val errors: Int,
     @ColumnInfo(name = "conflicts") val conflicts: Int,
     @ColumnInfo(name = "attention") val attention: Int,
+    @ColumnInfo(name = "images") val images: Int,
+    @ColumnInfo(name = "videos") val videos: Int,
+    @ColumnInfo(name = "audio") val audio: Int,
+    @ColumnInfo(name = "documents") val documents: Int,
+    @ColumnInfo(name = "otherTypes") val otherTypes: Int,
 )

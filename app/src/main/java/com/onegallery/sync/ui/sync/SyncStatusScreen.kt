@@ -87,7 +87,7 @@ fun SyncStatusScreen(
     val app = LocalContext.current.applicationContext as OneGalleryApplication
     val syncTasks = remember { SyncTaskLauncher.from(app) }
 
-    val stats = indexStats?.toSyncStats() ?: SyncStats(0, 0, 0, 0, 0, 0, 0, 0, 0)
+    val stats = indexStats?.toSyncStats() ?: SyncStats.empty()
     val problemCount = indexStats?.attention ?: problemItems.size
     LaunchedEffect(Unit) {
         syncCoordinator.refreshThumbnailCacheStats(force = true)
@@ -494,6 +494,19 @@ private fun StatsCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             StatRow("Itens no índice", stats.total.toString())
+            if (stats.total > 0) {
+                Text(
+                    "Por tipo (extensão do arquivo)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                StatRow("Imagens", stats.images.toString())
+                StatRow("Vídeos", stats.videos.toString())
+                StatRow("Áudio", stats.audio.toString())
+                StatRow("Documentos", stats.documents.toString())
+                StatRow("Outros", stats.otherTypes.toString())
+            }
             thumbnailStats?.let { thumbs ->
                 StatRow("Miniaturas no índice", "${thumbs.indexedWithThumbnail} / ${thumbs.indexedEligible}")
                 if (thumbs.indexedPending > 0) {
@@ -658,7 +671,16 @@ private data class SyncStats(
     val localOnly: Int,
     val errors: Int,
     val conflicts: Int,
-)
+    val images: Int,
+    val videos: Int,
+    val audio: Int,
+    val documents: Int,
+    val otherTypes: Int,
+) {
+    companion object {
+        fun empty() = SyncStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    }
+}
 
 private fun SyncIndexStatsRow.toSyncStats(): SyncStats = SyncStats(
     total = total,
@@ -670,6 +692,11 @@ private fun SyncIndexStatsRow.toSyncStats(): SyncStats = SyncStats(
     localOnly = localOnly,
     errors = errors,
     conflicts = conflicts,
+    images = images,
+    videos = videos,
+    audio = audio,
+    documents = documents,
+    otherTypes = otherTypes,
 )
 
 private fun connectionHeadline(mode: SyncMode, coordinator: SyncCoordinator): String = when (mode) {

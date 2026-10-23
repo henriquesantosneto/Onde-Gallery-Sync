@@ -640,7 +640,9 @@ class SyncCoordinator(
         galleryMetadataSource.take(1),
         galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
     )
-    val syncIndexStats: Flow<SyncIndexStatsRow> = syncMetadataDao.observeIndexStats()
+    val syncIndexStats: Flow<SyncIndexStatsRow> = syncMetadataDao.observeIndexStats(
+        androidx.sqlite.db.SimpleSQLiteQuery(GalleryMapper.buildSyncIndexStatsSql()),
+    )
     val syncAttentionItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAttentionItems()
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
 

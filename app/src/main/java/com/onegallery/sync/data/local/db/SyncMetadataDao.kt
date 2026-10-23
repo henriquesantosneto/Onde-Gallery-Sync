@@ -4,6 +4,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.onegallery.sync.sync.PendingDeleteTarget
 import kotlinx.coroutines.flow.Flow
 
@@ -94,25 +96,8 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
     fun observePendingDeletes(): Flow<List<SyncMetadataEntity>>
 
-    @Query(
-        """
-        SELECT
-            (SELECT COUNT(*) FROM sync_metadata) AS total,
-            (SELECT COUNT(*) FROM sync_metadata WHERE localMediaId IS NOT NULL) AS withLocal,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'SYNCED') AS synced,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_UPLOAD') AS pendingUpload,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_DOWNLOAD') AS pendingDownload,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CLOUD_ONLY') AS cloudOnly,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'LOCAL_ONLY') AS localOnly,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR') AS errors,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CONFLICT'
-                OR pendingDeleteTarget != 'NONE') AS conflicts,
-            (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR'
-                OR cloudState = 'CONFLICT'
-                OR (lastError IS NOT NULL AND TRIM(lastError) != '')) AS attention
-        """,
-    )
-    fun observeIndexStats(): Flow<SyncIndexStatsRow>
+    @RawQuery(observedEntities = [SyncMetadataEntity::class])
+    fun observeIndexStats(query: SupportSQLiteQuery): Flow<SyncIndexStatsRow>
 
     @Query(
         """
