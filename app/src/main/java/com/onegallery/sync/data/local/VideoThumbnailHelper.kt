@@ -72,6 +72,31 @@ object VideoThumbnailHelper {
         return bounds.outWidth > 0 && bounds.outHeight > 0
     }
 
+    /** Grade / commit: descarta JPEG decodificável porém quase todo preto (comum em MP4 parcial na nuvem). */
+    fun isDisplayableVideoThumbnailFile(file: File): Boolean {
+        if (!isAcceptableThumbnailFile(file)) return false
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+        val sampleSize = maxOf(
+            1,
+            minOf(
+                bounds.outWidth / LUMA_SAMPLE_EDGE,
+                bounds.outHeight / LUMA_SAMPLE_EDGE,
+            ),
+        )
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return false
+        return try {
+            isAcceptableFrame(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     fun isAcceptableFrame(bitmap: Bitmap): Boolean {
         if (bitmap.width <= 0 || bitmap.height <= 0) return false
         val sample = bitmap.scale(LUMA_SAMPLE_EDGE, LUMA_SAMPLE_EDGE)

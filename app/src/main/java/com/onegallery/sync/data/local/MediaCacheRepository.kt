@@ -151,7 +151,7 @@ class MediaCacheRepository(context: Context) {
     ): File? {
         val file = displayableThumbnailIfCached(canonicalPath, oneDriveItemId) ?: return null
         if (!requireVideoAcceptable) return file
-        return file.takeIf { VideoThumbnailHelper.isAcceptableThumbnailFile(it) }
+        return file.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
     }
 
     /** Miniatura em disco incluindo cinza 96×96 (estatísticas / fila). */

@@ -1835,6 +1835,10 @@ class SyncCoordinator(
                     return null
                 }
             }
+            if (isVideo && !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)) {
+                staging.delete()
+                return null
+            }
             return mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
         }
 
@@ -1992,8 +1996,9 @@ class SyncCoordinator(
     ): Boolean {
         staging.delete()
         fun acceptCloudImageThumb(): Boolean {
-            return acceptDownloadedCloudThumbnail(staging, isVideo = false) ||
-                acceptDownloadedCloudVideoThumbnail(staging)
+            if (acceptDownloadedCloudVideoThumbnail(staging)) return true
+            if (!acceptDownloadedCloudThumbnail(staging, isVideo = false)) return false
+            return VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
         }
         var graphReady = false
         oneDriveRepository.downloadBestListedThumbnailToFile(itemId, staging, onProgress).onSuccess {
@@ -2010,13 +2015,17 @@ class SyncCoordinator(
         fun captureFromPartial(partial: File, lenientOnly: Boolean): Boolean {
             if (!partial.isFile || partial.length() <= 0L) return false
             staging.delete()
-            val ok = if (lenientOnly) {
+            val ok = VideoThumbnailHelper.captureToFile(partial, staging) ||
                 VideoThumbnailHelper.captureLenientFileToFile(partial, staging)
-            } else {
-                VideoThumbnailHelper.captureToFile(partial, staging)
+            if (!ok) {
+                staging.delete()
+                return false
             }
-            if (!ok) staging.delete()
-            return ok && mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
+            if (!VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)) {
+                staging.delete()
+                return false
+            }
+            return mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
         }
 
         val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
@@ -2141,9 +2150,13 @@ class SyncCoordinator(
     }
 
     private fun acceptDownloadedCloudVideoThumbnail(staging: File): Boolean {
-        if (acceptDownloadedCloudThumbnail(staging, isVideo = true)) return true
+        if (acceptDownloadedCloudThumbnail(staging, isVideo = true) &&
+            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
+        ) {
+            return true
+        }
         if (reencodeFileToDisplayableThumbnail(staging, staging) &&
-            VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
+            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
         ) {
             return true
         }
