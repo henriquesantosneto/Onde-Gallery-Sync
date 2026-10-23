@@ -212,7 +212,9 @@ class SyncCoordinator(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
     private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
-    private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(ThumbnailPrefetchHostBridge())
+    private val thumbnailHost = SyncCoordinatorThumbnailHost()
+    private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(thumbnailHost)
+    private val thumbnailPostSyncEngine = ThumbnailPostSyncEngine(thumbnailHost, thumbnailPrefetchRunner)
     /** Retriever/loadThumbnail bloqueiam — no máximo 2 threads dedicadas na fila. */
     private val thumbnailPrefetchBlocking = Executors.newFixedThreadPool(2).asCoroutineDispatcher()
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
@@ -3057,7 +3059,7 @@ class SyncCoordinator(
             "${thumbRows.size} item(ns) · até $PARALLEL_THUMBNAILS em paralelo.",
             alsoUpdateLastMessage = false,
         )
-        thumbRows.chunked(THUMB_PREFETCH_BATCH).forEach { batch ->
+        thumbRows.chunked(ThumbnailPostSyncEngine.THUMB_PREFETCH_BATCH).forEach { batch ->
             ensureNotCancelled()
             withThumbnailPrefetchUi {
                 runMissingThumbnailPrefetch(batch, honorSyncCancel = true)
@@ -3999,7 +4001,9 @@ class SyncCoordinator(
             if (!longTaskMutex.tryLock()) return@launch
             try {
                 if (syncCancelRequested.get()) return@launch
-                val rows = buildMissingThumbnailEntities(maxPerRun = THUMB_PREFETCH_BATCH)
+                val rows = buildMissingThumbnailEntities(
+                    maxPerRun = ThumbnailPostSyncEngine.THUMB_PREFETCH_BATCH,
+                )
                 val cached = withThumbnailPrefetchUi {
                     runMissingThumbnailPrefetch(rows, honorSyncCancel = false)
                 }
@@ -4265,185 +4269,25 @@ class SyncCoordinator(
         }
     }
 
-    /**
-     * Pós-sync: esgota miniaturas antes de GPS/datas. Retorna quantas ainda faltam (0 = galeria liberada).
-     */
-    private suspend fun runCompleteThumbnailPrefetchBeforeMetadata(): Int {
-        var stalledPasses = 0
-        var pass = 0
-        while (pass < THUMB_POST_SYNC_OUTER_PASSES) {
-            ensureNotCancelled()
-            val pending = countIndexedMissingThumbnails()
-            if (pending == 0) return 0
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Completando cache da galeria…",
-                "~$pending item(ns) sem JPEG salvo no app · leva ${pass + 1}. " +
-                    "Fotos no aparelho já aparecem na grade; aqui falta sobretudo nuvem e índice.",
-                alsoUpdateLastMessage = false,
-            )
-            val before = pending
-            prefetchMissingThumbnails(
-                completeAllPending = false,
-                maxTotalPerRun = THUMB_POST_SYNC_MAX_TOTAL_PER_PASS,
-                progressHeadline = "Completando cache da galeria…",
-            )
-            forcePlaceholderForStubbornMissingThumbnails()
-            val after = countIndexedMissingThumbnails()
-            if (after == 0) return 0
-            if (after >= before - THUMB_STALL_MIN_PROGRESS) {
-                stalledPasses++
-                if (stalledPasses >= THUMB_POST_SYNC_MAX_STALL_PASSES) {
-                    forcePlaceholderForStubbornMissingThumbnails()
-                    clearRunQueueAndActiveTransfers()
-                    return countIndexedMissingThumbnails()
-                }
-            } else {
-                stalledPasses = 0
-            }
-            pass++
-        }
-        forcePlaceholderForStubbornMissingThumbnails()
-        clearRunQueueAndActiveTransfers()
-        return countIndexedMissingThumbnails()
-    }
+    private suspend fun runCompleteThumbnailPrefetchBeforeMetadata(): Int =
+        thumbnailPostSyncEngine.runCompleteBeforeMetadata()
 
-    /** Miniaturas faltantes em levas; limite por sync para não travar GPS/resto do app. */
     private suspend fun prefetchMissingThumbnails(
-        batchSize: Int = THUMB_PREFETCH_BATCH,
+        batchSize: Int = ThumbnailPostSyncEngine.THUMB_PREFETCH_BATCH,
         honorUserSyncCancel: Boolean = true,
-        maxTotalPerRun: Int = THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
+        maxTotalPerRun: Int = ThumbnailPostSyncEngine.THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
         completeAllPending: Boolean = false,
-        parallelSlots: Int = PARALLEL_THUMBNAILS,
+        parallelSlots: Int = ThumbnailPostSyncEngine.PARALLEL_THUMBNAILS,
         progressHeadline: String = "Completando cache da galeria…",
     ) {
-        val pendingAtStart = countIndexedMissingThumbnails()
-        if (pendingAtStart == 0) return
-        warmLocalItemsForThumbnailPass()
-        bulkThumbnailPrefetchDepth.incrementAndGet()
-        refreshThumbnailPrefetchUiFlag()
-        if (shouldPublishSyncActivityUi()) {
-            publishFullPendingThumbnailQueueToUi()
-        }
-        var totalCached = 0
-        var round = 0
-        var consecutiveEmptyBatches = 0
-        var remainingEstimate = pendingAtStart
-        val roundsNeeded = (pendingAtStart + batchSize - 1) / batchSize
-        val maxRounds = if (completeAllPending) {
-            minOf(
-                THUMB_POST_SYNC_COMPLETION_MAX_ROUNDS,
-                roundsNeeded + THUMB_PREFETCH_EXTRA_ROUNDS,
-            )
-        } else {
-            minOf(
-                THUMB_PREFETCH_MAX_ROUNDS,
-                roundsNeeded + THUMB_PREFETCH_EXTRA_ROUNDS,
-            )
-        }
-        val totalCap = if (completeAllPending) Int.MAX_VALUE / 4 else maxTotalPerRun
-        val emptyBatchGiveUp = if (completeAllPending) 8 else 5
-        var stoppedByCap = false
-        try {
-            while (round < maxRounds) {
-                if (syncCancelRequested.get()) break
-                if (honorUserSyncCancel) {
-                    ensureNotCancelled()
-                    ensureSyncMayContinue()
-                } else {
-                    coroutineContext.ensureActive()
-                    ensureSyncMayContinue()
-                }
-                if (totalCached >= totalCap) {
-                    stoppedByCap = true
-                    break
-                }
-                if (round == 0 || round % 4 == 0) {
-                    remainingEstimate = countIndexedMissingThumbnails()
-                }
-                if (remainingEstimate == 0) break
-                if (_state.value.runQueue.isEmpty() && countIndexedMissingThumbnails() > 0) {
-                    publishFullPendingThumbnailQueueToUi()
-                }
-                var rows = buildMissingThumbnailEntities(batchSize)
-                if (rows.isEmpty() && countIndexedMissingThumbnails() > 0) {
-                    val gaveUp = giveUpStubbornThumbnailsBatch(THUMB_STUBBORN_PLACEHOLDER_CAP)
-                    if (gaveUp > 0) {
-                        consecutiveEmptyBatches = 0
-                        round++
-                        continue
-                    }
-                }
-                if (rows.isEmpty()) {
-                    consecutiveEmptyBatches++
-                    if (consecutiveEmptyBatches >= emptyBatchGiveUp) break
-                    round++
-                    continue
-                }
-                if (shouldPublishSyncActivityUi()) {
-                    setSyncProgress(
-                        SyncProgressPhase.PREFETCH_THUMBNAILS,
-                        progressHeadline,
-                        "${totalCached.coerceAtLeast(0)} gravadas · ~$remainingEstimate ainda · " +
-                            "leva ${round + 1}/$maxRounds. " +
-                            thumbnailPrefetchProgressDetailSuffix(
-                                localSourcesOnly = false,
-                                cloudSourcesOnly = false,
-                            ),
-                        alsoUpdateLastMessage = false,
-                    )
-                }
-                val batchCached = runMissingThumbnailPrefetch(
-                    rows,
-                    honorSyncCancel = honorUserSyncCancel,
-                    parallelSlots = parallelSlots,
-                    progressHeadline = progressHeadline,
-                )
-                totalCached += batchCached
-                remainingEstimate = (remainingEstimate - batchCached).coerceAtLeast(0)
-                round++
-                if (batchCached == 0) {
-                    consecutiveEmptyBatches++
-                    if (consecutiveEmptyBatches >= emptyBatchGiveUp) break
-                } else {
-                    consecutiveEmptyBatches = 0
-                }
-            }
-            val remaining = countIndexedMissingThumbnails()
-            if (shouldPublishSyncActivityUi() && (totalCached > 0 || remaining > 0 || stoppedByCap)) {
-                setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Miniaturas",
-                    when {
-                        remaining == 0 -> "$totalCached gerada(s)/baixada(s); índice completo."
-                        completeAllPending && remaining > 0 ->
-                            "$totalCached nesta leva · ~$remaining ainda — continuando antes do GPS…"
-                        stoppedByCap ->
-                            "$totalCached nesta sync · ~$remaining ainda pendentes " +
-                                "(limite por passagem — sincronize de novo para continuar)."
-                        else -> "$totalCached nesta sync · $remaining ainda sem miniatura (falha ou cancelamento)."
-                    },
-                )
-            }
-            flushPendingAlbumCoverRevisions()
-            bulkGalleryDisplayRefreshJob?.cancel()
-            bulkGalleryDisplayRefreshJob = null
-            if (totalCached > 0) {
-                notifyGalleryDisplayRefresh()
-            }
-            forcePlaceholderForStubbornMissingThumbnails()
-            refreshThumbnailCacheStats(force = true)
-        } finally {
-            bulkThumbnailPrefetchDepth.decrementAndGet()
-            refreshThumbnailPrefetchUiFlag()
-        }
-    }
-
-    /** Itens que a nuvem não decodifica ficam com placeholder — encerra o pós-sync. */
-    private suspend fun forcePlaceholderForStubbornMissingThumbnails() {
-        if (giveUpStubbornThumbnailsBatch(THUMB_STUBBORN_PLACEHOLDER_CAP) > 0) {
-            notifyGalleryDisplayRefresh()
-        }
+        thumbnailPostSyncEngine.prefetchMissingThumbnails(
+            batchSize = batchSize,
+            honorUserSyncCancel = honorUserSyncCancel,
+            maxTotalPerRun = maxTotalPerRun,
+            completeAllPending = completeAllPending,
+            parallelSlots = parallelSlots,
+            progressHeadline = progressHeadline,
+        )
     }
 
     /** Para o loop infinito: grava cinza 96×96 e tira da fila de prefetch. */
@@ -5159,7 +5003,7 @@ class SyncCoordinator(
         }
     }
 
-    private inner class ThumbnailPrefetchHostBridge : ThumbnailPrefetchHost {
+    private inner class SyncCoordinatorThumbnailHost : ThumbnailPrefetchHost, ThumbnailPostSyncHost {
         override val thumbnailPrefetchBlocking get() = this@SyncCoordinator.thumbnailPrefetchBlocking
 
         override fun isSyncCancelRequested(): Boolean = syncCancelRequested.get()
@@ -5245,21 +5089,48 @@ class SyncCoordinator(
         override fun clearThumbPrefetchAttempt(canonicalPath: String) {
             thumbPrefetchAttemptsThisSession.remove(canonicalPath)
         }
+
+        override suspend fun countIndexedMissingThumbnails(): Int =
+            this@SyncCoordinator.countIndexedMissingThumbnails()
+
+        override suspend fun buildMissingThumbnailBatch(batchSize: Int): List<SyncMetadataEntity> =
+            this@SyncCoordinator.buildMissingThumbnailEntities(batchSize)
+
+        override suspend fun warmLocalItemsForThumbnailPass() =
+            this@SyncCoordinator.warmLocalItemsForThumbnailPass()
+
+        override fun onBulkThumbnailPrefetchDepthChanged(delta: Int) {
+            bulkThumbnailPrefetchDepth.addAndGet(delta)
+        }
+
+        override fun refreshThumbnailPrefetchUiFlag() =
+            this@SyncCoordinator.refreshThumbnailPrefetchUiFlag()
+
+        override fun isRunQueueEmpty(): Boolean = _state.value.runQueue.isEmpty()
+
+        override suspend fun flushPendingAlbumCoverRevisions() =
+            this@SyncCoordinator.flushPendingAlbumCoverRevisions()
+
+        override fun cancelBulkGalleryDisplayRefreshJob() {
+            bulkGalleryDisplayRefreshJob?.cancel()
+            bulkGalleryDisplayRefreshJob = null
+        }
+
+        override suspend fun notifyGalleryDisplayRefresh() =
+            this@SyncCoordinator.notifyGalleryDisplayRefresh()
+
+        override suspend fun refreshThumbnailCacheStats(force: Boolean) =
+            this@SyncCoordinator.refreshThumbnailCacheStats(force)
+
+        override suspend fun clearRunQueueAndActiveTransfers() =
+            this@SyncCoordinator.clearRunQueueAndActiveTransfers()
+
+        override suspend fun giveUpStubbornThumbnailsBatch(maxItems: Int): Int =
+            this@SyncCoordinator.giveUpStubbornThumbnailsBatch(maxItems)
     }
 
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
-        /** Itens por leva no pós-sync (miniaturas locais + download na nuvem). */
-        const val THUMB_PREFETCH_BATCH = 512
-        const val THUMB_PREFETCH_EXTRA_ROUNDS = 12
-        const val THUMB_PREFETCH_MAX_ROUNDS = 48
-        const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 6_000
-        const val THUMB_POST_SYNC_COMPLETION_MAX_ROUNDS = 96
-        const val THUMB_POST_SYNC_OUTER_PASSES = 2
-        const val THUMB_POST_SYNC_MAX_STALL_PASSES = 2
-        /** Por passagem do pós-sync: encerra sync cedo; resto em 2º plano + próximo sync. */
-        const val THUMB_POST_SYNC_MAX_TOTAL_PER_PASS = 3_000
-        const val THUMB_STALL_MIN_PROGRESS = 32
         const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 4_000
         const val THUMB_BACKGROUND_CONTINUE_PASSES = 24
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
@@ -5296,7 +5167,6 @@ class SyncCoordinator(
         const val POST_UPLOAD_VIDEO_THUMB_RETRY_DELAY_MS = 6_000L
         const val POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS = 45_000L
         const val CLOUD_THUMB_PREFETCH_MAX_PER_PASS = 2_000
-        const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
