@@ -916,17 +916,22 @@ class SyncCoordinator(
     private fun setRunQueueFromEntities(
         entities: List<SyncMetadataEntity>,
         thumbnailQueue: Boolean = false,
+        gpsQueue: Boolean = false,
     ) {
         if (!shouldPublishSyncActivityUi()) return
         val rows = entities.map { entity ->
-            if (thumbnailQueue) {
-                SyncQueueDisplayRow(
+            when {
+                thumbnailQueue -> SyncQueueDisplayRow(
                     canonicalPath = entity.canonicalPath,
                     displayName = entity.displayName,
                     statusLabel = thumbnailOperationLabel(entity),
                 )
-            } else {
-                SyncQueueDisplayRow.fromEntity(entity)
+                gpsQueue -> SyncQueueDisplayRow(
+                    canonicalPath = entity.canonicalPath,
+                    displayName = entity.displayName,
+                    statusLabel = gpsQueueStatusLabel(entity),
+                )
+                else -> SyncQueueDisplayRow.fromEntity(entity)
             }
         }
         val apply = { _state.value = _state.value.copy(runQueue = rows) }
@@ -1647,6 +1652,9 @@ class SyncCoordinator(
                 bindActiveLongTaskJob()
                 _state.value = _state.value.copy(
                     isRunning = true,
+                    progressPhase = SyncProgressPhase.BACKFILL_GPS,
+                    activityHeadline = "Indexando localização (GPS)…",
+                    activityDetail = "Preparando fila…",
                     lastMessage = "Indexando localização das fotos…",
                     runQueue = emptyList(),
                     activeItems = emptyList(),
@@ -1667,6 +1675,10 @@ class SyncCoordinator(
                     _state.value = _state.value.copy(
                         isRunning = false,
                         activeItems = emptyList(),
+                        runQueue = emptyList(),
+                        progressPhase = SyncProgressPhase.IDLE,
+                        activityHeadline = "",
+                        activityDetail = "",
                         lastMessage = when {
                             withGps == 0 ->
                                 "Nenhuma foto com GPS encontrada. Conceda “Localização das mídias” " +
@@ -3263,15 +3275,51 @@ class SyncCoordinator(
         return syncMetadataDao.getAll().count { row -> rowNeedsThumbnailPrefetch(row) }
     }
 
-    private suspend fun countIndexedMissingGps(): Int {
-        return syncMetadataDao.getAll().count { row ->
-            row.latitude == null &&
-                row.longitude == null &&
-                (
-                    row.localMediaId != null || row.localContentUri != null ||
-                        row.cachedFilePath != null || row.oneDriveItemId != null
-                    )
+    private fun rowNeedsGpsBackfill(row: SyncMetadataEntity): Boolean {
+        if (row.latitude != null && row.longitude != null) return false
+        return row.localMediaId != null ||
+            !row.localContentUri.isNullOrBlank() ||
+            !row.cachedFilePath.isNullOrBlank() ||
+            !row.oneDriveItemId.isNullOrBlank()
+    }
+
+    private suspend fun allPendingGpsEntitiesForUi(): List<SyncMetadataEntity> {
+        return syncMetadataDao.getAll()
+            .asSequence()
+            .filter { rowNeedsGpsBackfill(it) }
+            .sortedWith(gpsBackfillComparator)
+            .toList()
+    }
+
+    /** Fila total na tela Sync durante leitura de GPS (como miniaturas). */
+    private suspend fun publishFullPendingGpsQueueToUi(): Int {
+        if (!shouldPublishSyncActivityUi()) return 0
+        val rows = allPendingGpsEntitiesForUi()
+        val total = rows.size
+        val capped = if (rows.size > GPS_RUN_QUEUE_UI_CAP) {
+            rows.take(GPS_RUN_QUEUE_UI_CAP)
+        } else {
+            rows
         }
+        setRunQueueFromEntities(capped, gpsQueue = true)
+        return total
+    }
+
+    private fun gpsQueueStatusLabel(row: SyncMetadataEntity): String {
+        val hasLocal = row.localMediaId != null ||
+            !row.localContentUri.isNullOrBlank() ||
+            !row.cachedFilePath.isNullOrBlank()
+        return when {
+            hasLocal && !row.oneDriveItemId.isNullOrBlank() ->
+                "Aguardando GPS (aparelho ou nuvem)…"
+            hasLocal -> "Aguardando GPS no aparelho…"
+            !row.oneDriveItemId.isNullOrBlank() -> "Aguardando GPS na nuvem…"
+            else -> "Aguardando leitura de GPS…"
+        }
+    }
+
+    private suspend fun countIndexedMissingGps(): Int {
+        return syncMetadataDao.getAll().count { row -> rowNeedsGpsBackfill(row) }
     }
 
     private fun thumbnailOperationLabel(row: SyncMetadataEntity): String {
@@ -4662,33 +4710,62 @@ class SyncCoordinator(
         if (resetCursor) {
             syncPreferences.gpsBackfillCursor = 0
         }
-        var totalIndexed = 0
-        var hitLimit = false
-        repeat(maxRounds) {
-            if (countIndexedMissingGps() == 0) return@repeat
-            val outcome = backfillMissingGpsLocationsOnce(
-                maxLocalProbesPerRun = GPS_LOCAL_BATCH,
-                maxCloudProbesPerRun = GPS_CLOUD_BATCH,
-            )
-            totalIndexed += outcome.indexed
-            hitLimit = hitLimit || outcome.hitProbeLimit
-            if (!outcome.hitProbeLimit && outcome.probesAttempted == 0) return@repeat
+        val globalTotalAtStart = publishFullPendingGpsQueueToUi()
+        if (globalTotalAtStart == 0) {
+            clearRunQueueAndActiveTransfers()
+            return
         }
-        if (totalIndexed > 0) {
-            val remaining = countIndexedMissingGps()
-            val suffix = when {
-                remaining > 0 && hitLimit ->
-                    " · $remaining ainda sem GPS (sincronize de novo ou verifique permissão de mídia)."
-                remaining > 0 ->
-                    " · $remaining sem GPS nos arquivos ou na nuvem."
-                else -> "."
-            }
+        if (shouldPublishSyncActivityUi()) {
             setSyncProgress(
                 SyncProgressPhase.BACKFILL_GPS,
-                "Localização GPS",
-                "$totalIndexed item(ns) indexado(s)$suffix",
+                "Indexando localização (GPS)…",
+                "0/$globalTotalAtStart · ~$globalTotalAtStart na fila · " +
+                    "até $PARALLEL_GPS_BACKFILL em paralelo.",
+                alsoUpdateLastMessage = false,
             )
-            notifyGalleryDisplayRefresh()
+        }
+        var totalIndexed = 0
+        var totalAnalyzed = 0
+        var hitLimit = false
+        try {
+            repeat(maxRounds) {
+                if (countIndexedMissingGps() == 0) return@repeat
+                if (_state.value.runQueue.isEmpty()) {
+                    publishFullPendingGpsQueueToUi()
+                }
+                val outcome = backfillMissingGpsLocationsOnce(
+                    maxLocalProbesPerRun = GPS_LOCAL_BATCH,
+                    maxCloudProbesPerRun = GPS_CLOUD_BATCH,
+                    globalTotalAtStart = globalTotalAtStart,
+                    analyzedBeforeBatch = totalAnalyzed,
+                )
+                totalIndexed += outcome.indexed
+                totalAnalyzed += outcome.probesAttempted
+                hitLimit = hitLimit || outcome.hitProbeLimit
+                if (!outcome.hitProbeLimit && outcome.probesAttempted == 0) return@repeat
+            }
+            if (totalIndexed > 0 || totalAnalyzed > 0) {
+                val remaining = countIndexedMissingGps()
+                val queueLeft = _state.value.runQueue.size
+                val suffix = when {
+                    remaining > 0 && hitLimit ->
+                        " · $remaining ainda sem GPS no índice (sincronize de novo ou permissão de mídia)."
+                    remaining > 0 ->
+                        " · $remaining sem GPS nos arquivos ou na nuvem."
+                    else -> "."
+                }
+                setSyncProgress(
+                    SyncProgressPhase.BACKFILL_GPS,
+                    "Localização GPS",
+                    "$totalAnalyzed/$globalTotalAtStart analisados · " +
+                        "$totalIndexed com GPS · " +
+                        (if (queueLeft > 0) "~$queueLeft ainda na fila · " else "") +
+                        suffix.trim(),
+                )
+                notifyGalleryDisplayRefresh()
+            }
+        } finally {
+            clearRunQueueAndActiveTransfers()
         }
     }
 
@@ -4746,14 +4823,10 @@ class SyncCoordinator(
     private suspend fun backfillMissingGpsLocationsOnce(
         maxLocalProbesPerRun: Int,
         maxCloudProbesPerRun: Int,
+        globalTotalAtStart: Int = 0,
+        analyzedBeforeBatch: Int = 0,
     ): GpsBackfillBatchOutcome {
-        val rows = syncMetadataDao.getAll().filter { row ->
-            row.latitude == null && row.longitude == null &&
-                (
-                    row.localMediaId != null || row.localContentUri != null ||
-                        row.cachedFilePath != null || row.oneDriveItemId != null
-                    )
-        }
+        val rows = allPendingGpsEntitiesForUi()
         if (rows.isEmpty()) return GpsBackfillBatchOutcome(0, false, 0)
         val sorted = rows.sortedWith(gpsBackfillComparator)
         val startCursor = syncPreferences.gpsBackfillCursor % sorted.size
@@ -4792,13 +4865,19 @@ class SyncCoordinator(
                                 },
                             )
                             val index = analyzedCount.incrementAndGet()
-                            if (index % 16 == 0 && _state.value.isRunning) {
+                            val analyzedOverall = analyzedBeforeBatch + index
+                            val queueLeft = _state.value.runQueue.size
+                            if ((index % 8 == 0 || index == candidates) &&
+                                (_state.value.isRunning || shouldPublishSyncActivityUi())
+                            ) {
+                                val totalLabel = globalTotalAtStart.takeIf { it > 0 } ?: rows.size
                                 setSyncProgress(
                                     SyncProgressPhase.BACKFILL_GPS,
                                     "Indexando localização (GPS)…",
-                                    "Analisados $index/$candidates · ${indexedCount.get()} com GPS · " +
-                                        "local $localProbes/$maxLocalProbesPerRun · " +
-                                        "nuvem $cloudProbes/$maxCloudProbesPerRun · " +
+                                    "$analyzedOverall/$totalLabel analisados · " +
+                                        "${indexedCount.get()} com GPS · " +
+                                        "~$queueLeft na fila · " +
+                                        "leva $index/$candidates · " +
                                         "até $PARALLEL_GPS_BACKFILL em paralelo.",
                                     alsoUpdateLastMessage = false,
                                 )
@@ -4823,6 +4902,7 @@ class SyncCoordinator(
                         } catch (_: Throwable) {
                         } finally {
                             removeActiveSyncItem(item.row.canonicalPath)
+                            removeFromRunQueue(item.row.canonicalPath)
                         }
                     }
                 }
@@ -5330,6 +5410,7 @@ class SyncCoordinator(
         const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 8
         /** Lista na tela Sync — evita OOM com dezenas de milhares pendentes. */
         const val THUMB_RUN_QUEUE_UI_CAP = 1_500
+        const val GPS_RUN_QUEUE_UI_CAP = 1_500
         const val PARALLEL_THUMB_PREFETCH = 2
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
