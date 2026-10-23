@@ -1634,6 +1634,8 @@ class SyncCoordinator(
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
         preferCloudFirst: Boolean = false,
         lightweightPrefetch: Boolean = false,
+        localSourcesOnly: Boolean = false,
+        cloudSourcesOnly: Boolean = false,
     ): Result<File?> {
         val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
         return mutex.withLock {
@@ -1643,6 +1645,8 @@ class SyncCoordinator(
                     onProgress,
                     preferCloudFirst,
                     lightweightPrefetch,
+                    localSourcesOnly,
+                    cloudSourcesOnly,
                 )
             }
         }
@@ -1673,6 +1677,8 @@ class SyncCoordinator(
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
         preferCloudFirst: Boolean = false,
         lightweightPrefetch: Boolean = false,
+        localSourcesOnly: Boolean = false,
+        cloudSourcesOnly: Boolean = false,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
@@ -1810,26 +1816,31 @@ class SyncCoordinator(
             return null
         }
 
-        if (syncedOnGraph) {
-            if (cloudEligible) {
+        when {
+            cloudSourcesOnly -> tryCloudSource()?.let { return it }
+            localSourcesOnly -> tryLocalSources()?.let { return it }
+            syncedOnGraph -> {
+                if (cloudEligible) {
+                    tryCloudSource()?.let { return it }
+                }
+                if (hasLocalSource) {
+                    tryLocalSources()?.let { return it }
+                }
+            }
+            cloudFirst -> {
+                tryCloudSource()?.let { return it }
+                tryLocalSources()?.let { return it }
+            }
+            else -> {
+                tryLocalSources()?.let { return it }
                 tryCloudSource()?.let { return it }
             }
-        } else if (cloudFirst) {
-            tryCloudSource()?.let { return it }
-            tryLocalSources()?.let { return it }
-        } else {
-            tryLocalSources()?.let { return it }
-            tryCloudSource()?.let { return it }
         }
 
         staging.delete()
         existingCachedThumb()?.let { cached ->
             syncPreferences.clearThumbnailFailure(canonicalPath)
             return Result.success(cached)
-        }
-
-        if (syncedOnGraph) {
-            return Result.success(null)
         }
 
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
@@ -3621,8 +3632,9 @@ class SyncCoordinator(
                     isRunning = true,
                     activeItems = emptyList(),
                     progressPhase = SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    activityHeadline = "Completando galeria em segundo plano…",
-                    activityDetail = "Miniaturas, capas e metadados.",
+                    activityHeadline = "Envio/recebimento concluído",
+                    activityDetail = "Miniaturas locais primeiro (funciona offline), " +
+                        "depois cache do OneDrive — não reenvia arquivos.",
                 )
                 seedResidualRunQueueAfterCoreSync()
                 drainRemainingRunQueueBeforePrefetch()
@@ -3636,6 +3648,8 @@ class SyncCoordinator(
                 )
                 ensureNotCancelled()
                 ensureAlbumCoverThumbnails()
+                ensureNotCancelled()
+                ensureCloudThumbnailsPrefetch()
                 ensureNotCancelled()
                 materializeNonVisualThumbnails()
                 ensureNotCancelled()
@@ -3874,8 +3888,7 @@ class SyncCoordinator(
         val rows = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
-                row.oneDriveItemId == null &&
-                    rowCanBuildThumbnail(row) &&
+                rowCanBuildThumbnail(row) &&
                     hasLocalThumbnailSource(row) &&
                     mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null
             }
@@ -3892,7 +3905,7 @@ class SyncCoordinator(
                 buildString {
                     append("${rows.size} no aparelho")
                     if (videoCount > 0) append(" ($videoCount vídeo(s))")
-                    append(" — só itens ainda não enviados ao OneDrive.")
+                    append(" — funciona offline; nuvem vem na leva seguinte.")
                 },
                 alsoUpdateLastMessage = false,
             )
@@ -3902,7 +3915,42 @@ class SyncCoordinator(
             runMissingThumbnailPrefetch(
                 rows,
                 honorSyncCancel = true,
-                parallelSlots = PARALLEL_THUMBNAILS,
+                parallelSlots = PARALLEL_THUMB_PREFETCH,
+                localSourcesOnly = true,
+            )
+        }
+        notifyGalleryDisplayRefresh()
+    }
+
+    /** Itens já no OneDrive — baixa miniatura Graph (não bloqueia envio). */
+    private suspend fun ensureCloudThumbnailsPrefetch(
+        maxPerRun: Int = CLOUD_THUMB_PREFETCH_MAX_PER_PASS,
+    ) {
+        ensureNotCancelled()
+        if (!networkMonitor.isOnline() || syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return
+        val rows = syncMetadataDao.getAll()
+            .asSequence()
+            .filter { row ->
+                !row.oneDriveItemId.isNullOrBlank() &&
+                    rowCanBuildThumbnail(row) &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null
+            }
+            .sortedWith(missingThumbnailPrefetchComparator)
+            .take(maxPerRun)
+            .toList()
+        if (rows.isEmpty()) return
+        setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Miniaturas do OneDrive…",
+            "${rows.size} via Graph · grade usa cache; aparelho continua com preview local.",
+            alsoUpdateLastMessage = false,
+        )
+        withThumbnailPrefetchUi {
+            runMissingThumbnailPrefetch(
+                rows,
+                honorSyncCancel = true,
+                parallelSlots = PARALLEL_THUMB_PREFETCH,
+                cloudSourcesOnly = true,
             )
         }
         notifyGalleryDisplayRefresh()
@@ -4098,11 +4146,19 @@ class SyncCoordinator(
         rows: List<SyncMetadataEntity>,
         honorSyncCancel: Boolean,
         parallelSlots: Int = PARALLEL_THUMBNAILS,
+        localSourcesOnly: Boolean = false,
+        cloudSourcesOnly: Boolean = false,
     ): Int {
         if (rows.isEmpty()) return 0
         var total = 0
         for (chunk in rows.chunked(THUMB_PREFETCH_RUN_CHUNK)) {
-            total += runMissingThumbnailPrefetchChunk(chunk, honorSyncCancel, parallelSlots)
+            total += runMissingThumbnailPrefetchChunk(
+                chunk,
+                honorSyncCancel,
+                parallelSlots,
+                localSourcesOnly,
+                cloudSourcesOnly,
+            )
         }
         return total
     }
@@ -4111,6 +4167,8 @@ class SyncCoordinator(
         rows: List<SyncMetadataEntity>,
         honorSyncCancel: Boolean,
         parallelSlots: Int,
+        localSourcesOnly: Boolean,
+        cloudSourcesOnly: Boolean,
     ): Int {
         if (rows.isEmpty()) return 0
         if (shouldPublishSyncActivityUi()) {
@@ -4147,6 +4205,8 @@ class SyncCoordinator(
                                             row.canonicalPath,
                                             activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
                                             lightweightPrefetch = true,
+                                            localSourcesOnly = localSourcesOnly,
+                                            cloudSourcesOnly = cloudSourcesOnly,
                                         )
                                     }
                                 }
@@ -4864,6 +4924,7 @@ class SyncCoordinator(
         const val PARALLEL_THUMB_PREFETCH = 2
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         const val POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS = 45_000L
+        const val CLOUD_THUMB_PREFETCH_MAX_PER_PASS = 2_000
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
