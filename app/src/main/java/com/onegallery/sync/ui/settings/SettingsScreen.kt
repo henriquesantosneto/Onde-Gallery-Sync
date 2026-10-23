@@ -73,6 +73,8 @@ import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.system.AppStartupPermissions
 import com.onegallery.sync.system.BatteryOptimization
 import com.onegallery.sync.data.local.MediaAccessPermissions
+import com.onegallery.sync.ui.library.IndexUsageStats
+import com.onegallery.sync.ui.library.LibraryIndexUsageCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +93,8 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val authState by authManager.state.collectAsStateWithLifecycle()
     val syncState by syncCoordinator.state.collectAsStateWithLifecycle()
+    val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle(initialValue = null)
+    val usageStats = indexStats?.let { IndexUsageStats.from(it) }
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }
     var autoDeleteRemote by remember { mutableStateOf(syncPreferences.autoDeleteRemoteWhenLocalRemoved) }
@@ -289,6 +293,13 @@ fun SettingsScreen(
                         Text(stringResource(R.string.auth_sign_out))
                     }
                 }
+            }
+
+            item {
+                SettingsSectionTitle("Uso da biblioteca (índice)", Icons.Outlined.Storage)
+            }
+            item {
+                LibraryIndexUsageCard(stats = usageStats)
             }
 
             item { HorizontalDivider(modifier = Modifier.padding(top = 8.dp)) }
