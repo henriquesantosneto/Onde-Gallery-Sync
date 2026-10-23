@@ -80,7 +80,7 @@ fun GalleryThumbnailImage(
             withContext(Dispatchers.IO) {
                 mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
                     ?.let { cached ->
-                        if (isVideo && !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(cached)) {
+                        if (isVideo && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)) {
                             mediaCacheRepository.invalidateCommittedThumbnail(
                                 item.canonicalPath,
                                 item.oneDriveItemId,
@@ -95,7 +95,7 @@ fun GalleryThumbnailImage(
                         preferCloudFirst = true,
                         cloudVideoAggressive = true,
                     ).getOrNull()
-                        ?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
+                        ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
                         ?.let { return@withContext it }
                 }
                 if (isVideo && item.localUri != null && syncCoordinator != null) {
@@ -104,7 +104,7 @@ fun GalleryThumbnailImage(
                         preferCloudFirst = false,
                         localSourcesOnly = true,
                     ).getOrNull()
-                        ?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
+                        ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
                         ?.let { return@withContext it }
                 }
                 if (item.localUri != null) {
@@ -122,7 +122,7 @@ fun GalleryThumbnailImage(
                 )?.getOrNull()
                     ?.takeIf {
                         if (isVideo) {
-                            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it)
+                            VideoThumbnailHelper.isGalleryVideoThumbnailFile(it)
                         } else {
                             mediaCacheRepository.isDisplayableGalleryThumbFile(it)
                         }
@@ -189,7 +189,7 @@ private fun isStaleThumbnailDisplayData(
     if (mediaCacheRepository.isSyncFailurePlaceholderThumbnail(file)) {
         return item.localUri != null && item.kind != MediaKind.VIDEO
     }
-    if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(file)) {
+    if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(file)) {
         return true
     }
     return false
@@ -203,7 +203,7 @@ private fun initialThumbnailDisplayData(
         return uri
     }
     mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)?.let { cached ->
-        if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(cached)) {
+        if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)) {
             mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
         } else {
             return cached

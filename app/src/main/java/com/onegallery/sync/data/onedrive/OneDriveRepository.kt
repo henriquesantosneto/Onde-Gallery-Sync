@@ -637,6 +637,40 @@ class OneDriveRepository(
         }
     }
 
+    /** Trecho central do MP4 (alguns arquivos têm moov longe do início/fim). */
+    suspend fun downloadMiddleRangeForVideoThumbnail(
+        itemId: String,
+        destination: File,
+        maxBytes: Long = 32L * 1024L * 1024L,
+        knownSizeBytes: Long? = null,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
+    ): Result<Unit> {
+        return runWithToken { token ->
+            destination.parentFile?.mkdirs()
+            val auth = "Bearer $token"
+            val size = knownSizeBytes?.takeIf { it > 0L }
+                ?: graphApi.getDriveItem(auth, itemId).size?.takeIf { it > 0L }
+                ?: error("Tamanho desconhecido para amostra central.")
+            if (size <= maxBytes) {
+                error("Arquivo pequeno demais para amostra central.")
+            }
+            val span = maxBytes.coerceAtMost(size)
+            val start = ((size - span) / 2L).coerceAtLeast(0L)
+            val end = (start + span - 1L).coerceAtMost(size - 1L)
+            resumableTransfer.downloadByteRange(
+                authorization = auth,
+                itemId = itemId,
+                rangeHeader = "bytes=$start-$end",
+                destination = destination,
+                totalBytesHint = span,
+                onProgress = onProgress,
+            )
+            if (!destination.isFile || destination.length() <= 0L) {
+                error("Amostra central vazia para miniatura de vídeo.")
+            }
+        }
+    }
+
     /** Baixa até [maxBytes] do início (ou o arquivo inteiro se for menor) para decodificar frame de vídeo. */
     suspend fun downloadCappedContentForVideoThumbnail(
         itemId: String,
@@ -686,28 +720,7 @@ class OneDriveRepository(
             for (candidate in candidates) {
                 val url = candidate.url?.takeIf { it.isNotBlank() } ?: continue
                 destination.delete()
-                val saved = runCatching {
-                    val request = Request.Builder()
-                        .url(url)
-                        .header("Authorization", auth)
-                        .get()
-                        .build()
-                    graphHttpClient.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) return@runCatching false
-                        val body = response.body ?: return@runCatching false
-                        body.byteStream().use { input ->
-                            destination.outputStream().use { output ->
-                                copyStreamWithProgress(
-                                    input,
-                                    output,
-                                    body.contentLength(),
-                                    onProgress,
-                                )
-                            }
-                        }
-                        destination.isFile && destination.length() > 0L
-                    }
-                }.getOrDefault(false)
+                val saved = downloadPresignedUrlToFile(url, destination, auth, onProgress)
                 if (saved) return@runWithToken
             }
             error("Graph não listou miniatura utilizável.")
@@ -752,6 +765,43 @@ class OneDriveRepository(
         return runWithToken { token ->
             graphApi.getDriveItem("Bearer $token", itemId).size?.takeIf { it > 0L }
         }.getOrNull()
+    }
+
+    private fun downloadPresignedUrlToFile(
+        url: String,
+        destination: File,
+        bearerAuth: String,
+        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+    ): Boolean {
+        fun saveFromResponse(response: okhttp3.Response): Boolean {
+            if (!response.isSuccessful) return false
+            val body = response.body ?: return false
+            val totalHint = body.contentLength()
+            body.byteStream().use { input ->
+                destination.outputStream().use { output ->
+                    var copied = 0L
+                    onProgress?.invoke(0L, totalHint.takeIf { it > 0L })
+                    val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        copied += read
+                        onProgress?.invoke(copied, totalHint.takeIf { it > 0L } ?: copied)
+                    }
+                    onProgress?.invoke(copied, totalHint.takeIf { it > 0L } ?: copied)
+                }
+            }
+            return destination.isFile && destination.length() > 0L
+        }
+        fun attempt(useAuth: Boolean): Boolean = runCatching {
+            val builder = Request.Builder().url(url).get()
+            if (useAuth) {
+                builder.header("Authorization", bearerAuth)
+            }
+            graphHttpClient.newCall(builder.build()).execute().use(::saveFromResponse)
+        }.getOrDefault(false)
+        return attempt(useAuth = false) || attempt(useAuth = true)
     }
 
     /**
