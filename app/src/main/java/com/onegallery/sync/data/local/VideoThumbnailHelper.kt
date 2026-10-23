@@ -38,9 +38,11 @@ object VideoThumbnailHelper {
         uri: Uri,
         destination: File,
         localMediaId: Long? = null,
+        /** Fila de sync: só MediaStore (evita MediaMetadataRetriever bloquear threads). */
+        mediaStoreOnly: Boolean = false,
     ): Boolean {
-        if (tryCaptureStrict(context, uri, destination, localMediaId)) return true
-        return tryCaptureLenient(context, uri, destination, localMediaId)
+        if (tryCaptureStrict(context, uri, destination, localMediaId, mediaStoreOnly)) return true
+        return tryCaptureLenient(context, uri, destination, localMediaId, mediaStoreOnly)
     }
 
     fun captureToFile(source: File, destination: File): Boolean {
@@ -78,6 +80,7 @@ object VideoThumbnailHelper {
         uri: Uri,
         destination: File,
         localMediaId: Long?,
+        mediaStoreOnly: Boolean,
     ): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -96,6 +99,7 @@ object VideoThumbnailHelper {
         loadMediaStoreVideoThumbnail(context, localMediaId, strict = true)?.let { bitmap ->
             if (writeBitmapIfValid(destination, bitmap, strict = true)) return true
         }
+        if (mediaStoreOnly) return false
         captureFromContentUri(context, uri, strictFrames = true)?.let { bitmap ->
             writeBitmap(destination, downscale(bitmap))
             return destination.length() > 0L
@@ -110,6 +114,7 @@ object VideoThumbnailHelper {
         uri: Uri,
         destination: File,
         localMediaId: Long?,
+        mediaStoreOnly: Boolean,
     ): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -124,6 +129,7 @@ object VideoThumbnailHelper {
         loadMediaStoreVideoThumbnail(context, localMediaId, strict = false)?.let { bitmap ->
             if (writeBitmapIfValid(destination, bitmap, strict = false)) return true
         }
+        if (mediaStoreOnly) return false
         captureFromContentUri(context, uri, strictFrames = false)?.let { bitmap ->
             writeBitmap(destination, downscale(bitmap))
             return destination.length() > 0L
@@ -265,6 +271,7 @@ object VideoThumbnailHelper {
         context: Context,
         uri: Uri,
         strictFrames: Boolean = true,
+        mediaStoreOnly: Boolean = false,
     ): Bitmap? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -273,6 +280,7 @@ object VideoThumbnailHelper {
                 thumb.recycle()
             }
         }
+        if (mediaStoreOnly) return null
         val retriever = MediaMetadataRetriever()
         return runCatching {
             retriever.setDataSource(context, uri)

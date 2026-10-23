@@ -53,6 +53,8 @@ import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.Executors
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -190,6 +192,8 @@ class SyncCoordinator(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
     private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
+    /** Retriever/loadThumbnail bloqueiam — no máximo 2 threads dedicadas na fila. */
+    private val thumbnailPrefetchBlocking = Executors.newFixedThreadPool(2).asCoroutineDispatcher()
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
     /** Caminhos enviados à nuvem nesta execução — só estes entram em “liberar após sync”. */
     private val pathsUploadedThisSync = mutableSetOf<String>()
@@ -1733,10 +1737,16 @@ class SyncCoordinator(
             val itemId = row.oneDriveItemId ?: return null
             if (!cloudEligible) return null
             staging.delete()
-            val thumbReady = if (isVideo) {
-                fetchCloudVideoNativeThumbnail(itemId, staging, onProgress)
-            } else {
-                fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)
+            val thumbReady = try {
+                withTimeout(CLOUD_THUMB_FETCH_TIMEOUT_MS) {
+                    if (isVideo) {
+                        fetchCloudVideoNativeThumbnail(itemId, staging, onProgress)
+                    } else {
+                        fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)
+                    }
+                }
+            } catch (_: TimeoutCancellationException) {
+                false
             }
             if (!thumbReady) {
                 staging.delete()
@@ -1753,6 +1763,7 @@ class SyncCoordinator(
                         uri,
                         staging,
                         localMediaId = row.localMediaId,
+                        mediaStoreOnly = lightweightPrefetch,
                     )
                 } else {
                     cacheImageThumbnailFromUri(uri, staging)
@@ -1783,7 +1794,8 @@ class SyncCoordinator(
                 val cached = File(path)
                 if (cached.isFile && cached.length() > 0L) {
                     val ok = if (isVideo) {
-                        VideoThumbnailHelper.captureToFile(cached, staging)
+                        if (lightweightPrefetch) false
+                        else VideoThumbnailHelper.captureToFile(cached, staging)
                     } else {
                         cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
                     }
@@ -2861,10 +2873,7 @@ class SyncCoordinator(
             )
             syncMetadataDao.upsert(synced)
             pathsUploadedThisSync.add(row.canonicalPath)
-            ensureThumbnailCachedOnIo(
-                synced.canonicalPath,
-                preferCloudFirst = true,
-            )
+            schedulePostUploadThumbnailRefresh(synced.canonicalPath)
             if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
                 releaseLocalSpaceForRows(
                     listOf(synced),
@@ -2883,7 +2892,19 @@ class SyncCoordinator(
         }
     }
 
-    /** Exclusões pendentes na fila; miniaturas ficam para [runMissingThumbnailPrefetch] (3 em paralelo). */
+    /** Miniatura da nuvem após upload — fora da fila de envio (3 paralelos). */
+    private fun schedulePostUploadThumbnailRefresh(canonicalPath: String) {
+        val scope = backgroundScope ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                withTimeout(POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS) {
+                    ensureThumbnailCached(canonicalPath, preferCloudFirst = true)
+                }
+            }
+        }
+    }
+
+    /** Exclusões pendentes na fila; miniaturas ficam para [runMissingThumbnailPrefetch]. */
     private suspend fun drainRemainingRunQueueBeforePrefetch() {
         val snapshot = _state.value.runQueue
         if (snapshot.isEmpty()) return
@@ -3608,13 +3629,6 @@ class SyncCoordinator(
                 ensureNotCancelled()
                 materializeNonVisualThumbnails()
                 ensureNotCancelled()
-                setSyncProgress(
-                    SyncProgressPhase.BACKFILL_GPS,
-                    "Indexando localização (GPS)…",
-                    "Antes das miniaturas em massa — mapa e Locais aparecem mais cedo.",
-                    alsoUpdateLastMessage = false,
-                )
-                backfillMissingGpsLocations()
                 clearRunQueueOnly()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
@@ -3625,6 +3639,13 @@ class SyncCoordinator(
                     alsoUpdateLastMessage = false,
                 )
                 val thumbsStillMissing = runCompleteThumbnailPrefetchBeforeMetadata()
+                setSyncProgress(
+                    SyncProgressPhase.BACKFILL_GPS,
+                    "Indexando localização (GPS)…",
+                    "Miniaturas em andamento ou concluídas — mapa e Locais.",
+                    alsoUpdateLastMessage = false,
+                )
+                backfillMissingGpsLocations()
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_CAPTURE_DATE,
                     "Indexando data de captura…",
@@ -3995,7 +4016,6 @@ class SyncCoordinator(
                 if (remainingEstimate == 0) break
                 val rows = buildMissingThumbnailEntities(batchSize)
                 if (rows.isEmpty()) break
-                setRunQueueFromEntities(rows, thumbnailQueue = true)
                 if (shouldPublishSyncActivityUi()) {
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
@@ -4082,7 +4102,10 @@ class SyncCoordinator(
         parallelSlots: Int,
     ): Int {
         if (rows.isEmpty()) return 0
-        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMBNAILS)
+        if (shouldPublishSyncActivityUi()) {
+            setRunQueueFromEntities(rows, thumbnailQueue = true)
+        }
+        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMB_PREFETCH)
         val semaphore = Semaphore(slots)
         val completed = AtomicInteger(0)
         val cachedCount = AtomicInteger(0)
@@ -4107,12 +4130,14 @@ class SyncCoordinator(
                                 )
                             }
                             try {
-                                withTimeout(THUMB_PREFETCH_ITEM_TIMEOUT_MS) {
-                                    ensureThumbnailCached(
-                                        row.canonicalPath,
-                                        activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
-                                        lightweightPrefetch = true,
-                                    )
+                                withContext(thumbnailPrefetchBlocking) {
+                                    withTimeout(THUMB_PREFETCH_ITEM_TIMEOUT_MS) {
+                                        ensureThumbnailCached(
+                                            row.canonicalPath,
+                                            activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
+                                            lightweightPrefetch = true,
+                                        )
+                                    }
                                 }
                             } catch (_: TimeoutCancellationException) {
                                 syncPreferences.incrementThumbnailFailure(row.canonicalPath)
@@ -4820,11 +4845,14 @@ class SyncCoordinator(
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
         const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
         /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
-        const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 45_000L
+        const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 30_000L
         /** Evita milhares de coroutines e fila “congelada” após os primeiros itens. */
-        const val THUMB_PREFETCH_RUN_CHUNK = 32
+        const val THUMB_PREFETCH_RUN_CHUNK = 16
         /** Depois disso o item sai da leva nesta sessão (grade tenta de novo sob demanda). */
         const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 3
+        const val PARALLEL_THUMB_PREFETCH = 2
+        const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
+        const val POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS = 45_000L
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
