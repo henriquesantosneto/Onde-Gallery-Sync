@@ -3226,6 +3226,14 @@ class SyncCoordinator(
         indexPassLocalItemsById = localMediaRepository.loadLocalGallerySnapshot().associateBy { it.id }
     }
 
+    /** Garante vídeos/fotos do MediaStore no Room — senão não entram na fila de miniaturas. */
+    private suspend fun ensureAllLocalMediaPresentInIndex() {
+        warmLocalItemsForThumbnailPass()
+        val items = indexPassLocalItemsById.values.toList()
+        if (items.isEmpty()) return
+        applyLocalIndexPass(items, lightMetadataOnly = true)
+    }
+
     /** Todos os itens do índice ainda sem JPEG de preview (fila total na tela Sync). */
     private suspend fun allPendingThumbnailEntitiesForUi(): List<SyncMetadataEntity> {
         return syncMetadataDao.getAll()
@@ -3326,7 +3334,14 @@ class SyncCoordinator(
         val hasLocalSource = row.localMediaId != null ||
             !row.localContentUri.isNullOrBlank() ||
             !row.cachedFilePath.isNullOrBlank()
+        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         return when {
+            isVideo && hasLocalSource && row.oneDriveItemId == null ->
+                "Gerando miniatura do vídeo no aparelho…"
+            isVideo && hasLocalSource ->
+                "Miniatura do vídeo (aparelho ou nuvem)…"
+            isVideo && row.oneDriveItemId != null ->
+                "Miniatura do vídeo na nuvem…"
             row.oneDriveItemId != null && !hasLocalSource ->
                 "Baixando preview do OneDrive (Graph)…"
             row.oneDriveItemId != null && hasLocalSource ->
@@ -3926,9 +3941,14 @@ class SyncCoordinator(
         val residual = syncMetadataDao.getPostSyncResidualCandidates().filter { row ->
             when {
                 row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
-                row.oneDriveItemId != null &&
-                    rowNeedsThumbnailPrefetch(row) &&
-                    row.cloudState == CloudSyncState.CLOUD_ONLY -> true
+                rowNeedsThumbnailPrefetch(row) &&
+                    (
+                        hasLocalThumbnailSource(row) ||
+                            (
+                                row.oneDriveItemId != null &&
+                                    row.cloudState == CloudSyncState.CLOUD_ONLY
+                                )
+                        ) -> true
                 else -> false
             }
         }
@@ -3953,6 +3973,7 @@ class SyncCoordinator(
                 seedResidualRunQueueAfterCoreSync()
                 drainRemainingRunQueueBeforePrefetch()
                 ensureNotCancelled()
+                ensureAllLocalMediaPresentInIndex()
                 ensureLocalMediaThumbnailsEarly()
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
@@ -3967,7 +3988,7 @@ class SyncCoordinator(
                 ensureNotCancelled()
                 materializeNonVisualThumbnails()
                 ensureNotCancelled()
-                clearRunQueueOnly()
+                publishFullPendingThumbnailQueueToUi()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
                 setSyncProgress(
@@ -4208,6 +4229,7 @@ class SyncCoordinator(
             )
         }
         yield()
+        publishFullPendingThumbnailQueueToUi()
         val rows = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
@@ -4254,7 +4276,8 @@ class SyncCoordinator(
             )
         }
         if (showProgress) {
-            clearRunQueueAndActiveTransfers()
+            clearActiveSyncItems()
+            publishFullPendingThumbnailQueueToUi()
             setSyncProgress(
                 SyncProgressPhase.PREFETCH_THUMBNAILS,
                 "Miniaturas locais concluídas",
@@ -4289,6 +4312,7 @@ class SyncCoordinator(
             .take(maxPerRun)
             .toList()
         if (rows.isEmpty()) return
+        publishFullPendingThumbnailQueueToUi()
         setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Miniaturas do OneDrive…",
@@ -4304,7 +4328,8 @@ class SyncCoordinator(
                 progressHeadline = "Miniaturas do OneDrive…",
             )
         }
-        clearRunQueueAndActiveTransfers()
+        clearActiveSyncItems()
+        publishFullPendingThumbnailQueueToUi()
         setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Leva OneDrive concluída",
@@ -4453,6 +4478,9 @@ class SyncCoordinator(
                     remainingEstimate = countIndexedMissingThumbnails()
                 }
                 if (remainingEstimate == 0) break
+                if (_state.value.runQueue.isEmpty() && countIndexedMissingThumbnails() > 0) {
+                    publishFullPendingThumbnailQueueToUi()
+                }
                 var rows = buildMissingThumbnailEntities(batchSize)
                 if (rows.isEmpty() && countIndexedMissingThumbnails() > 0) {
                     val gaveUp = giveUpStubbornThumbnailsBatch(THUMB_STUBBORN_PLACEHOLDER_CAP)
@@ -4649,9 +4677,11 @@ class SyncCoordinator(
                                         ensureThumbnailCached(
                                             row.canonicalPath,
                                             activeSyncProgressCallback(row, thumbnailOperationLabel(row)),
-                                            lightweightPrefetch = true,
+                                            lightweightPrefetch = !localSourcesOnly && !cloudSourcesOnly,
                                             localSourcesOnly = localSourcesOnly,
                                             cloudSourcesOnly = cloudSourcesOnly,
+                                            cloudVideoAggressive = cloudSourcesOnly &&
+                                                GalleryMapper.isVideoFileName(row.displayName),
                                         )
                                     }
                                 }

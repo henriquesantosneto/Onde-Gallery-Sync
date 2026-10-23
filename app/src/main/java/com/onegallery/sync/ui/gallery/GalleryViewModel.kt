@@ -1351,7 +1351,14 @@ class GalleryViewModel(
 
     private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {
         if (!GalleryMapper.supportsGeneratedThumbnail(item.displayName)) return false
-        if (mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath) != null) {
+        val isVideo = item.kind == com.onegallery.sync.data.local.MediaKind.VIDEO
+        if (
+            mediaCacheRepository.galleryThumbnailResolved(
+                item.canonicalPath,
+                item.oneDriveItemId,
+                requireVideoAcceptable = isVideo,
+            ) != null
+        ) {
             return false
         }
         if (item.oneDriveItemId != null) return true
