@@ -109,19 +109,28 @@ val gpsBackfillComparator: Comparator<SyncMetadataEntity> =
         { it.canonicalPath },
     )
 
-/** Prefetch de miniaturas: prioriza itens só na nuvem (sem cópia local). */
+/** Prefetch de miniaturas: aparelho primeiro (vídeos locais no topo), depois nuvem. */
 val missingThumbnailPrefetchComparator: Comparator<SyncMetadataEntity> =
     compareBy<SyncMetadataEntity>(
-        { entity ->
-            val cloudOnly = entity.localMediaId == null &&
-                entity.localContentUri.isNullOrBlank() &&
-                entity.oneDriveItemId != null
-            if (cloudOnly) 0 else 1
-        },
+        { entity -> thumbnailPrefetchPriorityBucket(entity) },
         { it.syncQueueSortOrder() },
-        { -(it.remoteModifiedAt ?: it.localModifiedAt ?: 0L) },
+        { -(it.localModifiedAt ?: it.remoteModifiedAt ?: 0L) },
         { it.canonicalPath },
     )
+
+private fun thumbnailPrefetchPriorityBucket(entity: SyncMetadataEntity): Int {
+    val hasLocal = entity.localMediaId != null ||
+        !entity.localContentUri.isNullOrBlank() ||
+        !entity.cachedFilePath.isNullOrBlank()
+    if (!hasLocal) return 2
+    val ext = entity.displayName.substringAfterLast('.', "").lowercase()
+    val isVideo = ext in LOCAL_VIDEO_EXTENSIONS
+    return if (isVideo) 0 else 1
+}
+
+private val LOCAL_VIDEO_EXTENSIONS = setOf(
+    "mp4", "mkv", "webm", "mov", "3gp", "avi", "m4v",
+)
 
 fun SyncMetadataEntity.queueDetailLabel(): String {
     if (pendingDeleteTarget != PendingDeleteTarget.NONE) {

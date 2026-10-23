@@ -23,7 +23,11 @@ object GalleryThumbnailModels {
     ): Any? {
         item.localUri?.let { uri ->
             loadSystemThumbnail(context, uri, item.localMediaId, item.kind, sizePx)?.let { return it }
-            if (item.kind != MediaKind.VIDEO) return uri
+            if (item.kind == MediaKind.VIDEO) {
+                VideoThumbnailHelper.captureFromContentUri(context, uri)?.let { return it }
+                return null
+            }
+            return uri
         }
         return item.thumbnailModel
     }

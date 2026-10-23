@@ -1174,6 +1174,7 @@ class SyncCoordinator(
                         "Indexação local concluída",
                         "$localCount item(ns) vistos no aparelho nesta passagem.",
                     )
+                    kickLocalMediaThumbnailPrefetchDuringSync()
                     ensureSyncMayContinue()
                     setSyncProgress(
                         SyncProgressPhase.LISTING_REMOTE,
@@ -3422,6 +3423,8 @@ class SyncCoordinator(
                 )
                 seedResidualRunQueueAfterCoreSync()
                 drainRemainingRunQueueBeforePrefetch()
+                ensureNotCancelled()
+                ensureLocalMediaThumbnailsEarly()
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Capas dos álbuns…",
@@ -3642,6 +3645,64 @@ class SyncCoordinator(
     }
 
     /** Uma leva: no máximo uma miniatura por álbum ainda sem capa (UI usa qualquer thumb local). */
+    private fun kickLocalMediaThumbnailPrefetchDuringSync() {
+        val scope = backgroundScope ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                ensureLocalMediaThumbnailsEarly(
+                    maxPerRun = LOCAL_THUMB_EARLY_DURING_SYNC_MAX,
+                    showProgress = false,
+                )
+            }
+        }
+    }
+
+    /**
+     * Fotos/vídeos no aparelho — antes da fila massiva da nuvem e do GPS longo.
+     */
+    private suspend fun ensureLocalMediaThumbnailsEarly(
+        maxPerRun: Int = LOCAL_THUMB_EARLY_POST_SYNC_MAX,
+        showProgress: Boolean = true,
+    ) {
+        ensureNotCancelled()
+        val rows = syncMetadataDao.getAll()
+            .asSequence()
+            .filter { row ->
+                rowCanBuildThumbnail(row) &&
+                    hasLocalThumbnailSource(row) &&
+                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null
+            }
+            .sortedWith(missingThumbnailPrefetchComparator)
+            .take(maxPerRun)
+            .toList()
+        if (rows.isEmpty()) return
+        if (showProgress) {
+            val videoCount = rows.count { GalleryMapper.isVideoFileName(it.displayName) }
+            setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas locais…",
+                buildString {
+                    append("${rows.size} no aparelho")
+                    if (videoCount > 0) append(" ($videoCount vídeo(s))")
+                    append(" — prioridade antes da nuvem.")
+                },
+                alsoUpdateLastMessage = false,
+            )
+        }
+        runMissingThumbnailPrefetch(
+            rows,
+            honorSyncCancel = true,
+            parallelSlots = PARALLEL_THUMBNAILS,
+        )
+        notifyGalleryDisplayRefresh()
+    }
+
+    private fun hasLocalThumbnailSource(row: SyncMetadataEntity): Boolean {
+        return row.localMediaId != null ||
+            !row.localContentUri.isNullOrBlank() ||
+            !row.cachedFilePath.isNullOrBlank()
+    }
+
     private suspend fun ensureAlbumCoverThumbnails() {
         ensureNotCancelled()
         val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
@@ -4544,6 +4605,8 @@ class SyncCoordinator(
         const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 5
         const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 5
+        const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
+        const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
         /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
         const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 120_000L
         const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
