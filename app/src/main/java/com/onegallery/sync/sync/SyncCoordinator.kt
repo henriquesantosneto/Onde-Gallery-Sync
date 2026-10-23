@@ -30,6 +30,8 @@ import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumDao
 import com.onegallery.sync.data.local.db.UserAlbumEntity
+import com.onegallery.sync.data.onedrive.CloudThumbnailStaging
+import com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader
 import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
@@ -1830,7 +1832,12 @@ class SyncCoordinator(
 
         fun commitIfReady(allowGraphVideoPoster: Boolean = false): File? {
             if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
-                if (!reencodeFileToDisplayableThumbnail(staging, staging)) {
+                if (!CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
+                        staging,
+                        staging,
+                        mediaCacheRepository,
+                    )
+                ) {
                     staging.delete()
                     return null
                 }
@@ -1861,7 +1868,7 @@ class SyncCoordinator(
             val itemId = row.oneDriveItemId ?: return null
             if (!cloudEligible) return null
             staging.delete()
-            val thumbReady = try {
+            val outcome = try {
                 withTimeout(
                     when {
                         isVideo && (cloudVideoAggressive || !lightweightPrefetch) ->
@@ -1871,29 +1878,29 @@ class SyncCoordinator(
                     },
                 ) {
                     if (isVideo) {
-                        fetchCloudVideoThumbnail(
+                        CloudVideoThumbnailLoader.loadIntoFile(
+                            oneDriveRepository,
+                            mediaCacheRepository,
                             itemId,
                             staging,
                             row.remoteSizeBytes,
+                            cloudVideoAggressive || !lightweightPrefetch,
                             onProgress,
-                            aggressive = cloudVideoAggressive || !lightweightPrefetch,
                         )
+                    } else if (fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)) {
+                        CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
                     } else {
-                        if (fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)) {
-                            CloudVideoThumbSource.GRAPH_POSTER
-                        } else {
-                            CloudVideoThumbSource.NONE
-                        }
+                        CloudVideoThumbnailLoader.Outcome.NONE
                     }
                 }
             } catch (_: TimeoutCancellationException) {
-                CloudVideoThumbSource.NONE
+                CloudVideoThumbnailLoader.Outcome.NONE
             }
-            if (thumbReady == CloudVideoThumbSource.NONE) {
+            if (outcome == CloudVideoThumbnailLoader.Outcome.NONE) {
                 staging.delete()
                 return null
             }
-            val fromGraphPoster = thumbReady == CloudVideoThumbSource.GRAPH_POSTER
+            val fromGraphPoster = outcome == CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
             return successFromStaging(fromGraphPoster).takeIf { it.getOrNull() != null }
         }
 
@@ -1997,33 +2004,6 @@ class SyncCoordinator(
      * Vídeo na nuvem: miniatura Graph (large/medium); se faltar, amostra pequena do arquivo
      * (cauda com moov ou início) para extrair frame — sem baixar o vídeo inteiro.
      */
-    private suspend fun fetchCloudVideoThumbnail(
-        itemId: String,
-        staging: File,
-        remoteSizeBytes: Long?,
-        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
-        aggressive: Boolean = false,
-    ): CloudVideoThumbSource {
-        return when (
-            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.loadIntoFile(
-                oneDriveRepository,
-                mediaCacheRepository,
-                itemId,
-                staging,
-                remoteSizeBytes,
-                aggressive,
-                onProgress,
-            )
-        ) {
-            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER ->
-                CloudVideoThumbSource.GRAPH_POSTER
-            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.Outcome.EXTRACTED_FRAME ->
-                CloudVideoThumbSource.EXTRACTED_FRAME
-            com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader.Outcome.NONE ->
-                CloudVideoThumbSource.NONE
-        }
-    }
-
     private suspend fun fetchCloudImageThumbnail(
         itemId: String,
         staging: File,
@@ -2032,7 +2012,11 @@ class SyncCoordinator(
     ): Boolean {
         var thumbReady = false
         oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            thumbReady = acceptDownloadedCloudThumbnail(staging, isVideo = false)
+            thumbReady = CloudThumbnailStaging.acceptDownloadedCloudThumbnail(
+                staging,
+                mediaCacheRepository,
+                isVideo = false,
+            )
             if (!thumbReady) staging.delete()
         }
         if (thumbReady) return true
@@ -2047,7 +2031,11 @@ class SyncCoordinator(
         ).onSuccess {
             if (partial.isFile && partial.length() > 0L) {
                 thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(partial), staging) ||
-                    reencodeFileToDisplayableThumbnail(partial, staging)
+                    CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
+                        partial,
+                        staging,
+                        mediaCacheRepository,
+                    )
             }
         }
         if (!thumbReady) {
@@ -2062,83 +2050,17 @@ class SyncCoordinator(
             ).onSuccess {
                 if (tail.isFile && tail.length() > 0L) {
                     thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(tail), staging) ||
-                        reencodeFileToDisplayableThumbnail(tail, staging)
+                        CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
+                            tail,
+                            staging,
+                            mediaCacheRepository,
+                        )
                 }
             }
             tail.delete()
         }
         partial.delete()
         return thumbReady
-    }
-
-    private fun isStagingDisplayableThumbnail(staging: File): Boolean {
-        return staging.isFile &&
-            staging.length() > 0L &&
-            mediaCacheRepository.isDisplayableGalleryThumbFile(staging)
-    }
-
-    private fun acceptDownloadedCloudThumbnail(staging: File, isVideo: Boolean): Boolean {
-        if (isVideo) {
-            return isStagingDisplayableThumbnail(staging) &&
-                VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
-        }
-        if (isStagingDisplayableThumbnail(staging)) return true
-        return reencodeFileToDisplayableThumbnail(staging, staging)
-    }
-
-    private fun acceptDownloadedCloudVideoThumbnail(staging: File): Boolean {
-        if (acceptDownloadedCloudThumbnail(staging, isVideo = true)) return true
-        if (reencodeFileToDisplayableThumbnail(staging, staging) &&
-            VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
-        ) {
-            return true
-        }
-        staging.delete()
-        return false
-    }
-
-    private fun reencodeFileToDisplayableThumbnail(source: File, destination: File): Boolean {
-        if (!source.isFile || source.length() <= 0L) return false
-        val normalized = if (source.absolutePath == destination.absolutePath) {
-            File(source.absolutePath + ".reencode")
-        } else {
-            destination
-        }
-        normalized.delete()
-        val ok = runCatching {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(source.absolutePath, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
-            val sample = thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, THUMB_CACHE_MAX_SIDE_PX)
-            val decodeOpts = BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            val bitmap = BitmapFactory.decodeFile(source.absolutePath, decodeOpts) ?: return false
-            try {
-                normalized.parentFile?.mkdirs()
-                normalized.outputStream().use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_CACHE_JPEG_QUALITY, out)
-                }
-                normalized.isFile && mediaCacheRepository.isDisplayableGalleryThumbFile(normalized)
-            } finally {
-                bitmap.recycle()
-            }
-        }.getOrDefault(false)
-        if (!ok) {
-            normalized.delete()
-            return false
-        }
-        if (normalized.absolutePath != destination.absolutePath) {
-            destination.delete()
-            if (!normalized.renameTo(destination)) {
-                normalized.inputStream().buffered().use { input ->
-                    destination.outputStream().buffered().use { output -> input.copyTo(output) }
-                }
-                normalized.delete()
-            }
-        }
-        return isStagingDisplayableThumbnail(destination)
     }
 
     private suspend fun ensureGraphSessionOnMain(): Result<Unit> {
@@ -3637,7 +3559,11 @@ class SyncCoordinator(
                 bitmap.eraseColor(MediaCacheRepository.SYNC_STUB_PLACEHOLDER_COLOR)
                 staging.parentFile?.mkdirs()
                 staging.outputStream().use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_CACHE_JPEG_QUALITY, out)
+                    bitmap.compress(
+                        Bitmap.CompressFormat.JPEG,
+                        CloudThumbnailStaging.THUMB_CACHE_JPEG_QUALITY,
+                        out,
+                    )
                 }
             } finally {
                 bitmap.recycle()
@@ -3675,7 +3601,11 @@ class SyncCoordinator(
         }
     }
 
-    private fun cacheImageThumbnailFromUri(uri: Uri, target: File, maxSidePx: Int = THUMB_CACHE_MAX_SIDE_PX): Boolean {
+    private fun cacheImageThumbnailFromUri(
+        uri: Uri,
+        target: File,
+        maxSidePx: Int = CloudThumbnailStaging.THUMB_CACHE_MAX_SIDE_PX,
+    ): Boolean {
         return runCatching {
             target.parentFile?.mkdirs()
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -3683,7 +3613,7 @@ class SyncCoordinator(
                 BitmapFactory.decodeStream(probe, null, bounds)
             } ?: return false
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
-            val sample = thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, maxSidePx)
+            val sample = CloudThumbnailStaging.thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, maxSidePx)
             val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = sample
                 inPreferredConfig = Bitmap.Config.RGB_565
@@ -3693,21 +3623,17 @@ class SyncCoordinator(
             } ?: return false
             try {
                 target.outputStream().use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_CACHE_JPEG_QUALITY, out)
+                    bitmap.compress(
+                        Bitmap.CompressFormat.JPEG,
+                        CloudThumbnailStaging.THUMB_CACHE_JPEG_QUALITY,
+                        out,
+                    )
                 }
                 target.length() > 0L
             } finally {
                 bitmap.recycle()
             }
         }.getOrDefault(false)
-    }
-
-    private fun thumbnailInSampleSize(width: Int, height: Int, maxSidePx: Int): Int {
-        var sample = 1
-        while (width / sample > maxSidePx || height / sample > maxSidePx) {
-            sample *= 2
-        }
-        return sample.coerceAtLeast(1)
     }
 
     private fun mergeLocalIntoEntity(
@@ -5377,16 +5303,8 @@ class SyncCoordinator(
         }
     }
 
-    private enum class CloudVideoThumbSource {
-        NONE,
-        GRAPH_POSTER,
-        EXTRACTED_FRAME,
-    }
-
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
-        const val THUMB_CACHE_MAX_SIDE_PX = 1280
-        const val THUMB_CACHE_JPEG_QUALITY = 88
         /** Itens por leva no pós-sync (miniaturas locais + download na nuvem). */
         const val THUMB_PREFETCH_BATCH = 512
         const val THUMB_PREFETCH_EXTRA_ROUNDS = 12
