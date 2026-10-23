@@ -1,9 +1,12 @@
 package com.onegallery.sync.ui.gallery
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -14,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
@@ -51,33 +55,50 @@ fun GalleryThumbnailImage(
     var displayData by remember(item.canonicalPath, sizePx) {
         mutableStateOf<Any?>(initialThumbnailDisplayData(item, mediaCacheRepository))
     }
+    var resolvingThumb by remember(item.canonicalPath, sizePx) {
+        mutableStateOf(displayData == null && item.oneDriveItemId != null && syncCoordinator != null)
+    }
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
-        withContext(Dispatchers.IO) {
-            if (item.localUri != null) {
-                GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { local ->
-                    return@withContext local
-                }
-            }
-            mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
-                ?.let { cached ->
-                    if (item.kind == MediaKind.VIDEO &&
-                        !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)
-                    ) {
-                        mediaCacheRepository.invalidateCommittedThumbnail(
-                            item.canonicalPath,
-                            item.oneDriveItemId,
-                        )
-                    } else {
-                        return@withContext cached
+        if (displayData != null) {
+            resolvingThumb = false
+            return@LaunchedEffect
+        }
+        resolvingThumb = item.oneDriveItemId != null && syncCoordinator != null
+        try {
+            withContext(Dispatchers.IO) {
+                if (item.localUri != null) {
+                    GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { local ->
+                        return@withContext local
                     }
                 }
-            syncCoordinator?.ensureThumbnailCached(item.canonicalPath)?.getOrNull()
-                ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
-                ?.let { return@withContext it }
-            item.thumbnailModel
-        }?.let { resolved ->
-            displayData = resolved
+                mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
+                    ?.let { cached ->
+                        if (item.kind == MediaKind.VIDEO &&
+                            !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)
+                        ) {
+                            mediaCacheRepository.invalidateCommittedThumbnail(
+                                item.canonicalPath,
+                                item.oneDriveItemId,
+                            )
+                        } else {
+                            return@withContext cached
+                        }
+                    }
+                val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
+                    item.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                syncCoordinator?.ensureThumbnailCached(
+                    item.canonicalPath,
+                    preferCloudFirst = preferCloud,
+                )?.getOrNull()
+                    ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
+                    ?.let { return@withContext it }
+                item.thumbnailModel
+            }?.let { resolved ->
+                displayData = resolved
+            }
+        } finally {
+            resolvingThumb = false
         }
     }
 
@@ -109,7 +130,11 @@ fun GalleryThumbnailImage(
     } else {
         val showCenterCloud = item.cloudState != CloudSyncState.CLOUD_ONLY &&
             item.cloudState != CloudSyncState.PENDING_DOWNLOAD
-        MediaThumbnailPlaceholder(modifier = modifier, showCloudIcon = showCenterCloud)
+        MediaThumbnailPlaceholder(
+            modifier = modifier,
+            showCloudIcon = showCenterCloud,
+            showLoading = resolvingThumb,
+        )
     }
 }
 
@@ -142,14 +167,24 @@ private fun initialThumbnailDisplayData(
 fun MediaThumbnailPlaceholder(
     modifier: Modifier = Modifier,
     showCloudIcon: Boolean = true,
+    showLoading: Boolean = false,
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (showCloudIcon) {
-            Icon(
-                Icons.Outlined.Cloud,
-                contentDescription = null,
-                tint = OneDriveBlue,
-            )
+        when {
+            showLoading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                )
+            }
+            showCloudIcon -> {
+                Icon(
+                    Icons.Outlined.Cloud,
+                    contentDescription = null,
+                    tint = OneDriveBlue,
+                )
+            }
         }
     }
 }
