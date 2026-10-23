@@ -1769,23 +1769,33 @@ class SyncCoordinator(
                 }
 
         if (!syncedOnGraph && !cloudFirst) {
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
-                ?.let { cached ->
-                    if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
-                        syncPreferences.clearThumbnailFailure(canonicalPath)
-                        return Result.success(cached)
-                    }
-                    mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-                }
+            if (rowHasGalleryThumbnail(row)) {
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(
+                    mediaCacheRepository.galleryThumbnailResolved(
+                        canonicalPath,
+                        row.oneDriveItemId,
+                        requireVideoAcceptable = isVideo,
+                    ),
+                )
+            }
+            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)?.let {
+                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
+            }
         } else if (syncedOnGraph || cloudFirst) {
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
-                ?.let { cached ->
-                    if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
-                        syncPreferences.clearThumbnailFailure(canonicalPath)
-                        return Result.success(cached)
-                    }
-                    mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-                }
+            if (rowHasGalleryThumbnail(row)) {
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(
+                    mediaCacheRepository.galleryThumbnailResolved(
+                        canonicalPath,
+                        row.oneDriveItemId,
+                        requireVideoAcceptable = isVideo,
+                    ),
+                )
+            }
+            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)?.let {
+                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
+            }
         }
 
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
@@ -1932,11 +1942,9 @@ class SyncCoordinator(
 
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
         if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
-            if (!isVideo) {
-                persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
-                    syncPreferences.clearThumbnailFailure(canonicalPath)
-                    return Result.success(placeholder)
-                }
+            persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(placeholder)
             }
         }
         return Result.success(null)
@@ -1955,7 +1963,8 @@ class SyncCoordinator(
         staging.delete()
         var ready = false
         oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            ready = acceptDownloadedCloudVideoThumbnail(staging)
+            ready = acceptDownloadedCloudThumbnail(staging, isVideo = false) ||
+                acceptDownloadedCloudVideoThumbnail(staging)
         }
         if (ready) return true
 
@@ -3110,7 +3119,7 @@ class SyncCoordinator(
                     removeFromRunQueue(path)
                 }
                 row.oneDriveItemId != null &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null -> {
+                    rowNeedsThumbnailPrefetch(row) -> {
                     thumbRows.add(row)
                 }
                 else -> removeFromRunQueue(path)
@@ -3140,6 +3149,20 @@ class SyncCoordinator(
         return false
     }
 
+    private fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean {
+        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
+        return mediaCacheRepository.galleryThumbnailResolved(
+            row.canonicalPath,
+            row.oneDriveItemId,
+            requireVideoAcceptable = isVideo,
+        ) != null
+    }
+
+    private fun rowNeedsThumbnailPrefetch(row: SyncMetadataEntity): Boolean {
+        if (!rowCanBuildThumbnail(row)) return false
+        return !rowHasGalleryThumbnail(row)
+    }
+
     /** Áudio (ex.: .opus), PDF etc. — placeholder fixo, sem fila de download Graph. */
     private suspend fun materializeNonVisualThumbnails() {
         val rows = syncMetadataDao.getAll().filter { row ->
@@ -3165,10 +3188,7 @@ class SyncCoordinator(
     private suspend fun allPendingThumbnailEntitiesForUi(): List<SyncMetadataEntity> {
         return syncMetadataDao.getAll()
             .asSequence()
-            .filter { row ->
-                mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
-                    rowCanBuildThumbnail(row)
-            }
+            .filter { row -> rowNeedsThumbnailPrefetch(row) }
             .sortedWith(missingThumbnailPrefetchComparator)
             .toList()
     }
@@ -3195,8 +3215,7 @@ class SyncCoordinator(
         val missing = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
-                mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
-                    rowCanBuildThumbnail(row) &&
+                rowNeedsThumbnailPrefetch(row) &&
                     (thumbPrefetchAttemptsThisSession[row.canonicalPath] ?: 0) <
                     THUMB_PREFETCH_MAX_SESSION_ATTEMPTS
             }
@@ -3211,10 +3230,7 @@ class SyncCoordinator(
     }
 
     private suspend fun countIndexedMissingThumbnails(): Int {
-        return syncMetadataDao.getAll().count { row ->
-            mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
-                rowCanBuildThumbnail(row)
-        }
+        return syncMetadataDao.getAll().count { row -> rowNeedsThumbnailPrefetch(row) }
     }
 
     private suspend fun countIndexedMissingGps(): Int {
@@ -3540,12 +3556,20 @@ class SyncCoordinator(
 
     /** Miniatura neutra para itens que a nuvem não consegue decodificar (evita loop infinito). */
     private fun persistMinimalPlaceholderThumbnail(row: SyncMetadataEntity): File? {
-        val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)
-        if (existing != null) return existing
+        if (rowHasGalleryThumbnail(row)) {
+            return mediaCacheRepository.galleryThumbnailResolved(
+                row.canonicalPath,
+                row.oneDriveItemId,
+                requireVideoAcceptable = GalleryMapper.isVideoFileName(row.displayName),
+            )
+        }
+        mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)?.let {
+            mediaCacheRepository.invalidateCommittedThumbnail(row.canonicalPath, row.oneDriveItemId)
+        }
         val staging = mediaCacheRepository.thumbStagingFile(row.canonicalPath)
         staging.delete()
         return runCatching {
-            val edge = MediaCacheRepository.MIN_DISPLAYABLE_THUMB_EDGE_PX
+            val edge = MediaCacheRepository.SYNC_FAILURE_PLACEHOLDER_EDGE_PX
             val bitmap = Bitmap.createBitmap(edge, edge, Bitmap.Config.RGB_565)
             try {
                 bitmap.eraseColor(MediaCacheRepository.SYNC_STUB_PLACEHOLDER_COLOR)
@@ -3825,7 +3849,7 @@ class SyncCoordinator(
             when {
                 row.pendingDeleteTarget != PendingDeleteTarget.NONE -> true
                 row.oneDriveItemId != null &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
+                    rowNeedsThumbnailPrefetch(row) &&
                     row.cloudState == CloudSyncState.CLOUD_ONLY -> true
                 else -> false
             }
@@ -4111,7 +4135,7 @@ class SyncCoordinator(
             .filter { row ->
                 rowCanBuildThumbnail(row) &&
                     hasLocalThumbnailSource(row) &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null
+                    rowNeedsThumbnailPrefetch(row)
             }
             .sortedWith(missingThumbnailPrefetchComparator)
             .take(maxPerRun)
@@ -4181,7 +4205,7 @@ class SyncCoordinator(
             .filter { row ->
                 !row.oneDriveItemId.isNullOrBlank() &&
                     rowCanBuildThumbnail(row) &&
-                    mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null
+                    rowNeedsThumbnailPrefetch(row)
             }
             .sortedWith(missingThumbnailPrefetchComparator)
             .take(maxPerRun)
@@ -4353,8 +4377,12 @@ class SyncCoordinator(
                 if (remainingEstimate == 0) break
                 var rows = buildMissingThumbnailEntities(batchSize)
                 if (rows.isEmpty() && countIndexedMissingThumbnails() > 0) {
-                    thumbPrefetchAttemptsThisSession.clear()
-                    rows = buildMissingThumbnailEntities(batchSize)
+                    val gaveUp = giveUpStubbornThumbnailsBatch(THUMB_STUBBORN_PLACEHOLDER_CAP)
+                    if (gaveUp > 0) {
+                        consecutiveEmptyBatches = 0
+                        round++
+                        continue
+                    }
                 }
                 if (rows.isEmpty()) {
                     consecutiveEmptyBatches++
@@ -4423,15 +4451,29 @@ class SyncCoordinator(
 
     /** Itens que a nuvem não decodifica ficam com placeholder — encerra o pós-sync. */
     private suspend fun forcePlaceholderForStubbornMissingThumbnails() {
-        val stubborn = buildMissingThumbnailEntities(maxPerRun = THUMB_STUBBORN_PLACEHOLDER_CAP)
-            .filter { !GalleryMapper.isVideoFileName(it.displayName) }
-        if (stubborn.isEmpty()) return
-        stubborn.forEach { row ->
-            persistMinimalPlaceholderThumbnail(row)
-        }
-        if (stubborn.isNotEmpty()) {
+        if (giveUpStubbornThumbnailsBatch(THUMB_STUBBORN_PLACEHOLDER_CAP) > 0) {
             notifyGalleryDisplayRefresh()
         }
+    }
+
+    /** Para o loop infinito: grava cinza 96×96 e tira da fila de prefetch. */
+    private suspend fun giveUpStubbornThumbnailsBatch(maxItems: Int): Int {
+        val stubborn = syncMetadataDao.getAll()
+            .asSequence()
+            .filter { row -> rowNeedsThumbnailPrefetch(row) }
+            .sortedWith(missingThumbnailPrefetchComparator)
+            .take(maxItems)
+            .toList()
+        if (stubborn.isEmpty()) return 0
+        var saved = 0
+        stubborn.forEach { row ->
+            persistMinimalPlaceholderThumbnail(row)?.let {
+                syncPreferences.clearThumbnailFailure(row.canonicalPath)
+                thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
+                saved++
+            }
+        }
+        return saved
     }
 
     private suspend fun runMissingThumbnailPrefetch(
@@ -4538,10 +4580,7 @@ class SyncCoordinator(
                             } catch (_: TimeoutCancellationException) {
                                 syncPreferences.incrementThumbnailFailure(row.canonicalPath)
                             }
-                            var hit = mediaCacheRepository.displayableThumbnailIfCached(
-                                row.canonicalPath,
-                                row.oneDriveItemId,
-                            ) != null
+                            var hit = rowHasGalleryThumbnail(row)
                             if (!hit) {
                                 thumbPrefetchAttemptsThisSession.merge(
                                     row.canonicalPath,
@@ -5265,7 +5304,7 @@ class SyncCoordinator(
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
-        const val CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES = 32L * 1024L * 1024L
+        const val CLOUD_VIDEO_THUMB_TAIL_MAX_BYTES = 48L * 1024L * 1024L
         const val CLOUD_VIDEO_THUMB_HEAD_MAX_BYTES = 16L * 1024L * 1024L
         /** Vídeos pequenos na nuvem: baixa inteiro e extrai frame (mais confiável que trecho). */
         const val CLOUD_VIDEO_FULL_FETCH_MAX_BYTES = 25L * 1024L * 1024L

@@ -142,6 +142,17 @@ class MediaCacheRepository(context: Context) {
         return file.takeIf { isDisplayableGalleryThumb(it) }
     }
 
+    /** Grade: JPEG real ou placeholder de desistência (96×96) — não conta stub 32×32 legado. */
+    fun galleryThumbnailResolved(
+        canonicalPath: String,
+        oneDriveItemId: String?,
+        requireVideoAcceptable: Boolean,
+    ): File? {
+        val file = displayableThumbnailIfCached(canonicalPath, oneDriveItemId) ?: return null
+        if (!requireVideoAcceptable) return file
+        return file.takeIf { VideoThumbnailHelper.isAcceptableThumbnailFile(it) }
+    }
+
     /** Placeholder cinza de sync (32×32) — não conta como miniatura real. */
     fun isSyncStubPlaceholderThumbnail(file: File): Boolean {
         if (!file.isFile || file.length() <= 0L) return false
@@ -296,6 +307,8 @@ class MediaCacheRepository(context: Context) {
         const val MIN_DISPLAYABLE_THUMB_EDGE_PX = 32
         /** JPEG cinza 32×32 fica abaixo deste tamanho; miniaturas reais são maiores. */
         const val SYNC_STUB_PLACEHOLDER_MAX_BYTES = 2_048L
+        /** Placeholder após falhas — maior que stub 32×32 para não ser apagado no disco. */
+        const val SYNC_FAILURE_PLACEHOLDER_EDGE_PX = 96
         /** Cor neutra para placeholder de sync (evita célula totalmente preta). */
         val SYNC_STUB_PLACEHOLDER_COLOR: Int = Color.rgb(0xC4, 0xC4, 0xC4)
     }
