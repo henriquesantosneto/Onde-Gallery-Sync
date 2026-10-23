@@ -3036,10 +3036,26 @@ class SyncCoordinator(
         val hasLocalSource = row.localMediaId != null ||
             !row.localContentUri.isNullOrBlank() ||
             !row.cachedFilePath.isNullOrBlank()
-        return if (row.oneDriveItemId != null && !hasLocalSource) {
-            "Baixando miniatura da nuvem…"
-        } else {
-            "Gerando miniatura…"
+        return when {
+            row.oneDriveItemId != null && !hasLocalSource ->
+                "Baixando preview do OneDrive (Graph)…"
+            row.oneDriveItemId != null && hasLocalSource ->
+                "Gravando preview no cache (nuvem ou aparelho)…"
+            else -> "Gravando preview local no cache…"
+        }
+    }
+
+    private fun thumbnailPrefetchProgressDetailSuffix(
+        localSourcesOnly: Boolean,
+        cloudSourcesOnly: Boolean,
+    ): String {
+        return when {
+            cloudSourcesOnly ->
+                "Só baixa JPEG pequeno do OneDrive — não baixa foto/vídeo original."
+            localSourcesOnly ->
+                "Copia preview do MediaStore para o cache — grade já mostra o aparelho."
+            else ->
+                "Completa o que falta: Graph (nuvem) ou cache local — sem reenviar arquivos."
         }
     }
 
@@ -3917,6 +3933,7 @@ class SyncCoordinator(
                 honorSyncCancel = true,
                 parallelSlots = PARALLEL_THUMB_PREFETCH,
                 localSourcesOnly = true,
+                progressHeadline = "Miniaturas locais no cache…",
             )
         }
         notifyGalleryDisplayRefresh()
@@ -3951,6 +3968,7 @@ class SyncCoordinator(
                 honorSyncCancel = true,
                 parallelSlots = PARALLEL_THUMB_PREFETCH,
                 cloudSourcesOnly = true,
+                progressHeadline = "Miniaturas do OneDrive (Graph)…",
             )
         }
         notifyGalleryDisplayRefresh()
@@ -3995,14 +4013,16 @@ class SyncCoordinator(
             if (pending == 0) return 0
             setSyncProgress(
                 SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas na galeria…",
-                "~$pending pendente(s) · leva ${pass + 1} — GPS só depois de concluir.",
+                "Completando cache da galeria…",
+                "~$pending item(ns) sem JPEG salvo no app · leva ${pass + 1}. " +
+                    "Fotos no aparelho já aparecem na grade; aqui falta sobretudo nuvem e índice.",
                 alsoUpdateLastMessage = false,
             )
             val before = pending
             prefetchMissingThumbnails(
                 completeAllPending = false,
                 maxTotalPerRun = THUMB_POST_SYNC_MAX_TOTAL_PER_PASS,
+                progressHeadline = "Completando cache da galeria…",
             )
             forcePlaceholderForStubbornMissingThumbnails()
             val after = countIndexedMissingThumbnails()
@@ -4031,6 +4051,7 @@ class SyncCoordinator(
         maxTotalPerRun: Int = THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
         completeAllPending: Boolean = false,
         parallelSlots: Int = PARALLEL_THUMBNAILS,
+        progressHeadline: String = "Completando cache da galeria…",
     ) {
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
@@ -4078,9 +4099,13 @@ class SyncCoordinator(
                 if (shouldPublishSyncActivityUi()) {
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
-                        "Miniaturas na galeria…",
-                        "${totalCached.coerceAtLeast(0)} de ~$pendingAtStart · " +
-                            "~$remainingEstimate pendente(s) · leva ${round + 1}/$maxRounds.",
+                        progressHeadline,
+                        "${totalCached.coerceAtLeast(0)} gravadas · ~$remainingEstimate ainda · " +
+                            "leva ${round + 1}/$maxRounds. " +
+                            thumbnailPrefetchProgressDetailSuffix(
+                                localSourcesOnly = false,
+                                cloudSourcesOnly = false,
+                            ),
                         alsoUpdateLastMessage = false,
                     )
                 }
@@ -4088,6 +4113,7 @@ class SyncCoordinator(
                     rows,
                     honorSyncCancel = honorUserSyncCancel,
                     parallelSlots = parallelSlots,
+                    progressHeadline = progressHeadline,
                 )
                 totalCached += batchCached
                 remainingEstimate = (remainingEstimate - batchCached).coerceAtLeast(0)
@@ -4148,6 +4174,7 @@ class SyncCoordinator(
         parallelSlots: Int = PARALLEL_THUMBNAILS,
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
+        progressHeadline: String = "Completando cache da galeria…",
     ): Int {
         if (rows.isEmpty()) return 0
         var total = 0
@@ -4158,6 +4185,7 @@ class SyncCoordinator(
                 parallelSlots,
                 localSourcesOnly,
                 cloudSourcesOnly,
+                progressHeadline,
             )
         }
         return total
@@ -4169,6 +4197,7 @@ class SyncCoordinator(
         parallelSlots: Int,
         localSourcesOnly: Boolean,
         cloudSourcesOnly: Boolean,
+        progressHeadline: String,
     ): Int {
         if (rows.isEmpty()) return 0
         if (shouldPublishSyncActivityUi()) {
@@ -4230,10 +4259,13 @@ class SyncCoordinator(
                             if (shouldPublishSyncActivityUi()) {
                                 setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
-                                    "Gerando e baixando miniaturas…",
-                                    "$done/${rows.size} nesta leva · " +
-                                        "${cachedCount.get()} salvas · " +
-                                        "até $slots em paralelo.",
+                                    progressHeadline,
+                                    "$done/${rows.size} nesta leva · ${cachedCount.get()} JPEG no cache · " +
+                                        "até $slots em paralelo. " +
+                                        thumbnailPrefetchProgressDetailSuffix(
+                                            localSourcesOnly,
+                                            cloudSourcesOnly,
+                                        ),
                                     alsoUpdateLastMessage = false,
                                 )
                             }

@@ -232,8 +232,8 @@ fun SyncStatusScreen(
                                     SyncProgressPhase.SANITIZING_INDEX ->
                                         "Última checagem de entradas duplicadas ou órfãs."
                                     SyncProgressPhase.PREFETCH_THUMBNAILS ->
-                                        "Bibliotecas grandes podem levar vários minutos. " +
-                                            "Cada item tem até ~2 min; a barra indeterminada é normal entre levas."
+                                        "Grava previews JPEG no app (OneDrive Graph ou cache). " +
+                                            "Não reenvia fotos/vídeos; itens no aparelho já aparecem na galeria."
                                     else -> null
                                 }
                                 phaseHint?.let { hint ->
