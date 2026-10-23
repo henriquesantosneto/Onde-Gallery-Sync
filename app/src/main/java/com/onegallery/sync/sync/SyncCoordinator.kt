@@ -453,6 +453,7 @@ class SyncCoordinator(
     private fun prepareSyncSession(userInitiated: Boolean) {
         if (userInitiated) {
             resetSyncCancel()
+            syncPreferences.clearAllThumbnailFailureCounts()
         } else {
             ensureNotCancelled()
         }
@@ -1865,7 +1866,7 @@ class SyncCoordinator(
                 }
             }
 
-            if (!lightweightPrefetch && isVideo && row.localMediaId != null) {
+            if (isVideo && row.localMediaId != null) {
                 val item = indexPassLocalItemsById[row.localMediaId]
                     ?: localMediaRepository.findById(row.localMediaId)
                 if (item != null) {
@@ -1886,8 +1887,7 @@ class SyncCoordinator(
                 val cached = File(path)
                 if (cached.isFile && cached.length() > 0L) {
                     val ok = if (isVideo) {
-                        if (lightweightPrefetch) false
-                        else VideoThumbnailHelper.captureToFile(cached, staging)
+                        VideoThumbnailHelper.captureToFile(cached, staging)
                     } else {
                         cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
                     }
@@ -1904,10 +1904,13 @@ class SyncCoordinator(
             cloudSourcesOnly -> tryCloudSource()?.let { return it }
             localSourcesOnly -> tryLocalSources()?.let { return it }
             syncedOnGraph -> {
-                if (cloudEligible) {
+                if (isVideo && hasLocalSource && !cloudSourcesOnly) {
+                    tryLocalSources()?.let { return it }
+                }
+                if (cloudEligible && !localSourcesOnly) {
                     tryCloudSource()?.let { return it }
                 }
-                if (hasLocalSource) {
+                if (hasLocalSource && !cloudSourcesOnly) {
                     tryLocalSources()?.let { return it }
                 }
             }
@@ -4215,6 +4218,22 @@ class SyncCoordinator(
             !row.cachedFilePath.isNullOrBlank()
     }
 
+    /** Vídeo na nuvem precisa de mais tempo (Graph + amostra parcial) que JPEG local. */
+    private fun thumbPrefetchItemTimeoutMs(
+        row: SyncMetadataEntity,
+        cloudSourcesOnly: Boolean,
+        localSourcesOnly: Boolean,
+    ): Long {
+        when {
+            cloudSourcesOnly -> return CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS
+            localSourcesOnly && GalleryMapper.isVideoFileName(row.displayName) ->
+                return THUMB_PREFETCH_LOCAL_VIDEO_TIMEOUT_MS
+            GalleryMapper.isVideoFileName(row.displayName) ->
+                return THUMB_PREFETCH_VIDEO_TIMEOUT_MS
+        }
+        return THUMB_PREFETCH_ITEM_TIMEOUT_MS
+    }
+
     private suspend fun ensureAlbumCoverThumbnails() {
         ensureNotCancelled()
         val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
@@ -4500,11 +4519,11 @@ class SyncCoordinator(
                                 )
                             }
                             try {
-                                val itemTimeoutMs = if (cloudSourcesOnly) {
-                                    CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS
-                                } else {
-                                    THUMB_PREFETCH_ITEM_TIMEOUT_MS
-                                }
+                                val itemTimeoutMs = thumbPrefetchItemTimeoutMs(
+                                    row,
+                                    cloudSourcesOnly,
+                                    localSourcesOnly,
+                                )
                                 withContext(thumbnailPrefetchBlocking) {
                                     withTimeout(itemTimeoutMs) {
                                         ensureThumbnailCached(
@@ -5230,8 +5249,12 @@ class SyncCoordinator(
         const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 12
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
         const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
-        /** Por item na fila de miniaturas (evita travar o sync em MP4/JPEG na nuvem). */
+        /** Por item na fila de miniaturas (fotos locais / JPEG rápido). */
         const val THUMB_PREFETCH_ITEM_TIMEOUT_MS = 30_000L
+        /** MediaStore / retriever em MP4 local durante prefetch. */
+        const val THUMB_PREFETCH_LOCAL_VIDEO_TIMEOUT_MS = 75_000L
+        /** Leva mista: aparelho + Graph/amostra parcial no mesmo item. */
+        const val THUMB_PREFETCH_VIDEO_TIMEOUT_MS = 120_000L
         /** Evita milhares de coroutines e fila “congelada” após os primeiros itens. */
         const val THUMB_PREFETCH_RUN_CHUNK = 16
         /** Depois disso o item sai da leva nesta sessão (grade tenta de novo sob demanda). */

@@ -162,6 +162,11 @@ class SyncPreferences(context: Context) {
         }
     }
 
+    /** Novo sync manual — permite tentar miniaturas de vídeo de novo após falhas antigas. */
+    fun clearAllThumbnailFailureCounts() {
+        prefs.edit().remove(KEY_THUMB_FAIL_COUNTS).apply()
+    }
+
     /** Cursores e contadores ligados ao índice antigo — após zerar e reindexar. */
     fun resetIndexMaintenanceState() {
         prefs.edit()
