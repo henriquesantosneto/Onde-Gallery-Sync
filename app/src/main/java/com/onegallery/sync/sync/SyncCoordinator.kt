@@ -656,10 +656,6 @@ class SyncCoordinator(
             syncStatusScreenVisibleCount.updateAndGet { current ->
                 (current - 1).coerceAtLeast(0)
             }
-            if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
-                backgroundThumbPrefetchJob?.cancel()
-                backgroundThumbPrefetchJob = null
-            }
         }
     }
 
@@ -683,18 +679,7 @@ class SyncCoordinator(
      */
     fun onAppUiVisibilityChanged(inForeground: Boolean) {
         if (inForeground) {
-            if (!allowForegroundThumbnailPrefetch()) {
-                backgroundThumbPrefetchJob?.cancel()
-                backgroundThumbPrefetchJob = null
-                val scope = backgroundScope ?: return
-                scope.launch(Dispatchers.IO) {
-                    if (countIndexedMissingThumbnails() > 0) {
-                        backgroundThumbPrefetchDeferred.set(true)
-                    }
-                }
-            } else {
-                kickThumbnailPrefetchIfIdle()
-            }
+            kickThumbnailPrefetchIfIdle()
         } else {
             resumeBackgroundThumbnailPrefetchIfNeeded()
         }
@@ -3433,16 +3418,8 @@ class SyncCoordinator(
 
     /** Após cancelar sync/index, completa miniaturas pendentes sem refazer upload/download. */
     private fun scheduleThumbnailPrefetchAfterInterrupt() {
-        if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
-            backgroundThumbPrefetchDeferred.set(true)
-            return
-        }
         val scope = backgroundScope ?: return
         val job = scope.launch {
-            if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
-                backgroundThumbPrefetchDeferred.set(true)
-                return@launch
-            }
             if (syncCancelRequested.get()) return@launch
             if (!longTaskMutex.tryLock()) return@launch
             try {
@@ -3465,10 +3442,6 @@ class SyncCoordinator(
 
     /** Continua miniaturas após o sync principal (bibliotecas grandes, ex. dezenas de milhares na nuvem). */
     private fun scheduleBackgroundThumbnailPrefetchIfNeeded() {
-        if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
-            backgroundThumbPrefetchDeferred.set(true)
-            return
-        }
         if (backgroundThumbPrefetchJob?.isActive == true) return
         val scope = backgroundScope ?: return
         backgroundThumbPrefetchJob = scope.launch {
@@ -3477,14 +3450,18 @@ class SyncCoordinator(
             var stalledPasses = 0
             try {
             repeat(THUMB_BACKGROUND_CONTINUE_PASSES) {
-                if (appForegroundState.isInForeground() && !allowForegroundThumbnailPrefetch()) {
-                    backgroundThumbPrefetchDeferred.set(true)
-                    return@launch
-                }
                 if (_state.value.isRunning) return@launch
                 if (countIndexedMissingThumbnails() == 0) return@launch
+                val idleForeground = appForegroundState.isInForeground() &&
+                    !allowForegroundThumbnailPrefetch()
                 if (!longTaskMutex.tryLock()) {
-                    delay(BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS)
+                    delay(
+                        if (idleForeground) {
+                            THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS
+                        } else {
+                            BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS
+                        },
+                    )
                     return@repeat
                 }
                 try {
@@ -3492,8 +3469,17 @@ class SyncCoordinator(
                     if (before == 0) return@launch
                     prefetchMissingThumbnails(
                         honorUserSyncCancel = false,
-                        maxTotalPerRun = THUMB_BACKGROUND_MAX_TOTAL_PER_PASS,
-                        completeAllPending = true,
+                        maxTotalPerRun = if (idleForeground) {
+                            THUMB_FOREGROUND_IDLE_MAX_PER_PASS
+                        } else {
+                            THUMB_BACKGROUND_MAX_TOTAL_PER_PASS
+                        },
+                        completeAllPending = !idleForeground,
+                        parallelSlots = if (idleForeground) {
+                            PARALLEL_THUMBNAILS_FOREGROUND_IDLE
+                        } else {
+                            PARALLEL_THUMBNAILS
+                        },
                     )
                     val after = countIndexedMissingThumbnails()
                     if (after == 0) return@launch
@@ -3503,10 +3489,22 @@ class SyncCoordinator(
                     } else {
                         stalledPasses = 0
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    if (error.message?.contains("Wi‑Fi", ignoreCase = true) == true) {
+                        return@launch
+                    }
                 } finally {
                     longTaskMutex.unlock()
                 }
-                delay(BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS)
+                delay(
+                    if (idleForeground) {
+                        THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS
+                    } else {
+                        BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS
+                    },
+                )
             }
             } finally {
                 if (!_state.value.isRunning) {
@@ -3539,7 +3537,7 @@ class SyncCoordinator(
             "${paths.size} álbum(s) sem capa · 1 miniatura prioritária cada.",
             alsoUpdateLastMessage = false,
         )
-        runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
+        runMissingThumbnailPrefetch(rows, honorSyncCancel = true, parallelSlots = PARALLEL_THUMBNAILS)
     }
 
     /**
@@ -3589,6 +3587,7 @@ class SyncCoordinator(
         honorUserSyncCancel: Boolean = true,
         maxTotalPerRun: Int = THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
         completeAllPending: Boolean = false,
+        parallelSlots: Int = PARALLEL_THUMBNAILS,
     ) {
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
@@ -3616,8 +3615,10 @@ class SyncCoordinator(
             while (round < maxRounds) {
                 if (honorUserSyncCancel) {
                     ensureNotCancelled()
+                    ensureSyncMayContinue()
                 } else {
                     coroutineContext.ensureActive()
+                    ensureSyncMayContinue()
                 }
                 if (totalCached >= totalCap) {
                     stoppedByCap = true
@@ -3639,7 +3640,11 @@ class SyncCoordinator(
                         alsoUpdateLastMessage = false,
                     )
                 }
-                val batchCached = runMissingThumbnailPrefetch(rows, honorSyncCancel = true)
+                val batchCached = runMissingThumbnailPrefetch(
+                    rows,
+                    honorSyncCancel = honorUserSyncCancel,
+                    parallelSlots = parallelSlots,
+                )
                 totalCached += batchCached
                 remainingEstimate = (remainingEstimate - batchCached).coerceAtLeast(0)
                 round++
@@ -3694,9 +3699,11 @@ class SyncCoordinator(
     private suspend fun runMissingThumbnailPrefetch(
         rows: List<SyncMetadataEntity>,
         honorSyncCancel: Boolean,
+        parallelSlots: Int = PARALLEL_THUMBNAILS,
     ): Int {
         if (rows.isEmpty()) return 0
-        val semaphore = Semaphore(PARALLEL_THUMBNAILS)
+        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMBNAILS)
+        val semaphore = Semaphore(slots)
         val completed = AtomicInteger(0)
         val cachedCount = AtomicInteger(0)
         return supervisorScope {
@@ -3707,6 +3714,7 @@ class SyncCoordinator(
                             if (honorSyncCancel) {
                                 coroutineContext.ensureActive()
                                 ensureNotCancelled()
+                                ensureSyncMayContinue()
                             }
                             upsertActiveSyncItem(
                                 ActiveSyncItem(
@@ -3749,14 +3757,14 @@ class SyncCoordinator(
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
                             if (_state.value.isRunning &&
-                                (done == rows.size || done % 16 == 0)
+                                (done == rows.size || done == 1 || done % 4 == 0)
                             ) {
                                 setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                                     "Gerando e baixando miniaturas…",
                                     "$done/${rows.size} nesta leva · " +
                                         "${cachedCount.get()} salvas em cache · " +
-                                        "até $PARALLEL_THUMBNAILS em paralelo.",
+                                        "até $slots em paralelo.",
                                     alsoUpdateLastMessage = false,
                                 )
                             }
@@ -4425,6 +4433,10 @@ class SyncCoordinator(
         const val PARALLEL_UPLOADS = 3
         /** Downloads Graph / decode local em paralelo por leva. */
         const val PARALLEL_THUMBNAILS = 5
+        /** Com a galeria aberta (fora da tela Sync): miniaturas seguem, sem competir com a UI. */
+        const val PARALLEL_THUMBNAILS_FOREGROUND_IDLE = 2
+        const val THUMB_FOREGROUND_IDLE_MAX_PER_PASS = 320
+        const val THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS = 8_000L
         const val PARALLEL_GPS_BACKFILL = 3
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L

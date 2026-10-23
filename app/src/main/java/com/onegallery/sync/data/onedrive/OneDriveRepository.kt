@@ -669,7 +669,7 @@ class OneDriveRepository(
         const val EXIF_PROBE_BYTES = 512 * 1024L
         const val STREAM_BUFFER_BYTES = 64 * 1024
 
-        fun copyStreamWithProgress(
+        suspend fun copyStreamWithProgress(
             input: InputStream,
             output: java.io.OutputStream,
             totalHint: Long,
@@ -680,6 +680,7 @@ class OneDriveRepository(
             onProgress?.invoke(0L, total)
             val buffer = ByteArray(STREAM_BUFFER_BYTES)
             while (true) {
+                coroutineContext.ensureActive()
                 val read = input.read(buffer)
                 if (read <= 0) break
                 output.write(buffer, 0, read)

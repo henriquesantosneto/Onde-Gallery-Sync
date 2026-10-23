@@ -213,6 +213,9 @@ fun SyncStatusScreen(
                                             "Não mostramos subpasta a subpasta — só a pasta raiz de sync acima."
                                     SyncProgressPhase.SANITIZING_INDEX ->
                                         "Última checagem de entradas duplicadas ou órfãs."
+                                    SyncProgressPhase.PREFETCH_THUMBNAILS ->
+                                        "Bibliotecas grandes podem levar vários minutos. " +
+                                            "Cada item tem até ~2 min; a barra indeterminada é normal entre levas."
                                     else -> null
                                 }
                                 phaseHint?.let { hint ->
