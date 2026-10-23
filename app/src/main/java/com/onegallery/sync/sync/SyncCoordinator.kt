@@ -99,6 +99,8 @@ data class SyncUiState(
     val runQueue: List<SyncQueueDisplayRow> = emptyList(),
     /** Contagem de miniaturas (atualizada após sync / prefetch e ao abrir Sync). */
     val thumbnailStats: ThumbnailCacheStats? = null,
+    /** Prefetch de miniaturas (sync ou 2º plano com tela Sync aberta). */
+    val prefetchingThumbnails: Boolean = false,
 )
 
 class SyncCoordinator(
@@ -818,11 +820,31 @@ class SyncCoordinator(
         }
     }
 
+    private fun shouldPublishSyncActivityUi(): Boolean =
+        _state.value.isRunning || _state.value.prefetchingThumbnails
+
+    private fun refreshThumbnailPrefetchUiFlag() {
+        val active = bulkThumbnailPrefetchDepth.get() > 0
+        if (_state.value.prefetchingThumbnails == active) return
+        _state.update { it.copy(prefetchingThumbnails = active) }
+    }
+
+    private inline fun <T> withThumbnailPrefetchUi(block: () -> T): T {
+        bulkThumbnailPrefetchDepth.incrementAndGet()
+        refreshThumbnailPrefetchUiFlag()
+        try {
+            return block()
+        } finally {
+            bulkThumbnailPrefetchDepth.decrementAndGet()
+            refreshThumbnailPrefetchUiFlag()
+        }
+    }
+
     private fun setRunQueueFromEntities(
         entities: List<SyncMetadataEntity>,
         thumbnailQueue: Boolean = false,
     ) {
-        if (!_state.value.isRunning) return
+        if (!shouldPublishSyncActivityUi()) return
         val rows = entities.map { entity ->
             if (thumbnailQueue) {
                 SyncQueueDisplayRow(
@@ -862,7 +884,7 @@ class SyncCoordinator(
         operationLabel: String,
         showTransferProgress: Boolean = false,
     ) {
-        if (!_state.value.isRunning) return
+        if (!shouldPublishSyncActivityUi()) return
         upsertActiveSyncItem(
             ActiveSyncItem(
                 canonicalPath = row.canonicalPath,
@@ -1619,7 +1641,7 @@ class SyncCoordinator(
         row: SyncMetadataEntity,
         operationLabel: String,
     ): ((Long, Long?) -> Unit)? {
-        if (!_state.value.isRunning) return null
+        if (!shouldPublishSyncActivityUi()) return null
         return { done, total ->
             upsertActiveSyncItem(
                 ActiveSyncItem(
@@ -2801,8 +2823,10 @@ class SyncCoordinator(
         )
         thumbRows.chunked(THUMB_PREFETCH_BATCH).forEach { batch ->
             ensureNotCancelled()
-            setRunQueueFromEntities(batch, thumbnailQueue = true)
-            runMissingThumbnailPrefetch(batch, honorSyncCancel = true)
+            withThumbnailPrefetchUi {
+                setRunQueueFromEntities(batch, thumbnailQueue = true)
+                runMissingThumbnailPrefetch(batch, honorSyncCancel = true)
+            }
         }
     }
 
@@ -3591,7 +3615,10 @@ class SyncCoordinator(
             try {
                 if (syncCancelRequested.get()) return@launch
                 val rows = buildMissingThumbnailEntities(maxPerRun = THUMB_PREFETCH_BATCH)
-                val cached = runMissingThumbnailPrefetch(rows, honorSyncCancel = false)
+                val cached = withThumbnailPrefetchUi {
+                    setRunQueueFromEntities(rows, thumbnailQueue = true)
+                    runMissingThumbnailPrefetch(rows, honorSyncCancel = false)
+                }
                 if (cached > 0) {
                     val prefix = _state.value.lastMessage.substringBefore("\n")
                     _state.value = _state.value.copy(
@@ -3732,11 +3759,14 @@ class SyncCoordinator(
                 alsoUpdateLastMessage = false,
             )
         }
-        runMissingThumbnailPrefetch(
-            rows,
-            honorSyncCancel = true,
-            parallelSlots = PARALLEL_THUMBNAILS,
-        )
+        withThumbnailPrefetchUi {
+            setRunQueueFromEntities(rows, thumbnailQueue = true)
+            runMissingThumbnailPrefetch(
+                rows,
+                honorSyncCancel = true,
+                parallelSlots = PARALLEL_THUMBNAILS,
+            )
+        }
         notifyGalleryDisplayRefresh()
     }
 
@@ -3755,14 +3785,16 @@ class SyncCoordinator(
         if (paths.isEmpty()) return
         val rows = paths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
         if (rows.isEmpty()) return
-        setRunQueueFromEntities(rows, thumbnailQueue = true)
         setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Capas dos álbuns…",
             "${paths.size} álbum(s) sem capa · 1 miniatura prioritária cada.",
             alsoUpdateLastMessage = false,
         )
-        runMissingThumbnailPrefetch(rows, honorSyncCancel = true, parallelSlots = PARALLEL_THUMBNAILS)
+        withThumbnailPrefetchUi {
+            setRunQueueFromEntities(rows, thumbnailQueue = true)
+            runMissingThumbnailPrefetch(rows, honorSyncCancel = true, parallelSlots = PARALLEL_THUMBNAILS)
+        }
     }
 
     /**
@@ -3817,6 +3849,7 @@ class SyncCoordinator(
         val pendingAtStart = countIndexedMissingThumbnails()
         if (pendingAtStart == 0) return
         bulkThumbnailPrefetchDepth.incrementAndGet()
+        refreshThumbnailPrefetchUiFlag()
         var totalCached = 0
         var round = 0
         var consecutiveEmptyBatches = 0
@@ -3856,7 +3889,7 @@ class SyncCoordinator(
                 val rows = buildMissingThumbnailEntities(batchSize)
                 if (rows.isEmpty()) break
                 setRunQueueFromEntities(rows, thumbnailQueue = true)
-                if (_state.value.isRunning) {
+                if (shouldPublishSyncActivityUi()) {
                     setSyncProgress(
                         SyncProgressPhase.PREFETCH_THUMBNAILS,
                         "Miniaturas na galeria…",
@@ -3881,7 +3914,7 @@ class SyncCoordinator(
                 }
             }
             val remaining = countIndexedMissingThumbnails()
-            if (_state.value.isRunning && (totalCached > 0 || remaining > 0 || stoppedByCap)) {
+            if (shouldPublishSyncActivityUi() && (totalCached > 0 || remaining > 0 || stoppedByCap)) {
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     "Miniaturas",
@@ -3906,6 +3939,7 @@ class SyncCoordinator(
             refreshThumbnailCacheStats(force = true)
         } finally {
             bulkThumbnailPrefetchDepth.decrementAndGet()
+            refreshThumbnailPrefetchUiFlag()
         }
     }
 
@@ -3942,7 +3976,7 @@ class SyncCoordinator(
                                 ensureNotCancelled()
                                 ensureSyncMayContinue()
                             }
-                            if (_state.value.isRunning) {
+                            if (shouldPublishSyncActivityUi()) {
                                 upsertActiveSyncItem(
                                     ActiveSyncItem(
                                         canonicalPath = row.canonicalPath,
@@ -3976,7 +4010,7 @@ class SyncCoordinator(
                             }
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
-                            if (_state.value.isRunning &&
+                            if (shouldPublishSyncActivityUi() &&
                                 (done == rows.size || done == 1 || done % 4 == 0)
                             ) {
                                 setSyncProgress(

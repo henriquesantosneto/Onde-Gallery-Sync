@@ -97,10 +97,14 @@ fun SyncStatusScreen(
         onDispose { syncCoordinator.setSyncStatusScreenVisible(false) }
     }
     var clearingErrors by remember { mutableStateOf(false) }
-    val showLiveActivity = coordinatorState.isRunning
-    val queueForUi = remember(coordinatorState.isRunning, coordinatorState.runQueue, syncQueue) {
+    val showLiveActivity = coordinatorState.isRunning || coordinatorState.prefetchingThumbnails
+    val queueForUi = remember(
+        showLiveActivity,
+        coordinatorState.runQueue,
+        syncQueue,
+    ) {
         when {
-            coordinatorState.isRunning && coordinatorState.runQueue.isNotEmpty() ->
+            showLiveActivity && coordinatorState.runQueue.isNotEmpty() ->
                 coordinatorState.runQueue
             else -> syncQueue.map { SyncQueueDisplayRow.fromEntity(it) }
         }
@@ -199,6 +203,19 @@ fun SyncStatusScreen(
                             )
                         }
                         if (showLiveActivity &&
+                            coordinatorState.prefetchingThumbnails &&
+                            activeItems.isEmpty() &&
+                            queueWaiting.isEmpty()
+                        ) {
+                            Text(
+                                "Preparando leva de miniaturas…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                        if (showLiveActivity &&
+                            !coordinatorState.prefetchingThumbnails &&
                             activeItems.isEmpty() &&
                             queueWaiting.isEmpty()
                         ) {
@@ -238,6 +255,7 @@ fun SyncStatusScreen(
                     queueWaiting = queueWaiting,
                     activeItems = activeItems,
                     isRunning = coordinatorState.isRunning,
+                    prefetchingThumbnails = coordinatorState.prefetchingThumbnails,
                 )
             }
 
@@ -350,6 +368,7 @@ private fun SyncQueueScrollPanel(
     queueWaiting: List<SyncQueueDisplayRow>,
     activeItems: List<ActiveSyncItem>,
     isRunning: Boolean,
+    prefetchingThumbnails: Boolean,
 ) {
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
@@ -370,7 +389,7 @@ private fun SyncQueueScrollPanel(
             ) {
                 Text(
                     when {
-                        isRunning -> "Aguardando itens…"
+                        isRunning || prefetchingThumbnails -> "Aguardando itens…"
                         else -> "Nada pendente"
                     },
                     style = MaterialTheme.typography.bodySmall,
