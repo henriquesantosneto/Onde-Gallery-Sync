@@ -2,7 +2,11 @@ package com.onegallery.sync.ui.sync
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -495,17 +500,7 @@ private fun StatsCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             StatRow("Itens no índice", stats.total.toString())
             if (stats.total > 0) {
-                Text(
-                    "Por tipo (extensão do arquivo)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                StatRow("Imagens", stats.images.toString())
-                StatRow("Vídeos", stats.videos.toString())
-                StatRow("Áudio", stats.audio.toString())
-                StatRow("Documentos", stats.documents.toString())
-                StatRow("Outros", stats.otherTypes.toString())
+                IndexMediaTypeDistribution(stats = stats)
             }
             thumbnailStats?.let { thumbs ->
                 StatRow("Miniaturas no índice", "${thumbs.indexedWithThumbnail} / ${thumbs.indexedEligible}")
@@ -530,6 +525,101 @@ private fun StatsCard(
             )
         }
     }
+}
+
+private data class IndexMediaTypeSegment(
+    val label: String,
+    val count: Int,
+    val color: Color,
+)
+
+@Composable
+private fun IndexMediaTypeDistribution(stats: SyncStats) {
+    val segments = listOf(
+        IndexMediaTypeSegment("Imagens", stats.images, IndexMediaTypeColors.images),
+        IndexMediaTypeSegment("Vídeos", stats.videos, IndexMediaTypeColors.videos),
+        IndexMediaTypeSegment("Áudio", stats.audio, IndexMediaTypeColors.audio),
+        IndexMediaTypeSegment("Documentos", stats.documents, IndexMediaTypeColors.documents),
+        IndexMediaTypeSegment("Outros", stats.otherTypes, IndexMediaTypeColors.other),
+    )
+    val active = segments.filter { it.count > 0 }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Por tipo (extensão do arquivo)",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (active.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+            ) {
+                active.forEach { segment ->
+                    Box(
+                        modifier = Modifier
+                            .weight(segment.count.toFloat().coerceAtLeast(1f))
+                            .fillMaxHeight()
+                            .background(segment.color),
+                    )
+                }
+            }
+        }
+        segments.forEach { segment ->
+            val pct = if (stats.total > 0) {
+                segment.count * 100f / stats.total.toFloat()
+            } else {
+                0f
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(segment.color),
+                    )
+                    Text(segment.label, style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(
+                    "${segment.count} (${formatIndexTypePercent(pct)})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun formatIndexTypePercent(pct: Float): String {
+    return when {
+        pct <= 0f -> "0%"
+        pct < 1f -> "<1%"
+        pct >= 99.95f -> "100%"
+        else -> "${pct.toInt()}%"
+    }
+}
+
+private object IndexMediaTypeColors {
+    val images = Color(0xFF1A73E8)
+    val videos = Color(0xFFD93025)
+    val audio = Color(0xFF188038)
+    val documents = Color(0xFFF9AB00)
+    val other = Color(0xFF80868B)
 }
 
 @Composable
