@@ -1681,10 +1681,10 @@ class SyncCoordinator(
         }
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         val hasLocalSource = localContentUri(row) != null
-        val cloudEligible = row.oneDriveItemId != null &&
-            networkMonitor.isOnline() &&
+        val syncedOnGraph = !row.oneDriveItemId.isNullOrBlank() &&
             syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
-        /** Local enquanto o arquivo está no aparelho; nuvem quando só remoto ou após upload. */
+        val cloudEligible = syncedOnGraph && networkMonitor.isOnline()
+        /** Ainda não enviado: local primeiro; depois Graph se houver id (legado). */
         val cloudFirst = preferCloudFirst || (cloudEligible && !hasLocalSource)
 
         fun existingCachedThumb(): File? =
@@ -1693,7 +1693,7 @@ class SyncCoordinator(
                     !isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)
                 }
 
-        if (!cloudFirst) {
+        if (!syncedOnGraph && !cloudFirst) {
             mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
                 ?.let { cached ->
                     if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
@@ -1702,12 +1702,14 @@ class SyncCoordinator(
                     }
                     mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
                 }
-        } else {
+        } else if (syncedOnGraph || cloudFirst) {
             mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
                 ?.let { cached ->
-                    if (isVideo && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
-                        mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
+                    if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
+                        syncPreferences.clearThumbnailFailure(canonicalPath)
+                        return Result.success(cached)
                     }
+                    mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
                 }
         }
 
@@ -1808,7 +1810,11 @@ class SyncCoordinator(
             return null
         }
 
-        if (cloudFirst) {
+        if (syncedOnGraph) {
+            if (cloudEligible) {
+                tryCloudSource()?.let { return it }
+            }
+        } else if (cloudFirst) {
             tryCloudSource()?.let { return it }
             tryLocalSources()?.let { return it }
         } else {
@@ -1820,6 +1826,10 @@ class SyncCoordinator(
         existingCachedThumb()?.let { cached ->
             syncPreferences.clearThumbnailFailure(canonicalPath)
             return Result.success(cached)
+        }
+
+        if (syncedOnGraph) {
+            return Result.success(null)
         }
 
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
@@ -2898,7 +2908,7 @@ class SyncCoordinator(
         scope.launch(Dispatchers.IO) {
             runCatching {
                 withTimeout(POST_UPLOAD_THUMB_REFRESH_TIMEOUT_MS) {
-                    ensureThumbnailCached(canonicalPath, preferCloudFirst = true)
+                    ensureThumbnailCached(canonicalPath)
                 }
             }
         }
@@ -3864,7 +3874,8 @@ class SyncCoordinator(
         val rows = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
-                rowCanBuildThumbnail(row) &&
+                row.oneDriveItemId == null &&
+                    rowCanBuildThumbnail(row) &&
                     hasLocalThumbnailSource(row) &&
                     mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null
             }
@@ -3881,7 +3892,7 @@ class SyncCoordinator(
                 buildString {
                     append("${rows.size} no aparelho")
                     if (videoCount > 0) append(" ($videoCount vídeo(s))")
-                    append(" — prioridade antes da nuvem.")
+                    append(" — só itens ainda não enviados ao OneDrive.")
                 },
                 alsoUpdateLastMessage = false,
             )

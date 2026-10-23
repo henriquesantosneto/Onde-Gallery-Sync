@@ -70,7 +70,7 @@ fun GalleryThumbnailImage(
             syncCoordinator?.ensureThumbnailCached(item.canonicalPath)?.getOrNull()
                 ?.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
                 ?.let { return@withContext it }
-            if (item.localUri != null) {
+            if (item.localUri != null && item.oneDriveItemId == null) {
                 GalleryThumbnailModels.resolveGridModel(context, item, sizePx)
             } else {
                 item.thumbnailModel
@@ -130,7 +130,9 @@ private fun initialThumbnailDisplayData(
     if (item.kind == MediaKind.VIDEO) {
         return null
     }
-    item.localUri?.let { return it }
+    if (item.oneDriveItemId == null) {
+        item.localUri?.let { return it }
+    }
     item.cachedOriginal?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
     return null
 }

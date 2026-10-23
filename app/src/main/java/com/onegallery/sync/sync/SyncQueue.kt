@@ -111,7 +111,7 @@ val gpsBackfillComparator: Comparator<SyncMetadataEntity> =
         { it.canonicalPath },
     )
 
-/** Prefetch de miniaturas: aparelho primeiro (vídeos locais no topo), depois nuvem. */
+/** Prefetch: Graph (já no OneDrive) → só local (ainda não enviado). */
 val missingThumbnailPrefetchComparator: Comparator<SyncMetadataEntity> =
     compareBy<SyncMetadataEntity>(
         { entity -> thumbnailPrefetchPriorityBucket(entity) },
@@ -121,13 +121,14 @@ val missingThumbnailPrefetchComparator: Comparator<SyncMetadataEntity> =
     )
 
 private fun thumbnailPrefetchPriorityBucket(entity: SyncMetadataEntity): Int {
+    if (!entity.oneDriveItemId.isNullOrBlank()) return 0
     val hasLocal = entity.localMediaId != null ||
         !entity.localContentUri.isNullOrBlank() ||
         !entity.cachedFilePath.isNullOrBlank()
-    if (!hasLocal) return 2
+    if (!hasLocal) return 3
     val ext = entity.displayName.substringAfterLast('.', "").lowercase()
     val isVideo = ext in LOCAL_VIDEO_EXTENSIONS
-    return if (isVideo) 0 else 1
+    return if (isVideo) 1 else 2
 }
 
 private val LOCAL_VIDEO_EXTENSIONS = setOf(
