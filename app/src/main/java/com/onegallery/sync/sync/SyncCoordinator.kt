@@ -473,7 +473,7 @@ class SyncCoordinator(
                         }
                         else -> if (networkMonitor.isOnline()) {
                             remoteListingAvailable = true
-                            listRemoteFiles().getOrThrow().files.map { it.canonicalPath }.toSet()
+                            listRemoteFiles(userInitiated = userInitiated).getOrThrow().files.map { it.canonicalPath }.toSet()
                         } else {
                             remoteListingAvailable = false
                             emptySet()
@@ -1181,9 +1181,18 @@ class SyncCoordinator(
                             ?: "Aguarde — pode demorar com bibliotecas grandes.",
                     )
                     ensureNotCancelled()
-                    val remoteListing = listRemoteFiles().getOrThrow()
+                    val indexBeforeRemote = syncMetadataDao.countAll()
+                    val remoteListing = listRemoteFiles(userInitiated = userInitiated).getOrThrow()
                     ensureNotCancelled()
                     val remoteFiles = remoteListing.files
+                    if (syncPreferences.forceRemoteFullListingOnce &&
+                        (
+                            remoteFiles.size > indexBeforeRemote + 32 ||
+                                remoteListing.supplementalFromRecursive > 0
+                            )
+                    ) {
+                        syncPreferences.forceRemoteFullListingOnce = false
+                    }
                     val remoteByPath = remoteFiles.associateBy { it.canonicalPath }
                     val remoteByContentKey = buildRemoteContentIndex(remoteFiles)
                     setSyncProgress(
@@ -4286,7 +4295,7 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun listRemoteFiles(): Result<RemoteListingSnapshot> {
+    private suspend fun listRemoteFiles(userInitiated: Boolean = false): Result<RemoteListingSnapshot> {
         return when (syncPreferences.syncMode) {
             SyncMode.ONEDRIVE_LOCAL_MIRROR -> localMirrorRepository.listMirrorFiles().map { files ->
                 RemoteListingSnapshot(files = files, incremental = false, changedCount = files.size)
@@ -4299,7 +4308,15 @@ class SyncCoordinator(
                     ?: return Result.failure(IllegalStateException("Backend de nuvem indisponível"))
                 val baseline = remoteBaselineFromIndex(syncMetadataDao.getAll())
                     .map { it.toRemoteCloudFile() }
-                backend.listRemoteFiles(baseline).map { listing ->
+                val forceRecursive = syncPreferences.forceRemoteFullListingOnce ||
+                    oneDriveRepository.shouldForceRecursiveRemoteListing(
+                        indexRowCount = syncMetadataDao.countAll(),
+                        userInitiated = userInitiated,
+                    )
+                if (forceRecursive && syncPreferences.forceRemoteFullListingOnce) {
+                    oneDriveRepository.resetRemoteListingState()
+                }
+                backend.listRemoteFiles(baseline, forceRecursive).map { listing ->
                     RemoteListingSnapshot(
                         files = listing.files.map { it.toRemoteDriveFile() },
                         incremental = listing.incremental,

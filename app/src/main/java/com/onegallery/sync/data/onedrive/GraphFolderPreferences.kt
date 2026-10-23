@@ -54,6 +54,11 @@ class GraphFolderPreferences(context: Context) {
         get() = prefs.getLong(KEY_LAST_FULL_REMOTE_LISTING_MS, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_FULL_REMOTE_LISTING_MS, value).apply()
 
+    /** Arquivos vistos na última varredura recursiva da pasta de sync (referência vs índice Room). */
+    var lastRecursiveRemoteFileCount: Int
+        get() = prefs.getInt(KEY_LAST_RECURSIVE_FILE_COUNT, 0).coerceAtLeast(0)
+        set(value) = prefs.edit().putInt(KEY_LAST_RECURSIVE_FILE_COUNT, value.coerceAtLeast(0)).apply()
+
     fun clear() {
         prefs.edit().clear().apply()
     }
@@ -64,5 +69,6 @@ class GraphFolderPreferences(context: Context) {
         private const val KEY_LABEL = "sync_root_label"
         private const val KEY_DRIVE_DELTA_LINK = "sync_root_drive_delta_link"
         private const val KEY_LAST_FULL_REMOTE_LISTING_MS = "sync_root_last_full_listing_ms"
+        private const val KEY_LAST_RECURSIVE_FILE_COUNT = "sync_root_last_recursive_file_count"
     }
 }

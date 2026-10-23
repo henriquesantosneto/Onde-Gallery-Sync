@@ -182,15 +182,36 @@ class OneDriveRepository(
         }
     }
 
-    suspend fun listMirrorFiles(indexBaseline: List<RemoteDriveFile> = emptyList()): Result<RemoteDriveListing> {
+    /**
+     * Varredura recursiva completa quando o índice Room está claramente menor que a última
+     * contagem na pasta de sync (delta sozinho não descobre arquivos nunca indexados).
+     */
+    fun shouldForceRecursiveRemoteListing(indexRowCount: Int, userInitiated: Boolean): Boolean {
+        val lastRecursive = graphFolderPreferences.lastRecursiveRemoteFileCount
+        if (userInitiated) {
+            if (lastRecursive <= 0) return true
+            if (indexRowCount < (lastRecursive * 97 / 100).coerceAtLeast(1)) return true
+        } else if (lastRecursive > 0 &&
+            indexRowCount < (lastRecursive * 90 / 100).coerceAtLeast(1)
+        ) {
+            return true
+        }
+        return false
+    }
+
+    suspend fun listMirrorFiles(
+        indexBaseline: List<RemoteDriveFile> = emptyList(),
+        forceRecursiveComplement: Boolean = false,
+    ): Result<RemoteDriveListing> {
         return runWithToken { token ->
-            listMirrorFilesWithDelta(token, indexBaseline)
+            listMirrorFilesWithDelta(token, indexBaseline, forceRecursiveComplement)
         }
     }
 
     private suspend fun listMirrorFilesWithDelta(
         token: String,
         indexBaseline: List<RemoteDriveFile>,
+        forceRecursiveComplement: Boolean,
     ): RemoteDriveListing {
         val rootId = configuredSyncRootItemId()
         val savedDelta = graphFolderPreferences.driveDeltaLink
@@ -209,6 +230,7 @@ class OneDriveRepository(
                         unresolvedDeltaSkips = delta.unresolvedDeltaSkips,
                         indexBaselineSize = indexBaseline.size,
                         mergedFileCount = files.size,
+                        forceRecursiveComplement = forceRecursiveComplement,
                     )
                 ) {
                     val recursive = listFilesRecursive(token, rootId)
@@ -216,6 +238,7 @@ class OneDriveRepository(
                     supplemental = (merged.size - files.size).coerceAtLeast(0)
                     files = merged
                     graphFolderPreferences.lastFullRemoteListingAtMs = System.currentTimeMillis()
+                    graphFolderPreferences.lastRecursiveRemoteFileCount = files.size
                 }
                 RemoteDriveListing(
                     files = files,
@@ -253,6 +276,7 @@ class OneDriveRepository(
         val recursive = listFilesRecursive(token, rootId)
         val files = mergeRemoteFileListings(fromDelta, recursive)
         graphFolderPreferences.lastFullRemoteListingAtMs = System.currentTimeMillis()
+        graphFolderPreferences.lastRecursiveRemoteFileCount = files.size
         return RemoteDriveListing(
             files = files,
             incremental = false,
@@ -266,10 +290,17 @@ class OneDriveRepository(
         unresolvedDeltaSkips: Int,
         indexBaselineSize: Int,
         mergedFileCount: Int,
+        forceRecursiveComplement: Boolean,
     ): Boolean {
+        if (forceRecursiveComplement) return true
         // Índice vazio + delta sem alterações (ex.: após migração Room) → nuvem parecia “vazia”.
         if (indexBaselineSize == 0 && mergedFileCount == 0) return true
         if (unresolvedDeltaSkips > 0) return true
+        val lastRecursive = graphFolderPreferences.lastRecursiveRemoteFileCount
+        if (lastRecursive > 0 && mergedFileCount + 64 < lastRecursive) return true
+        if (indexBaselineSize > 0 && mergedFileCount <= indexBaselineSize && lastRecursive > indexBaselineSize) {
+            return true
+        }
         val last = graphFolderPreferences.lastFullRemoteListingAtMs
         if (last <= 0L) return true
         return System.currentTimeMillis() - last >= FULL_REMOTE_LISTING_INTERVAL_MS

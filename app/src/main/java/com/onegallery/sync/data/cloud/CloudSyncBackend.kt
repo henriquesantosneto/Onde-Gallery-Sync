@@ -15,7 +15,10 @@ interface CloudSyncBackend {
 
     fun isSyncRootConfigured(): Boolean
 
-    suspend fun listRemoteFiles(indexBaseline: List<RemoteCloudFile>): Result<CloudRemoteListing>
+    suspend fun listRemoteFiles(
+        indexBaseline: List<RemoteCloudFile>,
+        forceRecursiveComplement: Boolean = false,
+    ): Result<CloudRemoteListing>
 
     suspend fun uploadLocalFile(
         canonicalPath: String,

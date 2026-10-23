@@ -18,6 +18,7 @@ class DropboxCloudBackendStub : CloudSyncBackend {
 
     override suspend fun listRemoteFiles(
         indexBaseline: List<RemoteCloudFile>,
+        forceRecursiveComplement: Boolean,
     ): Result<CloudRemoteListing> = notReady()
 
     override suspend fun uploadLocalFile(

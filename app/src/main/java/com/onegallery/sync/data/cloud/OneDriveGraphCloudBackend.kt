@@ -15,9 +15,12 @@ class OneDriveGraphCloudBackend(
 
     override fun isSyncRootConfigured(): Boolean = oneDriveRepository.isSyncRootConfigured()
 
-    override suspend fun listRemoteFiles(indexBaseline: List<RemoteCloudFile>): Result<CloudRemoteListing> {
+    override suspend fun listRemoteFiles(
+        indexBaseline: List<RemoteCloudFile>,
+        forceRecursiveComplement: Boolean,
+    ): Result<CloudRemoteListing> {
         val baseline = indexBaseline.map { it.toRemoteDriveFile() }
-        return oneDriveRepository.listMirrorFiles(baseline).map { listing ->
+        return oneDriveRepository.listMirrorFiles(baseline, forceRecursiveComplement).map { listing ->
             CloudRemoteListing(
                 files = listing.files.map { it.toRemoteCloudFile() },
                 incremental = listing.incremental,

@@ -9,9 +9,18 @@ class SyncPreferences(context: Context) {
     fun migrateForAppVersion(currentVersionCode: Int) {
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
         if (last < currentVersionCode) {
-            prefs.edit().putInt(KEY_LAST_VERSION, currentVersionCode).apply()
+            val editor = prefs.edit().putInt(KEY_LAST_VERSION, currentVersionCode)
+            if (last in 1 until 362) {
+                editor.putBoolean(KEY_FORCE_REMOTE_FULL_LISTING, true)
+            }
+            editor.apply()
         }
     }
+
+    /** Próximo sync Graph faz varredura recursiva completa (corrige índice menor que a nuvem). */
+    var forceRemoteFullListingOnce: Boolean
+        get() = prefs.getBoolean(KEY_FORCE_REMOTE_FULL_LISTING, false)
+        set(value) = prefs.edit().putBoolean(KEY_FORCE_REMOTE_FULL_LISTING, value).apply()
 
     /**
      * Corrige instalações que perderam o modo de sync após migrações antigas,
@@ -246,5 +255,6 @@ class SyncPreferences(context: Context) {
         private const val KEY_GPS_BACKFILL_CURSOR = "gps_backfill_cursor"
         private const val KEY_THUMB_FAIL_COUNTS = "thumb_fail_counts"
         private const val KEY_THUMB_PREFETCH_CURSOR = "thumb_prefetch_cursor"
+        private const val KEY_FORCE_REMOTE_FULL_LISTING = "force_remote_full_listing_once"
     }
 }
