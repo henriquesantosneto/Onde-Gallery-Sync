@@ -199,7 +199,6 @@ class SyncCoordinator(
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
     private val longTaskMutex = Mutex()
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
-    private val thumbnailMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
     private val workerForegroundSession = AtomicBoolean(false)
     private var albumCoverRevisionJob: Job? = null
@@ -212,6 +211,30 @@ class SyncCoordinator(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
     private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
+    private val galleryThumbnailService = GalleryThumbnailService(
+        appContext = appContext,
+        syncMetadataDao = syncMetadataDao,
+        mediaCacheRepository = mediaCacheRepository,
+        oneDriveRepository = oneDriveRepository,
+        localMediaRepository = localMediaRepository,
+        syncPreferences = syncPreferences,
+        networkMonitor = networkMonitor,
+        mediaDeleteRequestRouter = mediaDeleteRequestRouter,
+        localIndexPassItems = { indexPassLocalItemsById },
+    )
+    private val galleryThumbnailIndex = GalleryThumbnailIndex(
+        syncMetadataDao = syncMetadataDao,
+        syncPreferences = syncPreferences,
+        thumbnails = galleryThumbnailService,
+        thumbPrefetchAttemptsThisSession = thumbPrefetchAttemptsThisSession,
+    )
+    private val thumbnailSyncPipelineHost = SyncCoordinatorThumbnailPipelineHost()
+    private val thumbnailSyncPipeline = ThumbnailSyncPipeline(
+        syncMetadataDao = syncMetadataDao,
+        mediaCacheRepository = mediaCacheRepository,
+        thumbnails = galleryThumbnailService,
+        host = thumbnailSyncPipelineHost,
+    )
     private val thumbnailHost = SyncCoordinatorThumbnailHost()
     private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(thumbnailHost)
     private val thumbnailPostSyncEngine = ThumbnailPostSyncEngine(thumbnailHost, thumbnailPrefetchRunner)
@@ -907,7 +930,7 @@ class SyncCoordinator(
         }
     }
 
-    private inline fun <T> withThumbnailPrefetchUi(block: () -> T): T {
+    private suspend inline fun <T> withThumbnailPrefetchUi(block: suspend () -> T): T {
         bulkThumbnailPrefetchDepth.incrementAndGet()
         refreshThumbnailPrefetchUiFlag()
         try {
@@ -1724,22 +1747,15 @@ class SyncCoordinator(
         cloudSourcesOnly: Boolean = false,
         /** Grade / detalhe: amostras maiores do MP4 na nuvem. */
         cloudVideoAggressive: Boolean = false,
-    ): Result<File?> {
-        val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
-        return mutex.withLock {
-            withContext(Dispatchers.IO) {
-                ensureThumbnailCachedOnIo(
-                    canonicalPath,
-                    onProgress,
-                    preferCloudFirst,
-                    lightweightPrefetch,
-                    localSourcesOnly,
-                    cloudSourcesOnly,
-                    cloudVideoAggressive,
-                )
-            }
-        }
-    }
+    ): Result<File?> = galleryThumbnailService.ensureThumbnailCached(
+        canonicalPath,
+        onProgress,
+        preferCloudFirst,
+        lightweightPrefetch,
+        localSourcesOnly,
+        cloudSourcesOnly,
+        cloudVideoAggressive,
+    )
 
     private fun activeSyncProgressCallback(
         row: SyncMetadataEntity,
@@ -1761,310 +1777,6 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun ensureThumbnailCachedOnIo(
-        canonicalPath: String,
-        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)? = null,
-        preferCloudFirst: Boolean = false,
-        lightweightPrefetch: Boolean = false,
-        localSourcesOnly: Boolean = false,
-        cloudSourcesOnly: Boolean = false,
-        cloudVideoAggressive: Boolean = false,
-    ): Result<File?> {
-        val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
-        if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
-            persistMinimalPlaceholderThumbnail(row)?.let { return Result.success(it) }
-            return Result.success(null)
-        }
-        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
-        val hasLocalSource = localContentUri(row) != null
-        if (hasLocalSource) {
-            mediaCacheRepository.committedThumbnailIncludingGiveUp(
-                row.canonicalPath,
-                row.oneDriveItemId,
-            )?.let { cached ->
-                if (mediaCacheRepository.isSyncFailurePlaceholderThumbnail(cached)) {
-                    mediaCacheRepository.invalidateCommittedThumbnail(row.canonicalPath, row.oneDriveItemId)
-                }
-            }
-        }
-        val syncedOnGraph = !row.oneDriveItemId.isNullOrBlank() &&
-            syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
-        val cloudEligible = syncedOnGraph && networkMonitor.isOnline()
-        /** Ainda não enviado: local primeiro; depois Graph se houver id (legado). */
-        val cloudFirst = preferCloudFirst || (cloudEligible && !hasLocalSource)
-
-        fun existingCachedThumb(): File? =
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
-                ?.takeIf { cached ->
-                    !isVideo || VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)
-                }
-
-        if (!syncedOnGraph && !cloudFirst) {
-            if (rowHasGalleryThumbnail(row)) {
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(
-                    mediaCacheRepository.galleryThumbnailResolved(
-                        canonicalPath,
-                        row.oneDriveItemId,
-                        requireVideoAcceptable = isVideo,
-                    ),
-                )
-            }
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)?.let {
-                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-            }
-        } else if (syncedOnGraph || cloudFirst) {
-            if (rowHasGalleryThumbnail(row)) {
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(
-                    mediaCacheRepository.galleryThumbnailResolved(
-                        canonicalPath,
-                        row.oneDriveItemId,
-                        requireVideoAcceptable = isVideo,
-                    ),
-                )
-            }
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)?.let {
-                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-            }
-        }
-
-        val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
-        staging.delete()
-        onProgress?.invoke(0L, null)
-
-        fun commitIfReady(allowGraphVideoPoster: Boolean = false): File? {
-            if (isVideo) {
-                return CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
-                    staging,
-                    mediaCacheRepository,
-                    canonicalPath,
-                    row.oneDriveItemId,
-                    fromGraphPoster = allowGraphVideoPoster,
-                )
-            }
-            if (!mediaCacheRepository.isDisplayableGalleryThumbFile(staging)) {
-                if (!CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
-                        staging,
-                        staging,
-                        mediaCacheRepository,
-                    )
-                ) {
-                    staging.delete()
-                    return null
-                }
-            }
-            return mediaCacheRepository.commitThumbnail(staging, canonicalPath, row.oneDriveItemId)
-        }
-
-        fun successFromStaging(allowGraphVideoPoster: Boolean = false): Result<File?> {
-            commitIfReady(allowGraphVideoPoster)?.let { file ->
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                onProgress?.invoke(file.length(), file.length())
-                return Result.success(file)
-            }
-            staging.delete()
-            return Result.success(null)
-        }
-
-        suspend fun tryCloudSource(): Result<File?>? {
-            val itemId = row.oneDriveItemId ?: return null
-            if (!cloudEligible) return null
-            staging.delete()
-            val outcome = try {
-                withTimeout(
-                    when {
-                        isVideo && (cloudVideoAggressive || !lightweightPrefetch) ->
-                            CLOUD_VIDEO_ON_DEMAND_FETCH_TIMEOUT_MS
-                        isVideo -> CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS
-                        else -> CLOUD_THUMB_FETCH_TIMEOUT_MS
-                    },
-                ) {
-                    if (isVideo) {
-                        CloudVideoThumbnailLoader.loadIntoFile(
-                            oneDriveRepository,
-                            mediaCacheRepository,
-                            itemId,
-                            staging,
-                            row.remoteSizeBytes,
-                            cloudVideoAggressive || !lightweightPrefetch,
-                            onProgress,
-                        )
-                    } else if (fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)) {
-                        CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
-                    } else {
-                        CloudVideoThumbnailLoader.Outcome.NONE
-                    }
-                }
-            } catch (_: TimeoutCancellationException) {
-                CloudVideoThumbnailLoader.Outcome.NONE
-            }
-            if (outcome == CloudVideoThumbnailLoader.Outcome.NONE) {
-                staging.delete()
-                return null
-            }
-            val fromGraphPoster = outcome == CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
-            return successFromStaging(fromGraphPoster).takeIf { it.getOrNull() != null }
-        }
-
-        fun tryLocalSources(): Result<File?>? {
-            localContentUri(row)?.let { uri ->
-                val ok = if (isVideo) {
-                    VideoThumbnailHelper.captureToFile(
-                        appContext,
-                        uri,
-                        staging,
-                        localMediaId = row.localMediaId,
-                        mediaStoreOnly = lightweightPrefetch && !isVideo,
-                    )
-                } else {
-                    cacheImageThumbnailFromUri(uri, staging)
-                }
-                if (ok) {
-                    successFromStaging().getOrNull()?.let { return Result.success(it) }
-                }
-            }
-
-            if (isVideo && row.localMediaId != null) {
-                val item = indexPassLocalItemsById[row.localMediaId]
-                    ?: localMediaRepository.findById(row.localMediaId)
-                if (item != null) {
-                    val temp = localMediaRepository.materializeToTempFile(item)
-                    if (temp != null) {
-                        try {
-                            if (VideoThumbnailHelper.captureToFile(temp, staging)) {
-                                successFromStaging().getOrNull()?.let { return Result.success(it) }
-                            }
-                        } finally {
-                            temp.delete()
-                        }
-                    }
-                }
-            }
-
-            row.cachedFilePath?.let { path ->
-                val cached = File(path)
-                if (cached.isFile && cached.length() > 0L) {
-                    val ok = if (isVideo) {
-                        VideoThumbnailHelper.captureToFile(cached, staging)
-                    } else {
-                        cacheImageThumbnailFromUri(Uri.fromFile(cached), staging)
-                    }
-                    if (ok) {
-                        successFromStaging().getOrNull()?.let { return Result.success(it) }
-                    }
-                }
-            }
-            staging.delete()
-            return null
-        }
-
-        when {
-            cloudSourcesOnly -> tryCloudSource()?.let { return it }
-            localSourcesOnly -> tryLocalSources()?.let { return it }
-            syncedOnGraph -> {
-                if (isVideo && hasLocalSource && !cloudSourcesOnly) {
-                    tryLocalSources()?.let { return it }
-                }
-                if (cloudEligible && !localSourcesOnly) {
-                    tryCloudSource()?.let { return it }
-                }
-                if (hasLocalSource && !cloudSourcesOnly) {
-                    tryLocalSources()?.let { return it }
-                }
-            }
-            cloudFirst -> {
-                tryCloudSource()?.let { return it }
-                tryLocalSources()?.let { return it }
-            }
-            else -> {
-                tryLocalSources()?.let { return it }
-                tryCloudSource()?.let { return it }
-            }
-        }
-
-        staging.delete()
-        existingCachedThumb()?.let { cached ->
-            syncPreferences.clearThumbnailFailure(canonicalPath)
-            return Result.success(cached)
-        }
-
-        val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
-        if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
-            if (!isVideo && hasLocalSource) {
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(null)
-            }
-            persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(placeholder)
-            }
-        }
-        return Result.success(null)
-    }
-
-    /**
-     * Vídeo na nuvem: miniatura Graph (large/medium); se faltar, amostra pequena do arquivo
-     * (cauda com moov ou início) para extrair frame — sem baixar o vídeo inteiro.
-     */
-    private suspend fun fetchCloudImageThumbnail(
-        itemId: String,
-        staging: File,
-        remoteSizeBytes: Long?,
-        onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
-    ): Boolean {
-        var thumbReady = false
-        oneDriveRepository.downloadThumbnailToFile(itemId, staging, onProgress).onSuccess {
-            thumbReady = CloudThumbnailStaging.acceptDownloadedCloudThumbnail(
-                staging,
-                mediaCacheRepository,
-                isVideo = false,
-            )
-            if (!thumbReady) staging.delete()
-        }
-        if (thumbReady) return true
-        val partial = File(staging.absolutePath + ".partial")
-        partial.delete()
-        val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
-        oneDriveRepository.downloadImagePrefixForThumbnail(
-            itemId,
-            partial,
-            maxBytes = 4L * 1024L * 1024L,
-            onProgress = onProgress,
-        ).onSuccess {
-            if (partial.isFile && partial.length() > 0L) {
-                thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(partial), staging) ||
-                    CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
-                        partial,
-                        staging,
-                        mediaCacheRepository,
-                    )
-            }
-        }
-        if (!thumbReady) {
-            val tail = File(staging.absolutePath + ".partial.imgtail")
-            tail.delete()
-            oneDriveRepository.downloadFileSuffixForThumbnail(
-                itemId,
-                tail,
-                maxBytes = 2L * 1024L * 1024L,
-                knownSizeBytes = remoteSize,
-                onProgress = onProgress,
-            ).onSuccess {
-                if (tail.isFile && tail.length() > 0L) {
-                    thumbReady = cacheImageThumbnailFromUri(Uri.fromFile(tail), staging) ||
-                        CloudThumbnailStaging.reencodeFileToDisplayableThumbnail(
-                            tail,
-                            staging,
-                            mediaCacheRepository,
-                        )
-                }
-            }
-            tail.delete()
-        }
-        partial.delete()
-        return thumbReady
-    }
 
     private suspend fun ensureGraphSessionOnMain(): Result<Unit> {
         if (syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return Result.success(Unit)
@@ -2397,7 +2109,7 @@ class SyncCoordinator(
         }
         syncMetadataDao.upsert(updated)
         notifyGalleryDisplayRefresh()
-        runCatching { ensureThumbnailCachedOnIo(row.canonicalPath) }
+        runCatching { galleryThumbnailService.ensureThumbnailCached(row.canonicalPath) }
         return Result.success(sourceFile)
     }
 
@@ -2888,21 +2600,8 @@ class SyncCoordinator(
         }
     }
 
-    private fun localContentUri(row: SyncMetadataEntity): Uri? {
-        row.localContentUri?.let { parsed ->
-            val uri = Uri.parse(parsed)
-            if (mediaDeleteRequestRouter.uriExists(appContext, uri)) return uri
-        }
-        row.localMediaId?.let { id ->
-            val kind = if (GalleryMapper.isVideoFileName(row.displayName)) {
-                com.onegallery.sync.data.local.MediaKind.VIDEO
-            } else {
-                com.onegallery.sync.data.local.MediaKind.IMAGE
-            }
-            localMediaRepository.contentUriForMediaId(id, kind)?.let { return it }
-        }
-        return null
-    }
+    private fun localContentUri(row: SyncMetadataEntity): Uri? =
+        galleryThumbnailService.localContentUri(row)
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
         ensureSyncMayContinue()
@@ -3067,52 +2766,17 @@ class SyncCoordinator(
         }
     }
 
-    private fun rowCanBuildThumbnail(row: SyncMetadataEntity): Boolean {
-        if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) return false
-        if (row.oneDriveItemId != null) return true
-        if (row.localMediaId != null) return true
-        if (!row.localContentUri.isNullOrBlank()) return true
-        if (!row.cachedFilePath.isNullOrBlank()) return true
-        return false
-    }
+    private fun rowCanBuildThumbnail(row: SyncMetadataEntity): Boolean =
+        galleryThumbnailService.canBuildThumbnail(row)
 
-    private fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean {
-        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
-        if (
-            mediaCacheRepository.galleryThumbnailResolved(
-                row.canonicalPath,
-                row.oneDriveItemId,
-                requireVideoAcceptable = isVideo,
-            ) != null
-        ) {
-            return true
-        }
-        // Fotos no aparelho: preview via MediaStore — não exige JPEG no cache.
-        if (!isVideo && hasLocalThumbnailSource(row) && localContentUri(row) != null) {
-            return true
-        }
-        return false
-    }
+    private fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean =
+        galleryThumbnailService.rowHasGalleryThumbnail(row)
 
-    private fun rowNeedsThumbnailPrefetch(row: SyncMetadataEntity): Boolean {
-        if (!rowCanBuildThumbnail(row)) return false
-        return !rowHasGalleryThumbnail(row)
-    }
+    private fun rowNeedsThumbnailPrefetch(row: SyncMetadataEntity): Boolean =
+        galleryThumbnailService.needsThumbnailPrefetch(row)
 
-    /** Áudio (ex.: .opus), PDF etc. — placeholder fixo, sem fila de download Graph. */
     private suspend fun materializeNonVisualThumbnails() {
-        val rows = syncMetadataDao.getAll().filter { row ->
-            mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId) == null &&
-                !GalleryMapper.supportsGeneratedThumbnail(row.displayName) &&
-                (
-                    row.oneDriveItemId != null || row.localMediaId != null ||
-                        !row.localContentUri.isNullOrBlank() || !row.cachedFilePath.isNullOrBlank()
-                    )
-        }
-        if (rows.isEmpty()) return
-        rows.forEach { row ->
-            persistMinimalPlaceholderThumbnail(row)
-        }
+        thumbnailSyncPipeline.materializeNonVisualThumbnails()
     }
 
     private suspend fun warmLocalItemsForThumbnailPass() {
@@ -3128,22 +2792,16 @@ class SyncCoordinator(
         applyLocalIndexPass(items, lightMetadataOnly = true)
     }
 
-    /** Todos os itens do índice ainda sem JPEG de preview (fila total na tela Sync). */
-    private suspend fun allPendingThumbnailEntitiesForUi(): List<SyncMetadataEntity> {
-        return syncMetadataDao.getAll()
-            .asSequence()
-            .filter { row -> rowNeedsThumbnailPrefetch(row) }
-            .sortedWith(missingThumbnailPrefetchComparator)
-            .toList()
-    }
+    private suspend fun allPendingThumbnailEntitiesForUi(): List<SyncMetadataEntity> =
+        galleryThumbnailIndex.allPendingEntitiesForUi()
 
     /** Atualiza [SyncCoordinatorState.runQueue] com a fila total de miniaturas pendentes. */
     private suspend fun publishFullPendingThumbnailQueueToUi(): Int {
         if (!shouldPublishSyncActivityUi()) return 0
         val rows = allPendingThumbnailEntitiesForUi()
         val total = rows.size
-        val capped = if (rows.size > THUMB_RUN_QUEUE_UI_CAP) {
-            rows.take(THUMB_RUN_QUEUE_UI_CAP)
+        val capped = if (rows.size > GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP) {
+            rows.take(GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP)
         } else {
             rows
         }
@@ -3155,27 +2813,11 @@ class SyncCoordinator(
         return countIndexedMissingThumbnails()
     }
 
-    private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
-        val missing = syncMetadataDao.getAll()
-            .asSequence()
-            .filter { row ->
-                rowNeedsThumbnailPrefetch(row) &&
-                    (thumbPrefetchAttemptsThisSession[row.canonicalPath] ?: 0) <
-                    THUMB_PREFETCH_MAX_SESSION_ATTEMPTS
-            }
-            .sortedWith(missingThumbnailPrefetchComparator)
-            .toList()
-        if (missing.isEmpty()) return emptyList()
-        val cursor = syncPreferences.thumbPrefetchCursor % missing.size
-        val rotated = missing.drop(cursor) + missing.take(cursor)
-        val batch = rotated.take(maxPerRun)
-        syncPreferences.thumbPrefetchCursor = (cursor + batch.size) % missing.size
-        return batch
-    }
+    private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> =
+        galleryThumbnailIndex.buildMissingBatch(maxPerRun)
 
-    private suspend fun countIndexedMissingThumbnails(): Int {
-        return syncMetadataDao.getAll().count { row -> rowNeedsThumbnailPrefetch(row) }
-    }
+    private suspend fun countIndexedMissingThumbnails(): Int =
+        galleryThumbnailIndex.countMissing()
 
     private fun rowNeedsGpsBackfill(row: SyncMetadataEntity): Boolean {
         if (row.latitude != null && row.longitude != null) return false
@@ -3224,39 +2866,13 @@ class SyncCoordinator(
         return syncMetadataDao.getAll().count { row -> rowNeedsGpsBackfill(row) }
     }
 
-    private fun thumbnailOperationLabel(row: SyncMetadataEntity): String {
-        val hasLocalSource = row.localMediaId != null ||
-            !row.localContentUri.isNullOrBlank() ||
-            !row.cachedFilePath.isNullOrBlank()
-        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
-        return when {
-            isVideo && hasLocalSource && row.oneDriveItemId == null ->
-                "Gerando miniatura do vídeo no aparelho…"
-            isVideo && hasLocalSource ->
-                "Miniatura do vídeo (aparelho ou nuvem)…"
-            isVideo && row.oneDriveItemId != null ->
-                "Miniatura do vídeo na nuvem…"
-            row.oneDriveItemId != null && !hasLocalSource ->
-                "Baixando preview do OneDrive (Graph)…"
-            row.oneDriveItemId != null && hasLocalSource ->
-                "Gravando preview no cache (nuvem ou aparelho)…"
-            else -> "Gravando preview local no cache…"
-        }
-    }
+    private fun thumbnailOperationLabel(row: SyncMetadataEntity): String =
+        GalleryThumbnailLabels.operationLabel(row)
 
     private fun thumbnailPrefetchProgressDetailSuffix(
         localSourcesOnly: Boolean,
         cloudSourcesOnly: Boolean,
-    ): String {
-        return when {
-            cloudSourcesOnly ->
-                "Só baixa JPEG pequeno do OneDrive — não baixa foto/vídeo original."
-            localSourcesOnly ->
-                "Copia preview do MediaStore para o cache — grade já mostra o aparelho."
-            else ->
-                "Completa o que falta: Graph (nuvem) ou cache local — sem reenviar arquivos."
-        }
-    }
+    ): String = GalleryThumbnailLabels.prefetchProgressDetailSuffix(localSourcesOnly, cloudSourcesOnly)
 
     /**
      * Corrige [CloudSyncState.PENDING_DOWNLOAD] fantasma (hash na listagem delta incompleto,
@@ -3539,104 +3155,6 @@ class SyncCoordinator(
                 deleteItemsImmediately(listOf(row.canonicalPath), row.pendingDeleteTarget)
             }
         }
-    }
-
-    /** Miniatura neutra para itens que a nuvem não consegue decodificar (evita loop infinito). */
-    private fun persistMinimalPlaceholderThumbnail(row: SyncMetadataEntity): File? {
-        if (rowHasGalleryThumbnail(row)) {
-            return mediaCacheRepository.galleryThumbnailResolved(
-                row.canonicalPath,
-                row.oneDriveItemId,
-                requireVideoAcceptable = GalleryMapper.isVideoFileName(row.displayName),
-            )
-        }
-        mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)?.let {
-            mediaCacheRepository.invalidateCommittedThumbnail(row.canonicalPath, row.oneDriveItemId)
-        }
-        val staging = mediaCacheRepository.thumbStagingFile(row.canonicalPath)
-        staging.delete()
-        return runCatching {
-            val edge = MediaCacheRepository.SYNC_FAILURE_PLACEHOLDER_EDGE_PX
-            val bitmap = Bitmap.createBitmap(edge, edge, Bitmap.Config.RGB_565)
-            try {
-                bitmap.eraseColor(MediaCacheRepository.SYNC_STUB_PLACEHOLDER_COLOR)
-                staging.parentFile?.mkdirs()
-                staging.outputStream().use { out ->
-                    bitmap.compress(
-                        Bitmap.CompressFormat.JPEG,
-                        CloudThumbnailStaging.THUMB_CACHE_JPEG_QUALITY,
-                        out,
-                    )
-                }
-            } finally {
-                bitmap.recycle()
-            }
-            if (staging.length() <= 0L) return null
-            mediaCacheRepository.commitThumbnail(staging, row.canonicalPath, row.oneDriveItemId)
-        }.getOrNull()
-    }
-
-    private fun cachePlaceholderThumbnail(row: SyncMetadataEntity) {
-        val existing = mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)
-        if (existing != null) return
-        val target = mediaCacheRepository.thumbFile(row.canonicalPath)
-        localContentUri(row)?.let { uri ->
-            val ok = if (GalleryMapper.isVideoFileName(row.displayName)) {
-                VideoThumbnailHelper.captureToFile(
-                    appContext,
-                    uri,
-                    target,
-                    localMediaId = row.localMediaId,
-                )
-            } else {
-                cacheImageThumbnailFromUri(uri, target)
-            }
-            if (ok) return
-        }
-        row.cachedFilePath?.let { path ->
-            val cached = File(path)
-            if (!cached.exists()) return@let
-            if (GalleryMapper.isVideoFileName(row.displayName)) {
-                VideoThumbnailHelper.captureToFile(cached, target)
-            } else {
-                cacheImageThumbnailFromUri(Uri.fromFile(cached), target)
-            }
-        }
-    }
-
-    private fun cacheImageThumbnailFromUri(
-        uri: Uri,
-        target: File,
-        maxSidePx: Int = CloudThumbnailStaging.THUMB_CACHE_MAX_SIDE_PX,
-    ): Boolean {
-        return runCatching {
-            target.parentFile?.mkdirs()
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            appContext.contentResolver.openInputStream(uri)?.use { probe ->
-                BitmapFactory.decodeStream(probe, null, bounds)
-            } ?: return false
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
-            val sample = CloudThumbnailStaging.thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, maxSidePx)
-            val decodeOpts = BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            val bitmap = appContext.contentResolver.openInputStream(uri)?.use { input ->
-                BitmapFactory.decodeStream(input, null, decodeOpts)
-            } ?: return false
-            try {
-                target.outputStream().use { out ->
-                    bitmap.compress(
-                        Bitmap.CompressFormat.JPEG,
-                        CloudThumbnailStaging.THUMB_CACHE_JPEG_QUALITY,
-                        out,
-                    )
-                }
-                target.length() > 0L
-            } finally {
-                bitmap.recycle()
-            }
-        }.getOrDefault(false)
     }
 
     private fun mergeLocalIntoEntity(
@@ -4109,165 +3627,32 @@ class SyncCoordinator(
         scope.launch(Dispatchers.IO) {
             runCatching {
                 ensureLocalMediaThumbnailsEarly(
-                    maxPerRun = LOCAL_THUMB_EARLY_DURING_SYNC_MAX,
+                    maxPerRun = ThumbnailSyncPipeline.LOCAL_THUMB_EARLY_DURING_SYNC_MAX,
                     showProgress = false,
                 )
             }
         }
     }
 
-    /**
-     * Fotos/vídeos no aparelho — antes da fila massiva da nuvem e do GPS longo.
-     */
     private suspend fun ensureLocalMediaThumbnailsEarly(
-        maxPerRun: Int = LOCAL_THUMB_EARLY_POST_SYNC_MAX,
+        maxPerRun: Int = ThumbnailSyncPipeline.LOCAL_THUMB_EARLY_POST_SYNC_MAX,
         showProgress: Boolean = true,
     ) {
-        ensureNotCancelled()
-        if (showProgress) {
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas locais no cache…",
-                "Procurando itens do aparelho sem preview salvo…",
-                alsoUpdateLastMessage = false,
-            )
-        }
-        yield()
-        publishFullPendingThumbnailQueueToUi()
-        val rows = syncMetadataDao.getAll()
-            .asSequence()
-            .filter { row ->
-                rowCanBuildThumbnail(row) &&
-                    hasLocalThumbnailSource(row) &&
-                    rowNeedsThumbnailPrefetch(row)
-            }
-            .sortedWith(missingThumbnailPrefetchComparator)
-            .take(maxPerRun)
-            .toList()
-        if (rows.isEmpty()) {
-            if (showProgress) {
-                setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Miniaturas locais",
-                    "Nada pendente no aparelho · seguindo…",
-                    alsoUpdateLastMessage = false,
-                )
-            }
-            return
-        }
-        warmLocalItemsForThumbnailPass()
-        if (showProgress) {
-            val videoCount = rows.count { GalleryMapper.isVideoFileName(it.displayName) }
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas locais…",
-                buildString {
-                    append("${rows.size} no aparelho")
-                    if (videoCount > 0) append(" ($videoCount vídeo(s))")
-                    append(" — funciona offline; nuvem vem na leva seguinte.")
-                },
-                alsoUpdateLastMessage = false,
-            )
-        }
-        val cached = withThumbnailPrefetchUi {
-            runMissingThumbnailPrefetch(
-                rows,
-                honorSyncCancel = true,
-                parallelSlots = PARALLEL_THUMB_PREFETCH,
-                localSourcesOnly = true,
-                progressHeadline = "Miniaturas locais no cache…",
-                publishUi = showProgress,
-            )
-        }
-        if (showProgress) {
-            clearActiveSyncItems()
-            publishFullPendingThumbnailQueueToUi()
-            setSyncProgress(
-                SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas locais concluídas",
-                "$cached JPEG gravado(s) de ${rows.size} · seguindo para OneDrive/capas…",
-                alsoUpdateLastMessage = false,
-            )
-        }
-        notifyGalleryDisplayRefresh()
+        thumbnailSyncPipeline.ensureLocalMediaThumbnailsEarly(maxPerRun, showProgress)
     }
 
-    /** Itens já no OneDrive — baixa miniatura Graph (não bloqueia envio). */
     private suspend fun ensureCloudThumbnailsPrefetch(
-        maxPerRun: Int = CLOUD_THUMB_PREFETCH_MAX_PER_PASS,
+        maxPerRun: Int = ThumbnailSyncPipeline.CLOUD_THUMB_PREFETCH_MAX_PER_PASS,
     ) {
-        ensureNotCancelled()
-        if (!networkMonitor.isOnline() || syncPreferences.syncMode != SyncMode.ONEDRIVE_GRAPH) return
-        setSyncProgress(
-            SyncProgressPhase.PREFETCH_THUMBNAILS,
-            "Preparando fila OneDrive…",
-            "Varrendo o índice (pode levar um instante em bibliotecas grandes)…",
-            alsoUpdateLastMessage = false,
-        )
-        yield()
-        val rows = syncMetadataDao.getAll()
-            .asSequence()
-            .filter { row ->
-                !row.oneDriveItemId.isNullOrBlank() &&
-                    rowCanBuildThumbnail(row) &&
-                    rowNeedsThumbnailPrefetch(row)
-            }
-            .sortedWith(missingThumbnailPrefetchComparator)
-            .take(maxPerRun)
-            .toList()
-        if (rows.isEmpty()) return
-        publishFullPendingThumbnailQueueToUi()
-        setSyncProgress(
-            SyncProgressPhase.PREFETCH_THUMBNAILS,
-            "Miniaturas do OneDrive…",
-            "${rows.size} na nuvem · Graph ou amostra do vídeo · grade usa cache.",
-            alsoUpdateLastMessage = false,
-        )
-        val cached = withThumbnailPrefetchUi {
-            runMissingThumbnailPrefetch(
-                rows,
-                honorSyncCancel = true,
-                parallelSlots = PARALLEL_THUMB_PREFETCH,
-                cloudSourcesOnly = true,
-                progressHeadline = "Miniaturas do OneDrive…",
-            )
-        }
-        clearActiveSyncItems()
-        publishFullPendingThumbnailQueueToUi()
-        setSyncProgress(
-            SyncProgressPhase.PREFETCH_THUMBNAILS,
-            "Leva OneDrive concluída",
-            "$cached preview(s) nesta passagem · completando restante do índice em seguida…",
-            alsoUpdateLastMessage = false,
-        )
-        notifyGalleryDisplayRefresh()
-    }
-
-    private fun hasLocalThumbnailSource(row: SyncMetadataEntity): Boolean {
-        return row.localMediaId != null ||
-            !row.localContentUri.isNullOrBlank() ||
-            !row.cachedFilePath.isNullOrBlank()
+        thumbnailSyncPipeline.ensureCloudThumbnailsPrefetch(maxPerRun)
     }
 
     private suspend fun ensureAlbumCoverThumbnails() {
-        ensureNotCancelled()
-        val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
-            syncMetadataDao.getAll(),
-            mediaCacheRepository,
-        )
-        if (paths.isEmpty()) return
-        val rows = paths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
-        if (rows.isEmpty()) return
-        setSyncProgress(
-            SyncProgressPhase.PREFETCH_THUMBNAILS,
-            "Capas dos álbuns…",
-            "${paths.size} álbum(s) sem capa · 1 miniatura prioritária cada.",
-            alsoUpdateLastMessage = false,
-        )
-        withThumbnailPrefetchUi {
-            runMissingThumbnailPrefetch(rows, honorSyncCancel = true, parallelSlots = PARALLEL_THUMBNAILS)
-        }
+        thumbnailSyncPipeline.ensureAlbumCoverThumbnails(PARALLEL_THUMBNAILS)
     }
+
+    private fun hasLocalThumbnailSource(row: SyncMetadataEntity): Boolean =
+        galleryThumbnailService.hasLocalThumbnailSource(row)
 
     private suspend fun runCompleteThumbnailPrefetchBeforeMetadata(): Int =
         thumbnailPostSyncEngine.runCompleteBeforeMetadata()
@@ -4290,28 +3675,11 @@ class SyncCoordinator(
         )
     }
 
-    /** Para o loop infinito: grava cinza 96×96 e tira da fila de prefetch. */
-    private suspend fun giveUpStubbornThumbnailsBatch(maxItems: Int): Int {
-        val stubborn = syncMetadataDao.getAll()
-            .asSequence()
-            .filter { row -> rowNeedsThumbnailPrefetch(row) }
-            .filter { row ->
-                GalleryMapper.isVideoFileName(row.displayName) || !hasLocalThumbnailSource(row)
-            }
-            .sortedWith(missingThumbnailPrefetchComparator)
-            .take(maxItems)
-            .toList()
-        if (stubborn.isEmpty()) return 0
-        var saved = 0
-        stubborn.forEach { row ->
-            persistMinimalPlaceholderThumbnail(row)?.let {
-                syncPreferences.clearThumbnailFailure(row.canonicalPath)
-                thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
-                saved++
-            }
+    private suspend fun giveUpStubbornThumbnailsBatch(maxItems: Int): Int =
+        thumbnailSyncPipeline.giveUpStubbornThumbnailsBatch(maxItems) { row ->
+            syncPreferences.clearThumbnailFailure(row.canonicalPath)
+            thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
         }
-        return saved
-    }
 
     private suspend fun runMissingThumbnailPrefetch(
         rows: List<SyncMetadataEntity>,
@@ -5001,6 +4369,57 @@ class SyncCoordinator(
             }
             SyncMode.LOCAL_ONLY -> Result.success(Unit)
         }
+    }
+
+    private inner class SyncCoordinatorThumbnailPipelineHost : ThumbnailSyncPipelineHost {
+        override suspend fun ensureNotCancelled() = this@SyncCoordinator.ensureNotCancelled()
+
+        override suspend fun setSyncProgress(
+            phase: SyncProgressPhase,
+            headline: String,
+            detail: String,
+            alsoUpdateLastMessage: Boolean,
+        ) = this@SyncCoordinator.setSyncProgress(phase, headline, detail, alsoUpdateLastMessage)
+
+        override suspend fun publishFullPendingThumbnailQueueToUi(): Int =
+            this@SyncCoordinator.publishFullPendingThumbnailQueueToUi()
+
+        override fun clearActiveSyncItems() = this@SyncCoordinator.clearActiveSyncItems()
+
+        override suspend fun notifyGalleryDisplayRefresh() =
+            this@SyncCoordinator.notifyGalleryDisplayRefresh()
+
+        override suspend fun warmLocalItemsForThumbnailPass() =
+            this@SyncCoordinator.warmLocalItemsForThumbnailPass()
+
+        override suspend fun ensureAllLocalMediaPresentInIndex() =
+            this@SyncCoordinator.ensureAllLocalMediaPresentInIndex()
+
+        override suspend fun <T> withThumbnailPrefetchUi(block: suspend () -> T): T =
+            this@SyncCoordinator.withThumbnailPrefetchUi(block)
+
+        override suspend fun runMissingThumbnailPrefetch(
+            rows: List<SyncMetadataEntity>,
+            honorSyncCancel: Boolean,
+            parallelSlots: Int,
+            localSourcesOnly: Boolean,
+            cloudSourcesOnly: Boolean,
+            progressHeadline: String,
+            publishUi: Boolean,
+        ): Int = this@SyncCoordinator.runMissingThumbnailPrefetch(
+            rows,
+            honorSyncCancel,
+            parallelSlots,
+            localSourcesOnly,
+            cloudSourcesOnly,
+            progressHeadline,
+            publishUi,
+        )
+
+        override fun isOnline(): Boolean = networkMonitor.isOnline()
+
+        override fun isOneDriveGraphMode(): Boolean =
+            syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
     }
 
     private inner class SyncCoordinatorThumbnailHost : ThumbnailPrefetchHost, ThumbnailPostSyncHost {
