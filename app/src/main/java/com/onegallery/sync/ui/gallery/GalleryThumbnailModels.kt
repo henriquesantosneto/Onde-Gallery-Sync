@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.data.local.VideoThumbnailHelper
 
 /** Modelos de miniatura otimizados para a grade (MediaStore + tamanho fixo). */
 object GalleryThumbnailModels {
@@ -22,7 +23,7 @@ object GalleryThumbnailModels {
     ): Any? {
         item.localUri?.let { uri ->
             loadSystemThumbnail(context, uri, item.localMediaId, item.kind, sizePx)?.let { return it }
-            return uri
+            if (item.kind != MediaKind.VIDEO) return uri
         }
         return item.thumbnailModel
     }
@@ -37,7 +38,9 @@ object GalleryThumbnailModels {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             return runCatching {
                 context.contentResolver.loadThumbnail(uri, Size(sizePx, sizePx), null)
-            }.getOrNull()
+            }.getOrNull()?.takeIf { bmp ->
+                kind != MediaKind.VIDEO || VideoThumbnailHelper.isAcceptableFrame(bmp)
+            }
         }
         if (localMediaId != null) {
             @Suppress("DEPRECATION")
@@ -57,7 +60,7 @@ object GalleryThumbnailModels {
                         MediaStore.Video.Thumbnails.MINI_KIND,
                         null,
                     )
-                }.getOrNull()
+                }.getOrNull()?.takeIf { VideoThumbnailHelper.isAcceptableFrame(it) }
             }
         }
         return null

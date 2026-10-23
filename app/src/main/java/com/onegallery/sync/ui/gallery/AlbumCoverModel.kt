@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.data.local.VideoThumbnailHelper
 import java.io.File
 
 /** Capa resolvida ao rolar a grade (modelo + item de origem, ex. vídeo). */
@@ -53,11 +54,25 @@ fun hasCachedThumbnailFile(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId) != null) {
-        return true
+    val cached = mediaCacheRepository.displayableThumbnailIfCached(
+        item.canonicalPath,
+        item.oneDriveItemId,
+    )
+    if (cached != null) {
+        if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
+            mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
+        } else {
+            return true
+        }
     }
     val stub = item.cachedPlaceholderThumb
-    return stub != null && mediaCacheRepository.isDisplayableGalleryThumbFile(stub)
+    if (stub != null && mediaCacheRepository.isDisplayableGalleryThumbFile(stub)) {
+        if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isAcceptableThumbnailFile(stub)) {
+            return false
+        }
+        return true
+    }
+    return false
 }
 
 fun resolveAlbumCoverModel(
@@ -87,9 +102,7 @@ fun resolveGalleryCoverModel(
         mediaCacheRepository?.isDisplayableGalleryThumbFile(thumb) == true
     }
     if (item.kind == MediaKind.VIDEO) {
-        cachedThumb?.let { return it }
-        item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
-        item.localUri?.let { return it }
+        cachedThumb?.takeIf { VideoThumbnailHelper.isAcceptableThumbnailFile(it) }?.let { return it }
         return item.thumbnailModel
     }
     item.localUri?.let { return it }

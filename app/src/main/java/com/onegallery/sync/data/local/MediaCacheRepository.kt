@@ -174,8 +174,17 @@ class MediaCacheRepository(context: Context) {
 
     fun deleteCached(canonicalPath: String) {
         deleteOriginalTransferArtifacts(canonicalPath)
-        thumbFile(canonicalPath).delete()
+        invalidateCommittedThumbnail(canonicalPath, oneDriveItemId = null)
+    }
+
+    fun invalidateCommittedThumbnail(canonicalPath: String, oneDriveItemId: String?) {
+        val file = thumbFile(canonicalPath)
         thumbExistsCache.remove(canonicalPath)
+        thumbOnDiskBySafeName.remove(file.name)
+        if (file.isFile) file.delete()
+        oneDriveItemId?.takeIf { it.isNotBlank() }?.let { itemId ->
+            thumbFileByRemoteItemId(itemId).delete()
+        }
     }
 
     fun deleteOriginalOnly(canonicalPath: String) {

@@ -1602,14 +1602,17 @@ class SyncCoordinator(
             persistMinimalPlaceholderThumbnail(row)?.let { return Result.success(it) }
             return Result.success(null)
         }
+        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)
-            ?.let {
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(it)
+            ?.let { cached ->
+                if (!isVideo || VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
+                    syncPreferences.clearThumbnailFailure(canonicalPath)
+                    return Result.success(cached)
+                }
+                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
             }
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
         staging.delete()
-        val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         onProgress?.invoke(0L, null)
 
         fun commitIfReady(): File? =
@@ -1730,6 +1733,10 @@ class SyncCoordinator(
                 }
                 partial.delete()
             }
+            if (thumbReady && isVideo && !VideoThumbnailHelper.isAcceptableThumbnailFile(staging)) {
+                thumbReady = false
+                staging.delete()
+            }
             if (thumbReady) {
                 commitIfReady()?.let {
                     syncPreferences.clearThumbnailFailure(canonicalPath)
@@ -1756,7 +1763,10 @@ class SyncCoordinator(
     }
 
     private fun acceptDownloadedCloudThumbnail(staging: File, isVideo: Boolean): Boolean {
-        if (isVideo) return isStagingDisplayableThumbnail(staging)
+        if (isVideo) {
+            return isStagingDisplayableThumbnail(staging) &&
+                VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
+        }
         if (isStagingDisplayableThumbnail(staging)) return true
         return reencodeFileToDisplayableThumbnail(staging, staging)
     }
