@@ -258,6 +258,16 @@ fun SyncStatusScreen(
             }
 
             item {
+                val queueTotal = activeItems.size + queueWaiting.size
+                if (showLiveActivity && queueTotal > 0) {
+                    SectionTitle(
+                        if (coordinatorState.prefetchingThumbnails) {
+                            "Fila desta execução ($queueTotal pendente(s))"
+                        } else {
+                            "Fila de sincronismo ($queueTotal pendente(s))"
+                        },
+                    )
+                }
                 SyncQueueScrollPanel(
                     queueWaiting = queueWaiting,
                     activeItems = activeItems,

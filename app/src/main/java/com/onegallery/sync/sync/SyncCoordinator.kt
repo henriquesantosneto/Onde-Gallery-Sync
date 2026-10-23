@@ -4268,7 +4268,12 @@ class SyncCoordinator(
         publishUi: Boolean = true,
     ): Int {
         if (rows.isEmpty()) return 0
+        if (publishUi && shouldPublishSyncActivityUi()) {
+            setRunQueueFromEntities(rows, thumbnailQueue = true)
+        }
         var total = 0
+        var globalCompleted = 0
+        val globalTotal = rows.size
         val chunks = rows.chunked(THUMB_PREFETCH_RUN_CHUNK)
         chunks.forEachIndexed { index, chunk ->
             total += runMissingThumbnailPrefetchChunk(
@@ -4279,12 +4284,18 @@ class SyncCoordinator(
                 cloudSourcesOnly,
                 progressHeadline,
                 publishUi,
+                globalTotal = globalTotal,
+                globalCompletedBefore = globalCompleted,
+                chunkIndex = index,
+                chunkCount = chunks.size,
             )
+            globalCompleted += chunk.size
             if (publishUi && shouldPublishSyncActivityUi() && index < chunks.lastIndex) {
                 setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     progressHeadline,
-                    "Leva ${index + 1}/${chunks.size} ok · preparando próxima…",
+                    "$globalCompleted/$globalTotal concluído(s) · leva ${index + 1}/${chunks.size} ok · " +
+                        "preparando próxima…",
                     alsoUpdateLastMessage = false,
                 )
             }
@@ -4300,11 +4311,12 @@ class SyncCoordinator(
         cloudSourcesOnly: Boolean,
         progressHeadline: String,
         publishUi: Boolean,
+        globalTotal: Int,
+        globalCompletedBefore: Int,
+        chunkIndex: Int,
+        chunkCount: Int,
     ): Int {
         if (rows.isEmpty()) return 0
-        if (publishUi && shouldPublishSyncActivityUi()) {
-            setRunQueueFromEntities(rows, thumbnailQueue = true)
-        }
         val slots = parallelSlots.coerceIn(1, PARALLEL_THUMB_PREFETCH)
         val semaphore = Semaphore(slots)
         val completed = AtomicInteger(0)
@@ -4364,10 +4376,12 @@ class SyncCoordinator(
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
                             if (publishUi && shouldPublishSyncActivityUi()) {
+                                val globalDone = (globalCompletedBefore + done).coerceAtMost(globalTotal)
                                 setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                                     progressHeadline,
-                                    "$done/${rows.size} nesta leva · ${cachedCount.get()} JPEG no cache · " +
+                                    "$globalDone/$globalTotal · ${cachedCount.get()} JPEG nesta leva · " +
+                                        "leva ${chunkIndex + 1}/$chunkCount ($done/${rows.size}) · " +
                                         "até $slots em paralelo. " +
                                         thumbnailPrefetchProgressDetailSuffix(
                                             localSourcesOnly,
