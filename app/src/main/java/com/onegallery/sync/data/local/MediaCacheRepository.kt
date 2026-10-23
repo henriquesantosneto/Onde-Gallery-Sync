@@ -122,13 +122,15 @@ class MediaCacheRepository(context: Context) {
             }
         }
         val file = thumbFile(canonicalPath)
-        if (file.isFile && file.length() >= minBytes) {
+        if (file.isFile && file.length() >= minBytes && !isSyncStubPlaceholderThumbnail(file)) {
             rememberThumbOnDisk(canonicalPath, file)
             return file
         }
         val itemId = oneDriveItemId?.takeIf { it.isNotBlank() } ?: return null
         val alias = thumbFileByRemoteItemId(itemId)
-        return alias.takeIf { it.isFile && it.length() >= minBytes }
+        return alias.takeIf {
+            it.isFile && it.length() >= minBytes && !isSyncStubPlaceholderThumbnail(it)
+        }
     }
 
     fun displayableThumbnailIfCached(
@@ -136,7 +138,16 @@ class MediaCacheRepository(context: Context) {
         oneDriveItemId: String? = null,
     ): File? {
         val file = thumbnailIfCached(canonicalPath, oneDriveItemId) ?: return null
+        if (isSyncStubPlaceholderThumbnail(file)) return null
         return file.takeIf { isDisplayableGalleryThumb(it) }
+    }
+
+    /** Placeholder cinza de sync (32×32) — não conta como miniatura real. */
+    fun isSyncStubPlaceholderThumbnail(file: File): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        if (file.length() > SYNC_STUB_PLACEHOLDER_MAX_BYTES) return false
+        val (w, h) = decodeBounds(file) ?: return false
+        return w == MIN_DISPLAYABLE_THUMB_EDGE_PX && h == MIN_DISPLAYABLE_THUMB_EDGE_PX
     }
 
     private fun rememberThumbOnDisk(canonicalPath: String, file: File) {
@@ -180,13 +191,20 @@ class MediaCacheRepository(context: Context) {
     fun thumbnailIfCached(canonicalPath: String, oneDriveItemId: String? = null): File? {
         if (thumbExistsCache[canonicalPath] == true) {
             val cached = thumbFile(canonicalPath)
-            if (cached.isFile && cached.length() > 0L) return cached
+            if (cached.isFile && cached.length() > 0L && !isSyncStubPlaceholderThumbnail(cached)) {
+                return cached
+            }
+            if (cached.isFile && isSyncStubPlaceholderThumbnail(cached)) cached.delete()
             thumbExistsCache.remove(canonicalPath)
             thumbOnDiskBySafeName.remove(safeFileName(canonicalPath))
         }
         val file = thumbFile(canonicalPath)
         if (file.isFile && file.length() > 0L) {
-            if (!isReadableThumbnailFile(file)) {
+            if (isSyncStubPlaceholderThumbnail(file)) {
+                file.delete()
+                thumbExistsCache.remove(canonicalPath)
+                thumbOnDiskBySafeName.remove(file.name)
+            } else if (!isReadableThumbnailFile(file)) {
                 file.delete()
                 thumbExistsCache.remove(canonicalPath)
                 thumbOnDiskBySafeName.remove(file.name)
@@ -209,7 +227,10 @@ class MediaCacheRepository(context: Context) {
                 file.outputStream().buffered().use { output -> input.copyTo(output) }
             }
         }
-        if (file.isFile && file.length() > 0L && isReadableThumbnailFile(file)) {
+        if (file.isFile && file.length() > 0L &&
+            isReadableThumbnailFile(file) &&
+            !isSyncStubPlaceholderThumbnail(file)
+        ) {
             rememberThumbOnDisk(canonicalPath, file)
             return file
         }
@@ -228,6 +249,7 @@ class MediaCacheRepository(context: Context) {
     private val MIN_DISPLAYABLE_THUMB_BYTES = 128L
 
     private fun isDisplayableGalleryThumb(file: File): Boolean {
+        if (isSyncStubPlaceholderThumbnail(file)) return false
         if (file.length() < MIN_DISPLAYABLE_THUMB_BYTES) return false
         val (w, h) = decodeBounds(file) ?: return false
         return w >= MIN_DISPLAYABLE_THUMB_EDGE_PX && h >= MIN_DISPLAYABLE_THUMB_EDGE_PX
@@ -263,6 +285,8 @@ class MediaCacheRepository(context: Context) {
 
     companion object {
         const val MIN_DISPLAYABLE_THUMB_EDGE_PX = 32
+        /** JPEG cinza 32×32 fica abaixo deste tamanho; miniaturas reais são maiores. */
+        const val SYNC_STUB_PLACEHOLDER_MAX_BYTES = 2_048L
         /** Cor neutra para placeholder de sync (evita célula totalmente preta). */
         val SYNC_STUB_PLACEHOLDER_COLOR: Int = Color.rgb(0xC4, 0xC4, 0xC4)
     }
