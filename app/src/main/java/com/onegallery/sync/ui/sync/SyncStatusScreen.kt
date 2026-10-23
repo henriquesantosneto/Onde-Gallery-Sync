@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -62,6 +60,8 @@ import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncMode
 import com.onegallery.sync.sync.SyncPreferences
 import com.onegallery.sync.sync.SyncTaskLauncher
+import com.onegallery.sync.ui.components.LazyColumnScrollbarEndPadding
+import com.onegallery.sync.ui.components.LazyColumnVerticalScrollbar
 import com.onegallery.sync.sync.ActiveSyncItem
 import com.onegallery.sync.sync.SyncQueueDisplayRow
 import com.onegallery.sync.sync.SyncProgressPhase
@@ -138,14 +138,20 @@ fun SyncStatusScreen(
             }
         },
     ) { padding ->
-        LazyColumn(
+        val mainListState = rememberLazyListState()
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 32.dp),
+                .padding(padding),
         ) {
+            LazyColumn(
+                state = mainListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 16.dp, end = 16.dp + LazyColumnScrollbarEndPadding),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+            ) {
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -346,6 +352,14 @@ fun SyncStatusScreen(
                     modifier = Modifier.padding(bottom = 24.dp),
                 )
             }
+            }
+            LazyColumnVerticalScrollbar(
+                listState = mainListState,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(end = 6.dp, top = 8.dp, bottom = 40.dp),
+            )
         }
     }
 }
@@ -425,7 +439,7 @@ private fun SyncQueueScrollPanel(
                         )
                     }
                 }
-                SyncQueueScrollbar(
+                LazyColumnVerticalScrollbar(
                     listState = listState,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -433,46 +447,6 @@ private fun SyncQueueScrollPanel(
                         .padding(end = 4.dp, top = 8.dp, bottom = 8.dp),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SyncQueueScrollbar(
-    listState: LazyListState,
-    modifier: Modifier = Modifier,
-) {
-    val layoutInfo = listState.layoutInfo
-    val totalItems = layoutInfo.totalItemsCount
-    val visibleCount = layoutInfo.visibleItemsInfo.size
-    if (totalItems == 0) return
-    val showThumb = totalItems > visibleCount && visibleCount > 0
-    val scrollRange = (totalItems - visibleCount).coerceAtLeast(1)
-    val scrollIndex = listState.firstVisibleItemIndex.coerceIn(0, scrollRange)
-    val thumbFraction = visibleCount.toFloat() / totalItems.toFloat()
-    val thumbOffsetFraction = scrollIndex.toFloat() / scrollRange.toFloat()
-    val trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    val thumbColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.85f)
-    BoxWithConstraints(
-        modifier = modifier.width(5.dp),
-    ) {
-        val trackHeight = maxHeight
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(trackColor, RoundedCornerShape(3.dp)),
-        )
-        if (showThumb) {
-            val thumbHeight = trackHeight * thumbFraction.coerceIn(0.18f, 1f)
-            val maxTravel = (trackHeight - thumbHeight).coerceAtLeast(0.dp)
-            val thumbTop = maxTravel * thumbOffsetFraction
-            Box(
-                modifier = Modifier
-                    .width(5.dp)
-                    .height(thumbHeight)
-                    .offset(y = thumbTop)
-                    .background(thumbColor, RoundedCornerShape(3.dp)),
-            )
         }
     }
 }

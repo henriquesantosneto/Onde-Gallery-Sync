@@ -5,7 +5,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Cloud
@@ -73,6 +76,8 @@ import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.system.AppStartupPermissions
 import com.onegallery.sync.system.BatteryOptimization
 import com.onegallery.sync.data.local.MediaAccessPermissions
+import com.onegallery.sync.ui.components.LazyColumnScrollbarEndPadding
+import com.onegallery.sync.ui.components.LazyColumnVerticalScrollbar
 import com.onegallery.sync.ui.library.IndexUsageStats
 import com.onegallery.sync.ui.library.LibraryIndexUsageCard
 
@@ -196,11 +201,19 @@ fun SettingsScreen(
         contentWindowInsets = ZeroScaffoldContentInsets,
         topBar = { TopAppBar(title = { Text("Ajustes") }) },
     ) { padding ->
-        LazyColumn(
+        val listState = rememberLazyListState()
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(end = LazyColumnScrollbarEndPadding),
+                contentPadding = PaddingValues(bottom = 16.dp),
+            ) {
             item {
                 SettingsSectionTitle("OneDrive (Microsoft Graph)", Icons.Outlined.Cloud)
             }
@@ -740,6 +753,14 @@ fun SettingsScreen(
                     )
                 }
             }
+            }
+            LazyColumnVerticalScrollbar(
+                listState = listState,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(end = 6.dp, top = 8.dp, bottom = 24.dp),
+            )
         }
     }
 
