@@ -98,7 +98,8 @@ fun SyncStatusScreen(
         onDispose { syncCoordinator.setSyncStatusScreenVisible(false) }
     }
     var clearingErrors by remember { mutableStateOf(false) }
-    val showLiveActivity = coordinatorState.isRunning || coordinatorState.prefetchingThumbnails
+    val syncBusy = coordinatorState.isSyncBusy
+    val showLiveActivity = syncBusy
     val queueForUi = remember(
         showLiveActivity,
         coordinatorState.runQueue,
@@ -171,9 +172,7 @@ fun SyncStatusScreen(
                                 coordinatorState.lastMessage.lineSequence().drop(1).joinToString("\n")
                             }
                             Text(
-                                coordinatorState.activityHeadline.ifBlank {
-                                    coordinatorState.progressPhase.runningHeadlineFallback()
-                                },
+                                coordinatorState.settingsSyncStatusHeadline(),
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(top = 12.dp),
@@ -285,7 +284,7 @@ fun SyncStatusScreen(
                 ) {
                     Button(
                         onClick = { syncTasks.runBidirectionalSync(userInitiated = true) },
-                        enabled = !coordinatorState.isRunning,
+                        enabled = !syncBusy,
                         modifier = Modifier.weight(1f),
                     ) { Text("Sincronizar agora") }
                     if (coordinatorState.isRunning) {

@@ -21,6 +21,7 @@ class SyncTaskLauncher(
     }
 
     fun runBidirectionalSync(userInitiated: Boolean = false) {
+        if (coordinator.state.value.isSyncBusy) return
         val prefs = app.syncPreferences
         if (userInitiated && app.appForegroundState.isInForeground()) {
             launchManaged { coordinator.runBidirectionalSync(userInitiated = true) }

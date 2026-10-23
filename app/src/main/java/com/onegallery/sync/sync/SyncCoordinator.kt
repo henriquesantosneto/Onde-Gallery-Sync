@@ -103,7 +103,25 @@ data class SyncUiState(
     val thumbnailStats: ThumbnailCacheStats? = null,
     /** Prefetch de miniaturas (sync ou 2º plano com tela Sync aberta). */
     val prefetchingThumbnails: Boolean = false,
-)
+) {
+    /** Sync principal, pós-sync ou miniaturas em 2º plano — bloqueia “Sincronizar agora”. */
+    val isSyncBusy: Boolean
+        get() = isRunning || prefetchingThumbnails
+
+    /** Linha principal na aba Ajustes → Sync (evita “Pronto…” durante prefetch). */
+    fun settingsSyncStatusHeadline(): String {
+        if (!isSyncBusy) {
+            return lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
+        }
+        return activityHeadline.ifBlank {
+            when {
+                prefetchingThumbnails && progressPhase == SyncProgressPhase.IDLE ->
+                    "Completando miniaturas no cache…"
+                else -> progressPhase.runningHeadlineFallback()
+            }
+        }
+    }
+}
 
 class SyncCoordinator(
     private val appContext: Context,
@@ -831,8 +849,35 @@ class SyncCoordinator(
 
     private fun refreshThumbnailPrefetchUiFlag() {
         val active = bulkThumbnailPrefetchDepth.get() > 0
-        if (_state.value.prefetchingThumbnails == active) return
-        _state.update { it.copy(prefetchingThumbnails = active) }
+        val current = _state.value
+        if (current.prefetchingThumbnails == active &&
+            (!active || current.isRunning || current.progressPhase != SyncProgressPhase.IDLE ||
+                current.activityHeadline.isNotBlank())
+        ) {
+            return
+        }
+        _state.update { state ->
+            if (!active) {
+                state.copy(
+                    prefetchingThumbnails = false,
+                    progressPhase = if (state.isRunning) state.progressPhase else SyncProgressPhase.IDLE,
+                    activityHeadline = if (state.isRunning) state.activityHeadline else "",
+                    activityDetail = if (state.isRunning) state.activityDetail else "",
+                )
+            } else {
+                state.copy(
+                    prefetchingThumbnails = true,
+                    progressPhase = if (state.isRunning) {
+                        state.progressPhase
+                    } else {
+                        SyncProgressPhase.PREFETCH_THUMBNAILS
+                    },
+                    activityHeadline = state.activityHeadline.ifBlank {
+                        if (state.isRunning) "" else "Completando miniaturas no cache…"
+                    },
+                )
+            }
+        }
     }
 
     private inline fun <T> withThumbnailPrefetchUi(block: () -> T): T {

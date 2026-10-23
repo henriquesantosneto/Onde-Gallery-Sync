@@ -98,6 +98,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val authState by authManager.state.collectAsStateWithLifecycle()
     val syncState by syncCoordinator.state.collectAsStateWithLifecycle()
+    val syncBusy = syncState.isSyncBusy
     val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle(initialValue = null)
     val usageStats = indexStats?.let { IndexUsageStats.from(it) }
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
@@ -325,11 +326,9 @@ fun SettingsScreen(
                     headlineContent = { Text("Sync") },
                     supportingContent = {
                         Column {
-                            if (syncState.isRunning) {
+                            if (syncBusy) {
                                 Text(
-                                    syncState.activityHeadline.ifBlank {
-                                        syncState.progressPhase.runningHeadlineFallback()
-                                    },
+                                    syncState.settingsSyncStatusHeadline(),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 syncState.activityDetail.takeIf { it.isNotBlank() }?.let { detail ->
@@ -345,17 +344,19 @@ fun SettingsScreen(
                                         .fillMaxWidth()
                                         .padding(top = 8.dp),
                                 )
-                                OutlinedButton(
-                                    onClick = { syncCoordinator.requestCancelSync() },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 8.dp),
-                                ) {
-                                    Text("Parar sincronismo")
+                                if (syncState.isRunning) {
+                                    OutlinedButton(
+                                        onClick = { syncCoordinator.requestCancelSync() },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                    ) {
+                                        Text("Parar sincronismo")
+                                    }
                                 }
                             } else {
                                 Text(
-                                    syncState.lastMessage.lineSequence().firstOrNull()?.trim().orEmpty()
+                                    syncState.settingsSyncStatusHeadline()
                                         .ifBlank { "Ver fila, transferências e estatísticas" },
                                     style = MaterialTheme.typography.bodySmall,
                                 )
@@ -551,7 +552,7 @@ fun SettingsScreen(
                             syncTasks.runIndexSanitation(userInitiated = true)
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = !syncState.isRunning,
+                        enabled = !syncBusy,
                     ) {
                         Text("Limpar órfãos")
                     }
@@ -578,7 +579,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { showResetIndexConfirm = true },
                         modifier = Modifier.weight(1f),
-                        enabled = !syncState.isRunning,
+                        enabled = !syncBusy,
                     ) {
                         Text("Zerar índice e recomeçar")
                     }
