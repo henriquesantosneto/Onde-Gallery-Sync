@@ -3,6 +3,12 @@ package com.onegallery.sync.data.local
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.ui.gallery.GalleryDisplayItem
 
+/** Mesmo critério da lista Locais: um item só entra no álbum da sua chave de bucket. */
+fun GalleryDisplayItem.matchesPlaceAlbumBucket(encodedKey: String): Boolean {
+    if (encodedKey.isBlank()) return false
+    return placeAlbumBucketEncodedKey(this) == encodedKey
+}
+
 /** Agrupa itens colapsados em álbuns de local (célula ~[PLACE_CLUSTER_RADIUS_KM] km ou rótulo legado). */
 internal fun groupDisplayItemsForPlaceAlbums(
     items: List<GalleryDisplayItem>,

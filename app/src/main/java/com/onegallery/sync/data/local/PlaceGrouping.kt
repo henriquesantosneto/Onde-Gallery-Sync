@@ -92,10 +92,15 @@ private fun SyncMetadataEntity.sortTimestamp(): Long =
         ?: localModifiedAt?.takeIf { it > 0L }
         ?: 0L
 
-internal fun SyncMetadataEntity.placeMediaDedupeKey(): String {
+internal fun SyncMetadataEntity.placeMediaDedupeKey(): String = placeAlbumCollapseKeyForEntity()
+
+internal fun SyncMetadataEntity.placeAlbumCollapseKeyForEntity(): String {
     localMediaId?.let { return "localId:$it" }
     oneDriveItemId?.let { return "cloudId:$it" }
     placeGeoDedupeKey()?.let { return "geoCap:$it" }
+    val path = canonicalPath.trim()
+    if (path.isNotEmpty()) return "path:$path"
+    localContentUri?.trim()?.takeIf { it.isNotEmpty() }?.let { return "uri:$it" }
     return "path:$canonicalPath"
 }
 

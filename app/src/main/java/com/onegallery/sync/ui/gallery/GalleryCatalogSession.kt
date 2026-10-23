@@ -3,8 +3,9 @@ package com.onegallery.sync.ui.gallery
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.PlaceMatchKey
+import com.onegallery.sync.data.local.collapseItemsForPlaceAlbums
 import com.onegallery.sync.data.local.db.UserAlbumEntity
-import com.onegallery.sync.data.local.matchesPlace
+import com.onegallery.sync.data.local.matchesPlaceAlbumBucket
 
 /** Estado derivado reutilizável entre recomposições e mudanças leves (miniaturas). */
 class GalleryCatalogSession {
@@ -154,10 +155,13 @@ class GalleryCatalogSession {
                 if (browseFilterCacheKey == cacheKey && browseFilterCachedItems.isNotEmpty()) {
                     return browseFilterCachedItems
                 }
-                val matchKey = PlaceMatchKey.decode(filter.matchKey)
-                val filtered = visibleItems.filter { item ->
-                    matchKey?.let { item.matchesPlace(it, filter.displayName) }
-                        ?: (item.locationLabel == filter.displayName)
+                val collapsed = collapseItemsForPlaceAlbums(visibleItems)
+                val filtered = collapsed.filter { item ->
+                    if (filter.matchKey.isNotBlank()) {
+                        item.matchesPlaceAlbumBucket(filter.matchKey)
+                    } else {
+                        item.locationLabel == filter.displayName
+                    }
                 }.sortedBy(order)
                 browseFilterCacheKey = cacheKey
                 browseFilterCachedItems = filtered
@@ -279,7 +283,7 @@ class GalleryCatalogSession {
     )
 
     companion object {
-        const val PLACE_ALBUM_GROUPING_VERSION = 2
+        const val PLACE_ALBUM_GROUPING_VERSION = 3
     }
 
     private fun computeGeoItems(catalog: List<GalleryDisplayItem>): List<GalleryDisplayItem> {

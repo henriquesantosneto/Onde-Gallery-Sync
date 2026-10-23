@@ -7,7 +7,9 @@ import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceComponents
+import com.onegallery.sync.data.local.collapseItemsForPlaceAlbums
 import com.onegallery.sync.data.local.groupDisplayItemsForPlaceAlbums
+import com.onegallery.sync.data.local.matchesPlaceAlbumBucket
 import com.onegallery.sync.data.local.placeAlbumTitleForGroup
 import com.onegallery.sync.data.local.preferredPlaceBrowseEncodedKey
 import com.onegallery.sync.data.local.PlaceLevel
@@ -651,6 +653,7 @@ class GalleryViewModel(
     ) {
         if (catalogItems.isEmpty()) return
         val albumItems = itemsForAlbumListGrouping(catalogItems, visibleItems)
+        val placeItems = itemsForPlaceAlbumGrouping(catalogItems, visibleItems)
         val pending = deferredAlbumLists.value
         if (pending.albums.isNotEmpty() &&
             pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
@@ -703,7 +706,7 @@ class GalleryViewModel(
             )
             val skeletonPlaces = sortPlaceAlbums(
                 buildPlaceAlbums(
-                    albumItems,
+                    placeItems,
                     albumCoverLocalIndex,
                     mediaCacheRepository,
                     resolveCoverModels = false,
@@ -726,7 +729,7 @@ class GalleryViewModel(
                 ),
                 sortPlaceAlbums(
                     buildPlaceAlbums(
-                        albumItems,
+                        placeItems,
                         albumCoverLocalIndex,
                         mediaCacheRepository,
                         resolveCoverModels = resolveCovers,
@@ -914,6 +917,7 @@ class GalleryViewModel(
         albumLists: DeferredAlbumLists,
         fingerprint: GalleryCatalogFingerprint,
         catalogItems: List<GalleryDisplayItem>,
+        placeCatalogItems: List<GalleryDisplayItem>,
         userAlbums: List<UserAlbumEntity>,
         albumSort: AlbumListSort,
         deferAlbumCoverModels: Boolean,
@@ -932,7 +936,7 @@ class GalleryViewModel(
                 mediaCacheRepository = mediaCacheRepository,
                 coverRevisionStamp = coverRevisionStamp,
             ) to catalogSession.placeAlbumsFor(
-                catalogItems = catalogItems,
+                catalogItems = placeCatalogItems,
                 albumSort = albumSort,
                 deferCoverModels = deferAlbumCoverModels,
                 albumCoverLocalIndex = albumCoverLocalIndex,
@@ -1049,10 +1053,12 @@ class GalleryViewModel(
         val userAlbums = snapshot.userAlbums
         val coverRevisionStamp = coverRevisions.values.fold(0L) { acc, stamp -> acc xor stamp }
         val albumListItems = itemsForAlbumListGrouping(catalogItems, visibleItems)
+        val placeListItems = itemsForPlaceAlbumGrouping(catalogItems, visibleItems)
         val (displayAlbums, displayPlaceAlbums) = albumListsForUi(
             albumLists = albumLists,
             fingerprint = fingerprint,
             catalogItems = albumListItems,
+            placeCatalogItems = placeListItems,
             userAlbums = userAlbums,
             albumSort = controls.albumSort,
             deferAlbumCoverModels = deferAlbumCoverModels,
@@ -1188,7 +1194,7 @@ class GalleryViewModel(
             }
         }
         groupDisplayItemsForPlaceAlbums(
-            itemsForAlbumListGrouping(catalogItems, latestLibraryItems),
+            itemsForPlaceAlbumGrouping(catalogItems, latestLibraryItems),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
@@ -1206,9 +1212,12 @@ class GalleryViewModel(
     }
 
     private suspend fun prefetchBrowseThumbnailsForPlace(encodedMatchKey: String, albumTitle: String? = null) {
-        val matchKey = PlaceMatchKey.decode(encodedMatchKey)
-        val items = latestLibraryItems.filter { item ->
-            matchKey?.let { item.matchesPlace(it, albumTitle) } == true
+        val items = collapseItemsForPlaceAlbums(latestLibraryItems).filter { item ->
+            if (encodedMatchKey.isNotBlank()) {
+                item.matchesPlaceAlbumBucket(encodedMatchKey)
+            } else {
+                albumTitle != null && item.locationLabel == albumTitle
+            }
         }
         prefetchBrowseThumbnails(items, coverBucketId = "place:$encodedMatchKey")
     }

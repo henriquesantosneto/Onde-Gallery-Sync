@@ -99,20 +99,7 @@ fun GalleryDisplayItem.matchesPlace(
         return placeAlbumDisplayTitle().equals(legacy, ignoreCase = true)
     }
     if (key.level == PlaceLevel.GEO_CELL) {
-        val coords = validPlaceCoordinates(latitude, longitude)
-        if (coords != null) {
-            val cell = geographicCellKey(coords.first, coords.second)
-            val cellParts = cell.split(':')
-            if (cellParts.getOrElse(0) { "" } == key.parts.getOrElse(0) { "" } &&
-                cellParts.getOrElse(1) { "" } == key.parts.getOrElse(1) { "" }
-            ) {
-                return true
-            }
-        }
-        if (!albumDisplayTitle.isNullOrBlank()) {
-            return placeAlbumDisplayTitle().equals(albumDisplayTitle.trim(), ignoreCase = true)
-        }
-        return false
+        return matchesPlaceAlbumBucket(key.encode())
     }
     val components = PlaceComponents.forItem(this) ?: return false
     fun eq(a: String?, b: String): Boolean =
