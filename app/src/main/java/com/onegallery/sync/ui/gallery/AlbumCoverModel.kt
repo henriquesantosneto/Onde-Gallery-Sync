@@ -153,5 +153,7 @@ fun albumCoverSelectionSignature(
     hash = hash * 31L + cover.sortTimestamp
     hash = hash * 31L + thumbMtime
     hash = hash * 31L + cover.localMediaId.hashCode()
+    hash = hash * 31L + (cover.localUri?.hashCode()?.toLong() ?: 0L)
+    hash = hash * 31L + (cover.cachedOriginal?.takeIf { it.isFile }?.lastModified() ?: 0L)
     return hash
 }

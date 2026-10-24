@@ -147,6 +147,7 @@ class GalleryViewModel(
     private var lastAlbumCoverRevisions: Map<String, Long> = emptyMap()
     private val folderAlbumCoverSignature = mutableMapOf<String, Long>()
     private val placeAlbumCoverSignature = mutableMapOf<String, Long>()
+    private var lastSeenLocalRevisionForCovers: Long = -1L
     @Volatile
     private var initialLibrarySnapshotApplied = false
     @Volatile
@@ -191,6 +192,7 @@ class GalleryViewModel(
         /** Linhas no Room quando a lista foi montada (detecta índice incompleto vs spill). */
         val metadataRowCount: Int = 0,
         val albumSort: AlbumListSort = AlbumListSort.NAME_A_Z,
+        val localRevision: Long = -1L,
     )
 
     private val deferredAlbumLists = MutableStateFlow(restoreDeferredAlbumListsFromSession())
@@ -235,6 +237,7 @@ class GalleryViewModel(
             catalogFingerprint = fingerprint,
             metadataRowCount = fingerprint.rowCount,
             albumSort = albumSort,
+            localRevision = catalogEntry?.localRevision ?: albumEntry.localRevision,
         )
     }
 
@@ -720,6 +723,7 @@ class GalleryViewModel(
             catalogFingerprint = fingerprint,
             metadataRowCount = metadataRowCount,
             albumSort = albumSort,
+            localRevision = entry.localRevision,
         )
         catalogSession.restoreAlbumCaches(
             albums = albums,
@@ -773,7 +777,8 @@ class GalleryViewModel(
         if (!onlyThumb &&
             pending.albums.isNotEmpty() &&
             pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
-            pending.albumSort == albumSort
+            pending.albumSort == albumSort &&
+            pending.localRevision == localRevision
         ) {
             return
         }
@@ -945,9 +950,12 @@ class GalleryViewModel(
             return
         }
         val pending = deferredAlbumLists.value
+        val sessionLocalRevision = catalogSession.lastBundle?.localRevision
+            ?: localMediaRepository.localGalleryRevision.value
         if (pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
             pending.metadataRowCount == metadata.size &&
             pending.albumSort == albumSort &&
+            pending.localRevision == sessionLocalRevision &&
             pending.albums.isNotEmpty()
         ) {
             return
@@ -971,6 +979,8 @@ class GalleryViewModel(
                     catalogFingerprint = fingerprint,
                     metadataRowCount = metadata.size,
                     albumSort = albumSort,
+                    localRevision = catalogSession.lastBundle?.localRevision
+                        ?: localMediaRepository.localGalleryRevision.value,
                 )
                 catalogSession.restoreAlbumCaches(
                     albums = albums,
@@ -985,7 +995,8 @@ class GalleryViewModel(
                     albums = albums,
                     placeAlbums = placeAlbums,
                     fingerprint = fingerprint,
-                    localRevision = catalogSession.lastBundle?.localRevision ?: 0L,
+                    localRevision = catalogSession.lastBundle?.localRevision
+                        ?: localMediaRepository.localGalleryRevision.value,
                     albumSort = albumSort,
                     coverRevisionStamp = coverRevisionStamp,
                 )
@@ -1050,9 +1061,12 @@ class GalleryViewModel(
         coverRevisionStamp: Long,
     ): Pair<List<MediaAlbum>, List<MediaAlbum>> {
         val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        val sessionLocalRevision = catalogSession.lastBundle?.localRevision
+            ?: localMediaRepository.localGalleryRevision.value
         if (!onlyThumb &&
             albumLists.albums.isNotEmpty() &&
-            albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true
+            albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true &&
+            albumLists.localRevision == sessionLocalRevision
         ) {
             return albumLists.albums to albumLists.placeAlbums
         }
@@ -1171,6 +1185,12 @@ class GalleryViewModel(
         val visibleItems = snapshot.visibleItems
         latestCatalogItems = catalogItems
         latestLibraryItems = visibleItems
+        val sessionLocalRevision = catalogSession.lastBundle?.localRevision
+            ?: localMediaRepository.localGalleryRevision.value
+        if (sessionLocalRevision != lastSeenLocalRevisionForCovers) {
+            lastSeenLocalRevisionForCovers = sessionLocalRevision
+            albumCoverLocalIndex.invalidateAfterThumbnailBatch()
+        }
         val deferAlbumCoverModels = catalogItems.size > 3_000
         val fingerprint = snapshot.fingerprint
             ?: catalogSession.lastBundle?.fingerprint
@@ -1363,15 +1383,18 @@ class GalleryViewModel(
     private fun detectAlbumCoverSignatureChanges(catalogItems: List<GalleryDisplayItem>): Set<String> {
         if (catalogItems.isEmpty()) return emptySet()
         val changed = mutableSetOf<String>()
-        val visibleByPath = latestLibraryItems.associateBy { it.canonicalPath }
-        catalogItems.groupBy { it.albumName }.forEach { (name, items) ->
+        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        val folderPool = itemsForAlbumListGrouping(
+            catalogItems,
+            latestLibraryItems,
+            mediaCacheRepository,
+            onlyItemsWithThumbnail = onlyThumb,
+        )
+        folderPool.groupBy { it.albumName }.forEach { (name, browsable) ->
             val key = "album:$name"
-            val browsable = items
-                .map { visibleByPath[it.canonicalPath] ?: it }
-                .filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
             val signature = albumCoverSelectionSignature(browsable, mediaCacheRepository)
             val previous = folderAlbumCoverSignature.put(key, signature)
-            if (previous != null && previous != signature) {
+            if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
             }
         }
@@ -1380,14 +1403,13 @@ class GalleryViewModel(
                 catalogItems,
                 latestLibraryItems,
                 mediaCacheRepository,
-                onlyItemsWithThumbnail = galleryPreferences.browseOnlyItemsWithThumbnail,
+                onlyItemsWithThumbnail = onlyThumb,
             ),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
-            val refreshed = group.map { visibleByPath[it.canonicalPath] ?: it }
-            val signature = albumCoverSelectionSignature(refreshed, mediaCacheRepository)
+            val signature = albumCoverSelectionSignature(group, mediaCacheRepository)
             val previous = placeAlbumCoverSignature.put(key, signature)
-            if (previous != null && previous != signature) {
+            if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
             }
         }
@@ -1534,23 +1556,30 @@ class GalleryViewModel(
     }
 
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {
-        val all = latestCatalogItems
-        if (all.isEmpty()) return emptyList()
-        val visibleByPath = latestLibraryItems.associateBy { it.canonicalPath }
-        val raw = when {
+        val catalog = latestCatalogItems
+        if (catalog.isEmpty() && latestLibraryItems.isEmpty()) return emptyList()
+        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        return when {
             album.bucketId.startsWith("place:") -> {
                 val encoded = album.bucketId.removePrefix("place:")
                 val matchKey = PlaceMatchKey.decode(encoded)
-                all.filter { item ->
+                itemsForPlaceAlbumGrouping(
+                    catalog,
+                    latestLibraryItems,
+                    mediaCacheRepository,
+                    onlyItemsWithThumbnail = onlyThumb,
+                ).filter { item ->
                     matchKey?.let { item.matchesPlace(it, album.title) }
                         ?: (item.locationLabel == album.title)
                 }
             }
-            else -> all.filter { it.albumName == album.filterKey }
+            else -> itemsForAlbumListGrouping(
+                catalog,
+                latestLibraryItems,
+                mediaCacheRepository,
+                onlyItemsWithThumbnail = onlyThumb,
+            ).filter { it.albumName == album.filterKey }
         }
-        return raw
-            .map { visibleByPath[it.canonicalPath] ?: it }
-            .filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
     }
 
     fun refresh() {
