@@ -161,7 +161,10 @@ fun MediaDetailScreen(
     var detailsDragging by remember { mutableStateOf(false) }
     var detailsContentLevel by remember { mutableStateOf(MediaDetailContentLevel.Simple) }
 
+    var detailZoomBlocksPager by remember { mutableStateOf(false) }
+
     LaunchedEffect(pagerState.currentPage) {
+        detailZoomBlocksPager = false
         detailsSettleFraction = 0f
         detailsDragFraction = 0f
         detailsDragging = false
@@ -275,7 +278,7 @@ fun MediaDetailScreen(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = !detailsDragging,
+                    userScrollEnabled = !detailsDragging && !detailZoomBlocksPager,
                     key = { page -> pagerPaths.getOrElse(page) { "empty-$page" } },
                 ) { page ->
                     val path = pagerPaths.getOrNull(page) ?: return@HorizontalPager
@@ -291,6 +294,9 @@ fun MediaDetailScreen(
                         mediaCacheRepository = mediaCacheRepository,
                         viewModel = viewModel,
                         onToggleImmersive = { immersive = !immersive },
+                        onDetailZoomActiveChanged = { active ->
+                            if (pageActive) detailZoomBlocksPager = active
+                        },
                     )
                 }
 
@@ -612,6 +618,7 @@ private fun LabMediaDetailPage(
     mediaCacheRepository: MediaCacheRepository,
     viewModel: GalleryViewModel,
     onToggleImmersive: () -> Unit,
+    onDetailZoomActiveChanged: (Boolean) -> Unit = {},
 ) {
     val viewContext = LocalContext.current
     val app = viewContext.applicationContext as OneGalleryApplication
@@ -729,6 +736,8 @@ private fun LabMediaDetailPage(
             withContext(Dispatchers.IO) {
                 syncCoordinator.recordLocalMediaAccess(canonicalPath)
             }
+        } else {
+            onDetailZoomActiveChanged(false)
         }
     }
 
@@ -776,6 +785,9 @@ private fun LabMediaDetailPage(
                                 displayName = display.displayName,
                                 bottomChromeInset = bottomChromeInset,
                                 onVideoAreaTap = onToggleImmersive,
+                                onZoomActiveChanged = { active ->
+                                    if (isActivePage) onDetailZoomActiveChanged(active)
+                                },
                             )
                         }
                     }
@@ -787,6 +799,9 @@ private fun LabMediaDetailPage(
                                 item = display,
                                 modifier = Modifier.fillMaxSize(),
                                 onToggleImmersive = onToggleImmersive,
+                                onZoomActiveChanged = { active ->
+                                    if (isActivePage) onDetailZoomActiveChanged(active)
+                                },
                             )
                         }
                     }

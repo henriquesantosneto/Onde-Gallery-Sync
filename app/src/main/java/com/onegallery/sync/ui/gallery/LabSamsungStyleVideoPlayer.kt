@@ -40,8 +40,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -80,6 +78,7 @@ fun LabSamsungStyleVideoPlayer(
     artworkItem: GalleryDisplayItem? = null,
     bottomChromeInset: Dp = 32.dp,
     onVideoAreaTap: (() -> Unit)? = null,
+    onZoomActiveChanged: (Boolean) -> Unit = {},
 ) {
     LabSamsungStyleMediaPlayer(
         uri = uri,
@@ -90,6 +89,7 @@ fun LabSamsungStyleVideoPlayer(
         artworkItem = artworkItem,
         bottomChromeInset = bottomChromeInset,
         onVideoAreaTap = onVideoAreaTap,
+        onZoomActiveChanged = onZoomActiveChanged,
     )
 }
 
@@ -104,6 +104,7 @@ fun LabSamsungStyleMediaPlayer(
     /** Espaço acima da faixa de miniaturas / barra de gestos. */
     bottomChromeInset: Dp = 32.dp,
     onVideoAreaTap: (() -> Unit)? = null,
+    onZoomActiveChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val focusRequester = remember(uri) { FocusRequester() }
@@ -234,42 +235,46 @@ fun LabSamsungStyleMediaPlayer(
     ) {
         if (kind == LabMediaPlaybackKind.Video) {
             val zoomTransform = remember(uri) { ZoomTransformHolder() }
-            ZoomableMediaContainer(
-                resetKey = uri,
-                transform = zoomTransform,
-                modifier = Modifier.fillMaxSize(),
-                interceptSingleTap = false,
-            ) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        (LayoutInflater.from(ctx).inflate(
-                            R.layout.gallery_detail_player_view,
-                            null,
-                            false,
-                        ) as PlayerView).apply {
-                            this.player = player
-                            useController = false
-                            isClickable = false
-                            isFocusable = false
-                            isFocusableInTouchMode = false
-                            setOnTouchListener { _, _ -> false }
-                        }
-                    },
-                    update = { view ->
-                        if (view.player != player) view.player = player
-                    },
-                )
+            val videoImmersiveModifier = if (onVideoAreaTap != null) {
+                Modifier.detailImmersiveTap(zoomTransform, onVideoAreaTap)
+            } else {
+                Modifier
             }
-            if (onVideoAreaTap != null) {
-                Box(
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(videoImmersiveModifier),
+            ) {
+                ZoomableMediaContainer(
+                    resetKey = uri,
+                    transform = zoomTransform,
                     modifier = Modifier
-                        .matchParentSize()
-                        .zIndex(1f)
-                        .pointerInput(uri, onVideoAreaTap) {
-                            detectImmersiveToggleTapMainPass { onVideoAreaTap.invoke() }
+                        .fillMaxSize()
+                        .notifyPagerWhenMultiTouch(onZoomActiveChanged),
+                    interceptSingleTap = false,
+                    onZoomActiveChanged = onZoomActiveChanged,
+                ) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            (LayoutInflater.from(ctx).inflate(
+                                R.layout.gallery_detail_player_view,
+                                null,
+                                false,
+                            ) as PlayerView).apply {
+                                this.player = player
+                                useController = false
+                                isClickable = false
+                                isFocusable = false
+                                isFocusableInTouchMode = false
+                                setOnTouchListener { _, _ -> false }
+                            }
                         },
-                )
+                        update = { view ->
+                            if (view.player != player) view.player = player
+                        },
+                    )
+                }
             }
         } else {
             LabAudioArtworkPanel(
@@ -289,7 +294,6 @@ fun LabSamsungStyleMediaPlayer(
                 showMuteInPill = kind == LabMediaPlaybackKind.Video,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .zIndex(2f)
                     .padding(start = 16.dp, end = 16.dp, bottom = pillBottom)
                     .fillMaxWidth(),
             )
@@ -308,7 +312,6 @@ fun LabSamsungStyleMediaPlayer(
                 },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .zIndex(2f)
                     .padding(start = 20.dp, end = 20.dp, bottom = sliderBottom)
                     .fillMaxWidth(),
                 colors = SliderDefaults.colors(

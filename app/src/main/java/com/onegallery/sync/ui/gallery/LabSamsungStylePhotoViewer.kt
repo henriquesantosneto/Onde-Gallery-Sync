@@ -19,6 +19,7 @@ fun LabSamsungStylePhotoViewer(
     item: GalleryDisplayItem,
     modifier: Modifier = Modifier,
     onToggleImmersive: (() -> Unit)? = null,
+    onZoomActiveChanged: (Boolean) -> Unit = {},
 ) {
     val transform = remember(item.canonicalPath) { ZoomTransformHolder() }
     val immersiveModifier = if (onToggleImmersive != null) {
