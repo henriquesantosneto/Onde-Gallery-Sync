@@ -56,8 +56,11 @@ fun LabSamsungStylePhotoViewer(
                 ZoomableMediaContainer(
                     resetKey = item.canonicalPath,
                     transform = transform,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .notifyPagerWhenMultiTouch(onZoomActiveChanged),
                     interceptSingleTap = false,
+                    onZoomActiveChanged = onZoomActiveChanged,
                 ) {
                     AsyncImage(
                         model = request,
@@ -76,8 +79,11 @@ fun LabSamsungStylePhotoViewer(
                 ZoomableMediaContainer(
                     resetKey = item.canonicalPath,
                     transform = transform,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .notifyPagerWhenMultiTouch(onZoomActiveChanged),
                     interceptSingleTap = false,
+                    onZoomActiveChanged = onZoomActiveChanged,
                 ) {
                     GalleryThumbnailImage(
                         item = item,

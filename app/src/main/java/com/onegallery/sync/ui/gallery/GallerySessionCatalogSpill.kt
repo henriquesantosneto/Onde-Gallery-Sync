@@ -186,6 +186,11 @@ object GallerySessionCatalogSpill {
         val placeholder = readNullableUtf(input)?.let { path ->
             java.io.File(path).takeIf { it.isFile && it.length() > 0L }
         }
+        val sortTimestamp = input.readLong()
+        val locationLabel = readNullableUtf(input)
+        val latitude = readNullableDouble(input)
+        val longitude = readNullableDouble(input)
+        val videoDurationMs = readNullableLong(input)
         val localReleasedForSpace = input.readBoolean()
         return GalleryDisplayItem(
             canonicalPath = canonical,
@@ -199,11 +204,11 @@ object GallerySessionCatalogSpill {
             localUri = localUri,
             cachedOriginal = cachedOriginal,
             cachedPlaceholderThumb = placeholder,
-            sortTimestamp = input.readLong(),
-            locationLabel = readNullableUtf(input),
-            latitude = readNullableDouble(input),
-            longitude = readNullableDouble(input),
-            videoDurationMs = readNullableLong(input),
+            sortTimestamp = sortTimestamp,
+            locationLabel = locationLabel,
+            latitude = latitude,
+            longitude = longitude,
+            videoDurationMs = videoDurationMs,
             localReleasedForSpace = localReleasedForSpace,
             showInBrowseGrid = spillShowInBrowseGrid(
                 kind = kind,

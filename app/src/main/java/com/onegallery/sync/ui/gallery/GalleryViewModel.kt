@@ -259,6 +259,7 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.galleryMetadata.collect { metadata ->
                 indexHydrated.value = true
+                loading.value = false
                 if (optimisticRemovedPaths.value.isEmpty()) return@collect
                 val indexed = metadata.asSequence().map { it.canonicalPath }.toHashSet()
                 optimisticRemovedPaths.update { pending ->
