@@ -131,7 +131,7 @@ internal class ThumbnailPrefetchRunner(
         chunkCount: Int,
     ): Int {
         if (rows.isEmpty()) return 0
-        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMB_PREFETCH)
+        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMBNAILS)
         val semaphore = Semaphore(slots)
         val completed = AtomicInteger(0)
         val cachedCount = AtomicInteger(0)
@@ -224,7 +224,7 @@ internal class ThumbnailPrefetchRunner(
 
     private companion object {
         const val THUMB_PREFETCH_RUN_CHUNK = 16
-        const val PARALLEL_THUMB_PREFETCH = 2
+        const val PARALLEL_THUMB_PREFETCH = 5
         const val PARALLEL_THUMBNAILS = 5
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
         const val THUMB_PREFETCH_LOCAL_VIDEO_TIMEOUT_MS = 75_000L

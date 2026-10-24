@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +68,7 @@ import com.onegallery.sync.sync.SyncQueueDisplayRow
 import com.onegallery.sync.sync.SyncProgressPhase
 import com.onegallery.sync.sync.runningHeadlineFallback
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.distinctUntilChanged
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncStatusScreen(
@@ -429,6 +431,36 @@ private fun SyncQueueScrollPanel(
             }
         } else {
             val listState = rememberLazyListState()
+            var followQueueTop by remember { mutableStateOf(true) }
+            var suppressScrollFollowDetect by remember { mutableStateOf(false) }
+            LaunchedEffect(listState) {
+                snapshotFlow {
+                    Triple(
+                        listState.firstVisibleItemIndex,
+                        listState.firstVisibleItemScrollOffset,
+                        listState.isScrollInProgress,
+                    )
+                }
+                    .distinctUntilChanged()
+                    .collect { (index, offset, inProgress) ->
+                        if (suppressScrollFollowDetect || inProgress) return@collect
+                        followQueueTop = index == 0 && offset <= 8
+                    }
+            }
+            val queueScrollAnchor = remember(activeItems, queueWaiting) {
+                activeItems.joinToString { it.canonicalPath } +
+                    "|" +
+                    queueWaiting.joinToString { it.canonicalPath }
+            }
+            LaunchedEffect(queueScrollAnchor, followQueueTop) {
+                if (!followQueueTop) return@LaunchedEffect
+                suppressScrollFollowDetect = true
+                try {
+                    listState.scrollToItem(0)
+                } finally {
+                    suppressScrollFollowDetect = false
+                }
+            }
             Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,

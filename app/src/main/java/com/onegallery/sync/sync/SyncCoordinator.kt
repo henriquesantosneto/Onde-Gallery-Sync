@@ -4614,7 +4614,7 @@ class SyncCoordinator(
         /** Lista na tela Sync — evita OOM com dezenas de milhares pendentes. */
         const val THUMB_RUN_QUEUE_UI_CAP = 1_500
         const val GPS_RUN_QUEUE_UI_CAP = 1_500
-        const val PARALLEL_THUMB_PREFETCH = 2
+        const val PARALLEL_THUMB_PREFETCH = 5
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
@@ -4638,14 +4638,14 @@ class SyncCoordinator(
         const val GPS_BACKFILL_MANUAL_ROUNDS = 48
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 500
-        const val PARALLEL_UPLOADS = 3
+        const val PARALLEL_UPLOADS = 5
         /** Downloads Graph / decode local em paralelo por leva. */
         const val PARALLEL_THUMBNAILS = 5
         /** Com a galeria aberta (fora da tela Sync): miniaturas seguem, sem competir com a UI. */
-        const val PARALLEL_THUMBNAILS_FOREGROUND_IDLE = 2
+        const val PARALLEL_THUMBNAILS_FOREGROUND_IDLE = 5
         const val THUMB_FOREGROUND_IDLE_MAX_PER_PASS = 320
         const val THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS = 8_000L
-        const val PARALLEL_GPS_BACKFILL = 3
+        const val PARALLEL_GPS_BACKFILL = 5
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L
     }
