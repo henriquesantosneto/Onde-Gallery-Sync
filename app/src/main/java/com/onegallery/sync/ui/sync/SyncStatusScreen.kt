@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -56,6 +57,7 @@ import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.R
 import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncMode
@@ -294,16 +296,10 @@ fun SyncStatusScreen(
                     ) { Text("Sincronizar agora") }
                     if (syncBusy) {
                         OutlinedButton(
-                            onClick = { syncCoordinator.requestCancelSync() },
+                            onClick = { syncCoordinator.requestStop() },
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(
-                                if (coordinatorState.isRunning) {
-                                    "Parar sincronismo"
-                                } else {
-                                    "Parar miniaturas"
-                                },
-                            )
+                            Text(stringResource(R.string.sync_action_stop))
                         }
                     }
                 }

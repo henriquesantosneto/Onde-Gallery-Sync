@@ -160,6 +160,15 @@ class GalleryViewModel(
 
     private var gridThumbnailPrefetchJob: Job? = null
     private val gridThumbnailPrefetchQueued = ConcurrentHashMap.newKeySet<String>()
+    private val userStopHook: () -> Unit = {
+        gridThumbnailPrefetchJob?.cancel()
+        gridThumbnailPrefetchJob = null
+        gridThumbnailPrefetchQueued.clear()
+    }
+
+    init {
+        syncCoordinator.registerUserStopHook(userStopHook)
+    }
 
     private val catalogSession = GalleryCatalogSession()
     private val displayBuildCache = GalleryDisplayBuildCache(
@@ -319,6 +328,7 @@ class GalleryViewModel(
     }
 
     override fun onCleared() {
+        syncCoordinator.unregisterUserStopHook(userStopHook)
         (appContext.applicationContext as? OneGalleryApplication)?.persistSessionCatalogForBackground()
         super.onCleared()
     }

@@ -48,4 +48,5 @@
     <string name="sync_notification_title">OneGallery Sync</string>
     <string name="sync_notification_message">Sincronizando com OneDrive…</string>
     <string name="sync_notification_thumbnails_message">Completando miniaturas no cache…</string>
+    <string name="sync_action_stop">Parar</string>
 </resources>

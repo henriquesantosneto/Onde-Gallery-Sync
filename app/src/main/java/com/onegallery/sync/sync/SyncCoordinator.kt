@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.update
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -110,10 +111,12 @@ data class SyncUiState(
     val thumbnailStats: ThumbnailCacheStats? = null,
     /** Prefetch de miniaturas (sync ou 2º plano com tela Sync aberta). */
     val prefetchingThumbnails: Boolean = false,
+    /** Jobs gerenciados / prefetch em 2º plano ainda sem flag de UI. */
+    val extraCancellableWork: Boolean = false,
 ) {
-    /** Sync principal, pós-sync ou miniaturas em 2º plano — bloqueia “Sincronizar agora”. */
+    /** Qualquer operação longa do sync — bloqueia “Sincronizar agora” e mostra Parar. */
     val isSyncBusy: Boolean
-        get() = isRunning || prefetchingThumbnails
+        get() = isRunning || prefetchingThumbnails || extraCancellableWork
 
     /** Linha principal na aba Ajustes → Sync (evita “Pronto…” durante prefetch). */
     fun settingsSyncStatusHeadline(): String {
@@ -199,6 +202,7 @@ class SyncCoordinator(
     private val syncCancelReason = AtomicReference(SyncCancelReason.NONE)
     private val activeLongTaskJob = AtomicReference<Job?>(null)
     private val managedSyncJobs = ConcurrentHashMap.newKeySet<Job>()
+    private val userStopHooks = CopyOnWriteArrayList<() -> Unit>()
     private val pendingIndexRebuild = AtomicBoolean(false)
     /** Cache da passagem atual de indexação (evita re-varrer MediaStore no backfill). */
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
@@ -352,18 +356,52 @@ class SyncCoordinator(
         )
     }
 
-    fun requestCancelSync() {
+    /** Interrompe sync, miniaturas, indexação e outros jobs gerenciados. */
+    fun requestStop() {
         cancelActiveSync(
             SyncCancelReason.USER,
             applyUserCooldown = true,
-            inProgressMessage = "Parando sincronismo…",
+            inProgressMessage = "Parando…",
         )
+    }
+
+    fun requestCancelSync() = requestStop()
+
+    fun registerUserStopHook(hook: () -> Unit) {
+        userStopHooks.add(hook)
+    }
+
+    fun unregisterUserStopHook(hook: () -> Unit) {
+        userStopHooks.remove(hook)
+    }
+
+    private fun fireUserStopHooks() {
+        userStopHooks.forEach { hook -> runCatching(hook) }
+    }
+
+    private fun refreshExtraCancellableWork() {
+        val extra =
+            (backgroundThumbPrefetchJob?.isActive == true) ||
+                managedSyncJobs.any { it.isActive } ||
+                (
+                    activeLongTaskJob.get()?.isActive == true &&
+                        !_state.value.isRunning &&
+                        !_state.value.prefetchingThumbnails
+                    )
+        _state.update { state ->
+            if (state.extraCancellableWork == extra) state
+            else state.copy(extraCancellableWork = extra)
+        }
     }
 
     /** Jobs de sync/index lançados fora do mutex (fila, galeria, WorkManager). */
     fun registerManagedSyncJob(job: Job) {
         managedSyncJobs.add(job)
-        job.invokeOnCompletion { managedSyncJobs.remove(job) }
+        refreshExtraCancellableWork()
+        job.invokeOnCompletion {
+            managedSyncJobs.remove(job)
+            refreshExtraCancellableWork()
+        }
     }
 
     /** Interrompe sync em andamento quando a política “apenas Wi‑Fi” não permite a rede atual. */
@@ -394,6 +432,7 @@ class SyncCoordinator(
         applyUserCooldown: Boolean,
         inProgressMessage: String,
     ) {
+        fireUserStopHooks()
         syncCancelReason.set(reason)
         syncCancelRequested.set(true)
         if (applyUserCooldown) {
@@ -417,6 +456,7 @@ class SyncCoordinator(
         if (job != null) {
             job.cancel(CancellationException(inProgressMessage))
         }
+        refreshExtraCancellableWork()
     }
 
     private fun cancelAllManagedSyncJobs(message: String) {
@@ -444,9 +484,14 @@ class SyncCoordinator(
                 progressPhase = SyncProgressPhase.IDLE,
                 activityHeadline = inProgressMessage,
                 activityDetail = "",
-                lastMessage = "$inProgressMessage\nMiniaturas interrompidas — sincronize de novo para continuar.",
+                lastMessage = if (syncCancelReason.get() == SyncCancelReason.USER) {
+                    autoSyncPausedMessage("Operação interrompida.")
+                } else {
+                    "Operação interrompida."
+                },
             )
         }
+        refreshExtraCancellableWork()
     }
 
     private fun completedMessageForCancelReason(reason: SyncCancelReason): String {
@@ -460,8 +505,8 @@ class SyncCoordinator(
     private fun cancellationResultMessage(): String {
         return when (syncCancelReason.getAndSet(SyncCancelReason.NONE)) {
             SyncCancelReason.WIFI_POLICY -> WIFI_POLICY_MESSAGE
-            SyncCancelReason.USER -> autoSyncPausedMessage("Sincronismo cancelado.")
-            SyncCancelReason.NONE -> autoSyncPausedMessage("Sincronismo cancelado.")
+            SyncCancelReason.USER -> autoSyncPausedMessage("Operação cancelada.")
+            SyncCancelReason.NONE -> autoSyncPausedMessage("Operação cancelada.")
         }
     }
 
@@ -488,7 +533,11 @@ class SyncCoordinator(
         val job = coroutineContext[Job] ?: return
         activeLongTaskJob.set(job)
         registerManagedSyncJob(job)
-        job.invokeOnCompletion { activeLongTaskJob.compareAndSet(job, null) }
+        job.invokeOnCompletion {
+            activeLongTaskJob.compareAndSet(job, null)
+            refreshExtraCancellableWork()
+        }
+        refreshExtraCancellableWork()
     }
 
     private fun prepareSyncSession(userInitiated: Boolean) {
@@ -3652,6 +3701,7 @@ class SyncCoordinator(
             foregroundGuard.enter(thumbMessage)
         }
         backgroundThumbPrefetchJob = scope.launch {
+            refreshExtraCancellableWork()
             if (!handoffForeground) {
                 foregroundGuard.enter(thumbMessage)
             }
@@ -3738,8 +3788,11 @@ class SyncCoordinator(
             }
             } finally {
                 foregroundGuard.leave()
+                backgroundThumbPrefetchJob = null
+                refreshExtraCancellableWork()
             }
         }
+        refreshExtraCancellableWork()
     }
 
     /** Uma leva: no máximo uma miniatura por álbum ainda sem capa (UI usa qualquer thumb local). */
