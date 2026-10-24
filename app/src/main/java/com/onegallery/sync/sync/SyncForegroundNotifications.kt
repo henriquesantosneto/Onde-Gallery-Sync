@@ -15,7 +15,8 @@ import com.onegallery.sync.R
 
 /** Notificação compartilhada: serviço em 1º plano e [androidx.work.CoroutineWorker.setForeground]. */
 object SyncForegroundNotifications {
-    const val CHANNEL_ID = "onegallery_sync"
+    /** v2: IMPORTANCE_DEFAULT para aparecer na barra de status (v1 era LOW). */
+    const val CHANNEL_ID = "onegallery_sync_v2"
     const val NOTIFICATION_ID = 4101
 
     fun ensureChannel(context: Context) {
@@ -24,10 +25,10 @@ object SyncForegroundNotifications {
         val channel = NotificationChannel(
             CHANNEL_ID,
             context.getString(R.string.sync_notification_channel),
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = context.getString(R.string.sync_notification_channel_desc)
-            setShowBadge(false)
+            setShowBadge(true)
         }
         manager.createNotificationChannel(channel)
     }
@@ -48,6 +49,8 @@ object SyncForegroundNotifications {
             .setContentIntent(openApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }

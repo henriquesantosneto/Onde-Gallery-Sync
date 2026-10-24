@@ -7,8 +7,11 @@ import java.util.concurrent.atomic.AtomicInteger
 class SyncForegroundGuard(private val context: Context) {
     private val depth = AtomicInteger(0)
 
+    fun holdsForeground(): Boolean = depth.get() > 0
+
     fun enter(message: String? = null) {
-        if (depth.incrementAndGet() == 1) {
+        val next = depth.incrementAndGet()
+        if (next == 1 || message != null) {
             SyncForegroundService.start(context, message)
         }
     }

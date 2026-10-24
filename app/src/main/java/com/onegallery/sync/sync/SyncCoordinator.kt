@@ -37,6 +37,7 @@ import com.onegallery.sync.data.onedrive.OneDriveRepository
 import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
+import com.onegallery.sync.R
 import com.onegallery.sync.worker.BackgroundSyncScheduler
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
@@ -3633,11 +3634,29 @@ class SyncCoordinator(
         registerManagedSyncJob(job)
     }
 
+    fun hasActiveBackgroundThumbnailPrefetchJob(): Boolean =
+        backgroundThumbPrefetchJob?.isActive == true
+
+    /** Espera prefetch de miniaturas em 2º plano (ex.: WorkManager mantém notificação até terminar). */
+    suspend fun joinBackgroundThumbnailPrefetchIfRunning() {
+        backgroundThumbPrefetchJob?.join()
+    }
+
     /** Continua miniaturas após o sync principal (bibliotecas grandes, ex. dezenas de milhares na nuvem). */
     private fun scheduleBackgroundThumbnailPrefetchIfNeeded() {
         if (backgroundThumbPrefetchJob?.isActive == true) return
         val scope = backgroundScope ?: return
+        val thumbMessage = appContext.getString(R.string.sync_notification_thumbnails_message)
+        val handoffForeground = foregroundGuard.holdsForeground()
+        if (handoffForeground) {
+            foregroundGuard.enter(thumbMessage)
+        }
         backgroundThumbPrefetchJob = scope.launch {
+            if (!handoffForeground) {
+                foregroundGuard.enter(thumbMessage)
+            }
+            try {
+            withThumbnailPrefetchUi {
             backgroundThumbPrefetchDeferred.set(false)
             delay(BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS)
             var stalledPasses = 0
@@ -3715,6 +3734,10 @@ class SyncCoordinator(
                         )
                     }
                 }
+            }
+            }
+            } finally {
+                foregroundGuard.leave()
             }
         }
     }

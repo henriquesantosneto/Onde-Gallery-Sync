@@ -74,6 +74,7 @@ class SyncWorker(
                         }
                     },
                 )
+            retainWorkerForegroundForBackgroundThumbnails()
         } else {
             BackgroundSyncScheduler.enqueueDeferredAutoSync(app, prefs)
         }
@@ -83,6 +84,21 @@ class SyncWorker(
 
     private suspend fun runAutoReleaseOnly(app: OneGalleryApplication) {
         runCatching { app.syncCoordinator.runAutoReleaseIfNeeded() }
+    }
+
+    /** Evita sumir a notificação entre o fim do sync e miniaturas em 2º plano. */
+    private suspend fun retainWorkerForegroundForBackgroundThumbnails() {
+        val coordinator = (applicationContext as OneGalleryApplication).syncCoordinator
+        if (!coordinator.hasActiveBackgroundThumbnailPrefetchJob()) return
+        runCatching {
+            setForeground(
+                SyncForegroundNotifications.foregroundInfo(
+                    applicationContext,
+                    applicationContext.getString(R.string.sync_notification_thumbnails_message),
+                ),
+            )
+        }
+        coordinator.joinBackgroundThumbnailPrefetchIfRunning()
     }
 
     companion object {
