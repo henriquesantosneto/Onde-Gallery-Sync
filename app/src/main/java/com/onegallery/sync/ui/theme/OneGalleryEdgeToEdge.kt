@@ -15,7 +15,8 @@ fun galleryStyleStatusBarRoute(route: String?): Boolean {
         route == "albums" ||
         route == "albums/browse" ||
         route == "places_map" ||
-        route.startsWith("media/")
+        route.startsWith("media/") ||
+        route.startsWith("media-lab/")
 }
 
 /**

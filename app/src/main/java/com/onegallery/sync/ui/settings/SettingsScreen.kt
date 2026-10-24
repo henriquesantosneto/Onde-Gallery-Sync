@@ -76,6 +76,7 @@ import com.onegallery.sync.sync.SyncTaskLauncher
 import com.onegallery.sync.system.AppStartupPermissions
 import com.onegallery.sync.system.BatteryOptimization
 import com.onegallery.sync.data.local.MediaAccessPermissions
+import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.components.LazyColumnScrollbarEndPadding
 import com.onegallery.sync.ui.components.LazyColumnVerticalScrollbar
 import com.onegallery.sync.ui.library.IndexUsageStats
@@ -86,6 +87,7 @@ import com.onegallery.sync.ui.library.LibraryIndexUsageCard
 fun SettingsScreen(
     authManager: MsalAuthManager,
     syncPreferences: SyncPreferences,
+    galleryPreferences: GalleryPreferences,
     onOpenCloudFolderPicker: () -> Unit,
     onMicrosoftSignIn: () -> Unit,
     onOpenSyncStatus: () -> Unit,
@@ -116,6 +118,9 @@ fun SettingsScreen(
     var batteryOptimizationExempt by remember { mutableStateOf(BatteryOptimization.isExempt(context)) }
     var autoFreeLocalAfterSync by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced)
+    }
+    var experimentalMediaLab by remember {
+        mutableStateOf(galleryPreferences.experimentalMediaDetailLab)
     }
     var autoFreeLocalWhenIdle by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenIdle)
@@ -735,6 +740,28 @@ fun SettingsScreen(
                                 Text(grantLabel)
                             }
                         }
+                    },
+                )
+            }
+
+            item {
+                SettingsSectionTitle(title = "Laboratório", icon = Icons.Outlined.PhotoLibrary)
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Player de mídia experimental",
+                    summary = "Rota separada (estilo Samsung). Desligado = visualizador atual.",
+                    info = SettingsInfoDialog(
+                        title = "Player experimental",
+                        body = "Quando ligado, tocar em uma mídia abre o visualizador de laboratório " +
+                            "(rota media-lab), sem alterar o código do detalhe padrão. " +
+                            "Desligue para voltar ao fluxo normal.",
+                    ),
+                    checked = experimentalMediaLab,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = { enabled ->
+                        experimentalMediaLab = enabled
+                        galleryPreferences.experimentalMediaDetailLab = enabled
                     },
                 )
             }

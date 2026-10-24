@@ -39,10 +39,19 @@ class GalleryPreferences(context: Context) {
             value.coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE),
         ).apply()
 
+    /**
+     * Abre mídia na rota experimental [MediaDetailLabScreen] em vez de [MediaDetailScreen].
+     * Desligado por padrão — não altera o fluxo atual até você ativar em Ajustes.
+     */
+    var experimentalMediaDetailLab: Boolean
+        get() = prefs.getBoolean(KEY_EXPERIMENTAL_MEDIA_LAB, false)
+        set(value) = prefs.edit().putBoolean(KEY_EXPERIMENTAL_MEDIA_LAB, value).apply()
+
     companion object {
         private const val KEY_SORT = "sort_order"
         private const val KEY_ALBUM_SORT = "album_sort"
         private const val KEY_ALBUM_GRID_ZOOM = "album_grid_zoom"
         private const val KEY_GALLERY_GRID_ZOOM = "gallery_grid_zoom"
+        private const val KEY_EXPERIMENTAL_MEDIA_LAB = "experimental_media_detail_lab"
     }
 }
