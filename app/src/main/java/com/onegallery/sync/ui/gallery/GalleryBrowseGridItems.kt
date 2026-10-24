@@ -17,23 +17,35 @@ fun resolveBrowseGridItems(
         return libraryItems
     }
     if (!routeAlbumFolderKey.isNullOrBlank()) {
-        if (browseItemsFromState.isNotEmpty()) return browseItemsFromState
-        return libraryItems
+        val fromRoute = libraryItems
             .filter { it.albumName == routeAlbumFolderKey }
             .sortedBy(sortOrder)
+        if (browseItemsFromState.isNotEmpty() &&
+            browseItemsFromState.all { it.albumName == routeAlbumFolderKey }
+        ) {
+            return browseItemsFromState
+        }
+        return fromRoute
     }
     if (!routePlaceMatchKey.isNullOrBlank()) {
-        if (browseItemsFromState.isNotEmpty()) return browseItemsFromState
         val matchKey = PlaceMatchKey.decode(routePlaceMatchKey)
-        return libraryItems
-            .filter { item ->
-                when {
-                    matchKey != null -> item.matchesPlace(matchKey, routePlaceTitle)
-                    !routePlaceTitle.isNullOrBlank() -> item.locationLabel == routePlaceTitle
-                    else -> false
-                }
-            }
-            .sortedBy(sortOrder)
+        fun matchesPlaceItem(item: GalleryDisplayItem): Boolean = when {
+            matchKey != null -> item.matchesPlace(matchKey, routePlaceTitle)
+            !routePlaceTitle.isNullOrBlank() -> item.locationLabel == routePlaceTitle
+            else -> false
+        }
+        val fromRoute = libraryItems.filter(::matchesPlaceItem).sortedBy(sortOrder)
+        if (browseItemsFromState.isNotEmpty() &&
+            browseItemsFromState.all(::matchesPlaceItem)
+        ) {
+            return browseItemsFromState
+        }
+        return fromRoute
     }
     return emptyList()
 }
+
+internal fun browseGridItemsAlbumFolderMatches(
+    items: List<GalleryDisplayItem>,
+    albumFolderKey: String,
+): Boolean = items.isNotEmpty() && items.all { it.albumName == albumFolderKey }
