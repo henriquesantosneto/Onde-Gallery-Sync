@@ -36,8 +36,7 @@ private fun isStrongCoverCandidate(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (hasCachedThumbnailFile(item, mediaCacheRepository)) return true
-    return item.kind == MediaKind.VIDEO && item.localUri != null
+    return hasCachedThumbnailFile(item, mediaCacheRepository)
 }
 
 private fun albumCoverComparator(mediaCacheRepository: MediaCacheRepository) =

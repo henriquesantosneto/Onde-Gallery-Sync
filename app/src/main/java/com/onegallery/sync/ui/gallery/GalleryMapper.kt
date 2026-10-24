@@ -79,9 +79,7 @@ object GalleryMapper {
                 )
         }
         val hasThumb = when (kind) {
-            MediaKind.VIDEO ->
-                placeholderThumb != null ||
-                    (localUri != null && videoLocalUriCountsAsBrowseThumb(entity))
+            MediaKind.VIDEO -> placeholderThumb != null
             else ->
                 placeholderThumb != null ||
                     (localUri != null)
@@ -136,16 +134,6 @@ object GalleryMapper {
         return GalleryLocalContentUri.resolve(entity, kind, localMediaRepository)
     }
 
-    private fun videoLocalUriCountsAsBrowseThumb(entity: SyncMetadataEntity): Boolean {
-        if (entity.localReleasedForSpace) return false
-        if (entity.cloudState == CloudSyncState.CLOUD_ONLY ||
-            entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
-        ) {
-            return false
-        }
-        return true
-    }
-
     private fun computeShowInBrowseGrid(
         kind: MediaKind,
         localUri: Uri?,
@@ -156,11 +144,7 @@ object GalleryMapper {
         cloudState: CloudSyncState,
         hasThumb: Boolean,
     ): Boolean {
-        if (kind == MediaKind.VIDEO) {
-            if (hasThumb) return true
-            if (localUri != null && !localReleasedForSpace) return true
-            return false
-        }
+        if (kind == MediaKind.VIDEO) return hasThumb
         if (localUri != null) return true
         if (cachedOriginal != null) return true
         if (localMediaId != null && !localReleasedForSpace) return true
@@ -211,9 +195,7 @@ object GalleryMapper {
             longitude = item.longitude,
             videoDurationMs = item.durationMs,
             localReleasedForSpace = false,
-            showInBrowseGrid = kind != MediaKind.VIDEO ||
-                item.uri != null ||
-                placeholderThumb != null,
+            showInBrowseGrid = kind != MediaKind.VIDEO || placeholderThumb != null,
         )
     }
 

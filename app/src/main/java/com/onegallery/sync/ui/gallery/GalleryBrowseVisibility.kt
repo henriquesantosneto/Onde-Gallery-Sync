@@ -5,8 +5,7 @@ import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
 
 /**
- * Grade: mídia local imediata; itens indexados na nuvem aparecem com placeholder enquanto
- * a miniatura baixa. Só-local sem nuvem exige miniatura ou URI.
+ * Grade sem filtro de miniatura: fotos podem usar URI local; vídeo só com JPEG/poster em cache.
  */
 fun GalleryDisplayItem.isVisibleInGalleryBrowse(
     mediaCacheRepository: MediaCacheRepository,
@@ -29,22 +28,14 @@ fun GalleryDisplayItem.isVisibleInGalleryBrowseWithThumbnail(
     return hasBrowsableThumbnail(mediaCacheRepository)
 }
 
-/** Miniatura real (JPEG) ou URI local que a grade consegue pintar imediatamente. */
+/** Miniatura em disco (vídeo: poster/frame aceitável); fotos também podem usar URI local. */
 fun GalleryDisplayItem.hasBrowsableThumbnail(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
-    if (kind == MediaKind.VIDEO) {
-        if (localUri == null) return false
-        if (cloudState == CloudSyncState.CLOUD_ONLY ||
-            cloudState == CloudSyncState.PENDING_DOWNLOAD
-        ) {
-            return false
-        }
-        return true
-    }
+    if (kind == MediaKind.VIDEO) return false
     if (localUri != null && kind == MediaKind.IMAGE) return true
     if (kind == MediaKind.IMAGE &&
         cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null
