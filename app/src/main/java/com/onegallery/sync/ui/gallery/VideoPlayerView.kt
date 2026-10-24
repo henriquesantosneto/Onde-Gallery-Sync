@@ -2,7 +2,8 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +36,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -58,6 +61,8 @@ fun VideoPlayerView(
     isActive: Boolean = true,
     /** Toque na área do vídeo (ex.: alternar tela cheia no detalhe). */
     onVideoAreaTap: (() -> Unit)? = null,
+    /** Espaço inferior para não sobrepor o carrossel de miniaturas. */
+    controlsBottomPadding: androidx.compose.ui.unit.Dp = 96.dp,
 ) {
     val context = LocalContext.current
     var muted by remember(uri) { mutableStateOf(true) }
@@ -168,7 +173,24 @@ fun VideoPlayerView(
                     .matchParentSize()
                     .zIndex(1f)
                     .pointerInput(uri, onVideoAreaTap) {
-                        detectTapGestures(onTap = { onVideoAreaTap.invoke() })
+                        val touchSlop = viewConfiguration.touchSlop
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var sumMove = Offset.Zero
+                            var sawMultiTouch = false
+                            do {
+                                val event = awaitPointerEvent()
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.size >= 2) {
+                                    sawMultiTouch = true
+                                } else if (pressed.size == 1) {
+                                    sumMove += pressed.first().positionChange()
+                                }
+                            } while (event.changes.any { it.pressed })
+                            if (!sawMultiTouch && sumMove.getDistance() < touchSlop) {
+                                onVideoAreaTap.invoke()
+                            }
+                        }
                     },
             )
         }
@@ -177,7 +199,7 @@ fun VideoPlayerView(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .zIndex(2f)
-                    .padding(bottom = 96.dp),
+                    .padding(bottom = controlsBottomPadding),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

@@ -284,6 +284,7 @@ fun MediaDetailScreen(
 
     val showFilmstrip = !state.selectionMode &&
         !detailsPanelOpen &&
+        !immersive &&
         filmstripItems.size > 1
 
     val barTitle = when {
@@ -381,6 +382,7 @@ fun MediaDetailScreen(
                     suppressAutoRecallRevision = suppressAutoRecallRevision,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
+                    videoControlsBottomPadding = if (showFilmstrip) 96.dp else 24.dp,
                     onToggleImmersive = { immersive = !immersive },
                     onZoomActiveChanged = { active ->
                         zoomActive = active
@@ -728,6 +730,7 @@ fun MediaDetailScreen(
             showDeleteConfirm -> showDeleteConfirm = false
             showMoveDialog -> showMoveDialog = false
             state.selectionMode -> viewModel.clearSelection()
+            immersive -> immersive = false
             detailsPanelOpen -> {
                 detailsSettleFraction = 0f
                 detailsDragFraction = 0f
@@ -746,6 +749,7 @@ private fun VideoPlayerWithZoom(
     zoomTransform: ZoomTransformHolder,
     onZoomActiveChanged: (Boolean) -> Unit,
     onToggleImmersive: () -> Unit,
+    videoControlsBottomPadding: androidx.compose.ui.unit.Dp,
 ) {
     ZoomableMediaContainer(
         resetKey = canonicalPath,
@@ -761,6 +765,8 @@ private fun VideoPlayerWithZoom(
             playWhenReady = shouldPlayVideo,
             usePlaybackControls = false,
             isActive = shouldPlayVideo,
+            onVideoAreaTap = onToggleImmersive,
+            controlsBottomPadding = videoControlsBottomPadding,
         )
     }
 }
@@ -776,6 +782,7 @@ private fun MediaDetailPage(
     suppressAutoRecallRevision: Int,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
+    videoControlsBottomPadding: androidx.compose.ui.unit.Dp,
     onToggleImmersive: () -> Unit,
     onZoomActiveChanged: (Boolean) -> Unit,
     onActivePageError: (String?) -> Unit,
@@ -995,6 +1002,7 @@ private fun MediaDetailPage(
                                     zoomTransform = zoomTransform,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onToggleImmersive = onToggleImmersive,
+                                    videoControlsBottomPadding = videoControlsBottomPadding,
                                 )
                             }
                         }
