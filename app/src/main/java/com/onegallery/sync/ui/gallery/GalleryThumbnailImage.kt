@@ -65,6 +65,13 @@ fun GalleryThumbnailImage(
             GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
         )
     }
+    var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
+        mutableStateOf(style == GalleryThumbnailStyle.Grid)
+    }
+
+    LaunchedEffect(displayData) {
+        allowHardwareBitmap = style == GalleryThumbnailStyle.Grid
+    }
 
     LaunchedEffect(
         item.canonicalPath,
@@ -111,15 +118,21 @@ fun GalleryThumbnailImage(
         item.kind == MediaKind.VIDEO &&
         (displayData == null || displayData is android.net.Uri)
     if (displayData != null && !filmstripVideoPending) {
-        val request = remember(displayData, sizePx, style, item.canonicalPath) {
-            val builder = ImageRequest.Builder(context)
+        val request = remember(displayData, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
+            ImageRequest.Builder(context)
                 .data(displayData)
                 .size(sizePx)
-                .crossfade(style == GalleryThumbnailStyle.Detail)
-                .allowHardware(false)
-                .memoryCacheKey("${item.canonicalPath}:$sizePx:${style.name}")
+                .applyGalleryThumbnailLoading(style, allowHardwareBitmap)
+                .memoryCacheKey(
+                    galleryThumbnailMemoryCacheKey(
+                        item.canonicalPath,
+                        sizePx,
+                        style,
+                        allowHardwareBitmap,
+                    ),
+                )
                 .diskCacheKey("${item.canonicalPath}:$sizePx")
-            builder.build()
+                .build()
         }
         AsyncImage(
             model = request,
@@ -127,6 +140,12 @@ fun GalleryThumbnailImage(
             modifier = modifier,
             contentScale = contentScale,
             onState = { state ->
+                if (state is AsyncImagePainter.State.Error &&
+                    style == GalleryThumbnailStyle.Grid &&
+                    allowHardwareBitmap
+                ) {
+                    allowHardwareBitmap = false
+                }
                 if (style == GalleryThumbnailStyle.Filmstrip &&
                     item.kind == MediaKind.VIDEO &&
                     state is AsyncImagePainter.State.Error

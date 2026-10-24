@@ -23,6 +23,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaKind
@@ -46,6 +47,11 @@ fun AlbumGridCoverImage(
     var displayModel by remember(album.bucketId) { mutableStateOf<Any?>(fallbackCover) }
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(false) }
     var coverCacheKey by remember(album.bucketId) { mutableStateOf(album.bucketId) }
+    var allowHardwareBitmap by remember(album.bucketId) { mutableStateOf(true) }
+
+    LaunchedEffect(displayModel) {
+        allowHardwareBitmap = true
+    }
 
     LaunchedEffect(album.bucketId, fallbackCover) {
         if (displayModel == null && fallbackCover != null) {
@@ -76,12 +82,19 @@ fun AlbumGridCoverImage(
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (displayModel != null) {
-            val request = remember(displayModel, coverCacheKey) {
+            val request = remember(displayModel, coverCacheKey, allowHardwareBitmap) {
                 ImageRequest.Builder(context)
                     .data(displayModel)
-                    .memoryCacheKey("album-cover:$coverCacheKey")
+                    .applyGalleryThumbnailLoading(GalleryThumbnailStyle.Grid, allowHardwareBitmap)
+                    .memoryCacheKey(
+                        galleryThumbnailMemoryCacheKey(
+                            "album-cover:$coverCacheKey",
+                            480,
+                            GalleryThumbnailStyle.Grid,
+                            allowHardwareBitmap,
+                        ),
+                    )
                     .diskCacheKey("album-cover:$coverCacheKey")
-                    .crossfade(false)
                     .build()
             }
             AsyncImage(
@@ -89,6 +102,11 @@ fun AlbumGridCoverImage(
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                onState = { state ->
+                    if (state is AsyncImagePainter.State.Error && allowHardwareBitmap) {
+                        allowHardwareBitmap = false
+                    }
+                },
             )
             if (coverIsVideo) {
                 Icon(
