@@ -1348,7 +1348,6 @@ class GalleryViewModel(
 
     /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
     fun prefetchGridThumbnails(canonicalPaths: List<String>) {
-        if (GalleryGridScrollGate.isUserScrollingGrid) return
         val paths = canonicalPaths
             .asSequence()
             .filter { it.isNotBlank() }
@@ -1357,16 +1356,20 @@ class GalleryViewModel(
             .take(GRID_THUMB_PREFETCH_BATCH)
             .toList()
         if (paths.isEmpty()) return
+        val lightweight = GalleryGridScrollGate.isUserScrollingGrid
         gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                prefetchThumbnailPathsParallel(paths)
+                prefetchThumbnailPathsParallel(paths, lightweightPrefetch = lightweight)
             } finally {
                 paths.forEach { gridThumbnailPrefetchQueued.remove(it) }
             }
         }
     }
 
-    private suspend fun prefetchThumbnailPathsParallel(paths: List<String>) {
+    private suspend fun prefetchThumbnailPathsParallel(
+        paths: List<String>,
+        lightweightPrefetch: Boolean = false,
+    ) {
         if (paths.isEmpty()) return
         var cachedAny = false
         supervisorScope {
@@ -1376,7 +1379,7 @@ class GalleryViewModel(
                     semaphore.withPermit {
                         galleryThumbnailCache.ensureThumbnailCached(
                             path,
-                            lightweightPrefetch = true,
+                            lightweightPrefetch = lightweightPrefetch,
                         ).getOrNull()
                         val hit = mediaCacheRepository.displayableThumbnailIfCached(path) != null
                         if (hit) cachedAny = true

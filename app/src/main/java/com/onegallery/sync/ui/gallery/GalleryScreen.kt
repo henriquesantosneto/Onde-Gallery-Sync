@@ -342,10 +342,6 @@ fun GalleryScreen(
                 }
                 LaunchedEffect(gridState, gridEntries) {
                     snapshotFlow {
-                        val scrolling = gridState.isScrollInProgress
-                        if (scrolling) {
-                            return@snapshotFlow emptyList()
-                        }
                         val layout = gridState.layoutInfo
                         val visible = layout.visibleItemsInfo
                         if (visible.isEmpty()) return@snapshotFlow emptyList<String>()
