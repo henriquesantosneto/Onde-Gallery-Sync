@@ -95,7 +95,7 @@ object GalleryThumbnailResolver {
         cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
         if (diskCacheOnly) return null
         if (filmstripVideo && item.localUri != null) {
-            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
+            GalleryThumbnailModels.resolveFilmstripVideoModel(context, item, sizePx)?.let { return it }
         }
         if (isVideo && thumbnailCache != null) {
             if (item.localUri != null) {

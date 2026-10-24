@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
@@ -62,9 +63,10 @@ fun MediaDetailFilmstrip(
                     val isVideo = item.kind == MediaKind.VIDEO
                     thumbCache.ensureThumbnailCached(
                         item.canonicalPath,
-                        preferCloudFirst = item.oneDriveItemId != null,
+                        preferCloudFirst = item.localUri == null && item.oneDriveItemId != null,
                         cloudVideoAggressive = isVideo,
-                        lightweightPrefetch = !isVideo,
+                        lightweightPrefetch = false,
+                        localSourcesOnly = isVideo && item.localUri != null,
                     )
                 }
         }
@@ -81,6 +83,7 @@ fun MediaDetailFilmstrip(
     LazyRow(
         state = listState,
         modifier = modifier
+            .zIndex(2f)
             .fillMaxWidth()
             .height(88.dp)
             .background(Color.Black.copy(alpha = 0.92f)),

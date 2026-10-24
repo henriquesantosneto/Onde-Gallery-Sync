@@ -10,9 +10,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.net.Uri
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +26,7 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.ui.theme.OneDriveBlue
@@ -74,6 +77,7 @@ fun GalleryThumbnailImage(
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
         mutableStateOf(gpuThumbStyle)
     }
+    var filmstripVideoRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
 
     LaunchedEffect(displayData) {
         allowHardwareBitmap = gpuThumbStyle
@@ -89,11 +93,23 @@ fun GalleryThumbnailImage(
         style,
         refreshNonce,
     ) {
-        if (displayData is java.io.File &&
-            !GalleryThumbnailResolver.isStaleDisplayData(item, displayData, mediaCacheRepository)
-        ) {
-            resolvingThumb = false
-            return@LaunchedEffect
+        val filmstripVideo = style == GalleryThumbnailStyle.Filmstrip && item.kind == MediaKind.VIDEO
+        if (filmstripVideo && displayData is Uri) {
+            displayData = null
+        }
+        val cachedFile = displayData as? java.io.File
+        if (cachedFile != null) {
+            val stale = GalleryThumbnailResolver.isStaleDisplayData(
+                item,
+                cachedFile,
+                mediaCacheRepository,
+            )
+            val okVideoThumb = !filmstripVideo ||
+                VideoThumbnailHelper.isGalleryVideoThumbnailFile(cachedFile)
+            if (!stale && okVideoThumb) {
+                resolvingThumb = false
+                return@LaunchedEffect
+            }
         }
         if (displayData !is OneDriveCloudThumbnailKey) {
             resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(
@@ -118,6 +134,36 @@ fun GalleryThumbnailImage(
                 )
             }?.let { resolved ->
                 displayData = resolved
+            }
+        } finally {
+            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
+        }
+    }
+
+    LaunchedEffect(filmstripVideoRetry, item.canonicalPath, sizePx, style, refreshNonce) {
+        if (filmstripVideoRetry == 0) return@LaunchedEffect
+        if (style != GalleryThumbnailStyle.Filmstrip || item.kind != MediaKind.VIDEO) return@LaunchedEffect
+        try {
+            withContext(Dispatchers.IO) {
+                thumbCache.ensureThumbnailCached(
+                    item.canonicalPath,
+                    preferCloudFirst = item.localUri == null && item.oneDriveItemId != null,
+                    cloudVideoAggressive = true,
+                    localSourcesOnly = item.localUri != null,
+                    lightweightPrefetch = false,
+                )
+                GalleryThumbnailResolver.resolveForGrid(
+                    context = context,
+                    item = item,
+                    thumbnailCache = thumbCache,
+                    mediaCacheRepository = mediaCacheRepository,
+                    sizePx = sizePx,
+                    style = style,
+                )
+            }?.let { resolved ->
+                if (resolved !is Uri) {
+                    displayData = resolved
+                }
             }
         } finally {
             resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
@@ -164,12 +210,21 @@ fun GalleryThumbnailImage(
             mediaCacheRepository = mediaCacheRepository,
         )
     } else {
-        displayData
+        val raw = displayData
+        if (style == GalleryThumbnailStyle.Filmstrip &&
+            item.kind == MediaKind.VIDEO &&
+            raw is Uri
+        ) {
+            null
+        } else {
+            raw
+        }
     }
 
     val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
         item.kind == MediaKind.VIDEO &&
-        (paintModel == null || paintModel is android.net.Uri)
+        paintModel == null &&
+        resolvingThumb
     if (paintModel != null && !filmstripVideoPending) {
         val request = remember(paintModel, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
             ImageRequest.Builder(context)
@@ -204,7 +259,11 @@ fun GalleryThumbnailImage(
                     item.kind == MediaKind.VIDEO &&
                     state is AsyncImagePainter.State.Error
                 ) {
+                    if (displayData is Uri) {
+                        displayData = null
+                    }
                     resolvingThumb = true
+                    filmstripVideoRetry++
                 }
                 if (onContentAspectRatio != null && state is AsyncImagePainter.State.Success) {
                     val size = state.painter.intrinsicSize

@@ -403,8 +403,6 @@ fun MediaDetailScreen(
                             activePageRecalling = recalling
                         }
                     },
-                    onOpenDetails = { openDetailsToSimple() },
-                    detailsSwipeEnabled = panelPullEnabled,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -748,36 +746,22 @@ private fun VideoPlayerWithZoom(
     zoomTransform: ZoomTransformHolder,
     onZoomActiveChanged: (Boolean) -> Unit,
     onToggleImmersive: () -> Unit,
-    onOpenDetails: () -> Unit = {},
-    detailsSwipeEnabled: Boolean = false,
-    isActivePage: Boolean = false,
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        ZoomableMediaContainer(
-            resetKey = canonicalPath,
-            transform = zoomTransform,
+    ZoomableMediaContainer(
+        resetKey = canonicalPath,
+        transform = zoomTransform,
+        modifier = Modifier.fillMaxSize(),
+        interceptSingleTap = false,
+        onZoomActiveChanged = onZoomActiveChanged,
+        onSingleTap = onToggleImmersive,
+    ) {
+        VideoPlayerView(
+            uri = playback,
             modifier = Modifier.fillMaxSize(),
-            interceptSingleTap = false,
-            onZoomActiveChanged = onZoomActiveChanged,
-            onSingleTap = onToggleImmersive,
-        ) {
-            VideoPlayerView(
-                uri = playback,
-                modifier = Modifier.fillMaxSize(),
-                playWhenReady = shouldPlayVideo,
-                usePlaybackControls = false,
-                isActive = shouldPlayVideo,
-            )
-        }
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .fillMaxHeight(0.72f)
-                .openDetailsOnSwipeUp(
-                    enabled = isActivePage && detailsSwipeEnabled,
-                    onSwipeUp = onOpenDetails,
-                ),
+            playWhenReady = shouldPlayVideo,
+            usePlaybackControls = false,
+            isActive = shouldPlayVideo,
+            onVideoAreaTap = onToggleImmersive,
         )
     }
 }
@@ -800,8 +784,6 @@ private fun MediaDetailPage(
     onDisplayItemChanged: (GalleryDisplayItem) -> Unit = {},
     onRegisterZoomTransform: (ZoomTransformHolder) -> Unit = {},
     onRecallingChanged: (Boolean) -> Unit = {},
-    onOpenDetails: () -> Unit = {},
-    detailsSwipeEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
@@ -1012,9 +994,6 @@ private fun MediaDetailPage(
                                     zoomTransform = zoomTransform,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onToggleImmersive = onToggleImmersive,
-                                    onOpenDetails = onOpenDetails,
-                                    detailsSwipeEnabled = detailsSwipeEnabled,
-                                    isActivePage = isActivePage,
                                 )
                             }
                         }

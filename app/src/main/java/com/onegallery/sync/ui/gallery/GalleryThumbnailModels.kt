@@ -16,6 +16,22 @@ object GalleryThumbnailModels {
     /**
      * Preferência: miniatura do sistema (rápida). Fallback: URI/arquivo para o Coil redimensionar.
      */
+    /**
+     * Faixa do detalhe: só Bitmap ou JPEG em cache — URI de vídeo quebra no Coil.
+     */
+    fun resolveFilmstripVideoModel(
+        context: Context,
+        item: GalleryDisplayItem,
+        sizePx: Int,
+    ): Any? {
+        if (item.kind != MediaKind.VIDEO) return null
+        val uri = item.localUri ?: return null
+        loadSystemThumbnail(context, uri, item.localMediaId, item.kind, sizePx)?.let { return it }
+        VideoThumbnailHelper.captureFromContentUri(context, uri, strictFrames = false)
+            ?.let { return it }
+        return null
+    }
+
     fun resolveGridModel(
         context: Context,
         item: GalleryDisplayItem,

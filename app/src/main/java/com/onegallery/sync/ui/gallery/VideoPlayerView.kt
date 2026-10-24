@@ -2,11 +2,11 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
@@ -33,6 +33,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.view.LayoutInflater
@@ -52,6 +53,8 @@ fun VideoPlayerView(
     usePlaybackControls: Boolean = true,
     /** Pausa imediatamente ao trocar de página no carrossel. */
     isActive: Boolean = true,
+    /** Toque na área do vídeo (ex.: alternar tela cheia no detalhe). */
+    onVideoAreaTap: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var muted by remember(uri) { mutableStateOf(true) }
@@ -148,36 +151,42 @@ fun VideoPlayerView(
                 }
             },
         )
-        if (isActive && !usePlaybackControls) {
-            Row(
+        if (isActive && !usePlaybackControls && onVideoAreaTap != null) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 96.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .matchParentSize()
+                    .pointerInput(uri, onVideoAreaTap) {
+                        detectTapGestures(onTap = { onVideoAreaTap.invoke() })
+                    },
+            )
+        }
+        if (isActive && !usePlaybackControls) {
+            IconButton(
+                onClick = { userPlaying = !userPlaying },
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(72.dp)
+                    .background(Color.Black.copy(alpha = 0.42f), CircleShape),
             ) {
-                IconButton(
-                    onClick = { userPlaying = !userPlaying },
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
-                ) {
-                    Icon(
-                        imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
-                        tint = Color.White,
-                    )
-                }
-                IconButton(
-                    onClick = { muted = !muted },
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
-                ) {
-                    Icon(
-                        imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
-                        contentDescription = if (muted) "Ativar som" else "Silenciar",
-                        tint = Color.White,
-                    )
-                }
+                Icon(
+                    imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
+                    tint = Color.White,
+                    modifier = Modifier.size(40.dp),
+                )
+            }
+            IconButton(
+                onClick = { muted = !muted },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+            ) {
+                Icon(
+                    imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                    contentDescription = if (muted) "Ativar som" else "Silenciar",
+                    tint = Color.White,
+                )
             }
         } else if (isActive && usePlaybackControls) {
             IconButton(
