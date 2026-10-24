@@ -90,11 +90,26 @@ object GalleryThumbnailResolver {
         displayData: Any?,
         thumbnailCache: GalleryThumbnailCache?,
         item: GalleryDisplayItem,
+        mediaCacheRepository: MediaCacheRepository? = null,
     ): Boolean {
         if (displayData is OneDriveCloudThumbnailKey) return false
         if (item.kind == MediaKind.VIDEO && displayData is android.net.Uri) return true
         if (displayData != null) return false
         if (thumbnailCache == null) return false
+        if (item.kind == MediaKind.IMAGE) {
+            if (mediaCacheRepository != null &&
+                !item.hasBrowsableThumbnail(mediaCacheRepository)
+            ) {
+                return false
+            }
+            if (item.cloudState == CloudSyncState.CLOUD_ONLY ||
+                item.cloudState == CloudSyncState.PENDING_DOWNLOAD
+            ) {
+                return false
+            }
+            if (item.needsCloudOriginalRecall()) return false
+            return item.oneDriveItemId != null && item.localUri == null
+        }
         return item.oneDriveItemId != null ||
             (item.kind == MediaKind.VIDEO && item.localUri != null)
     }

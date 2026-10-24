@@ -78,6 +78,18 @@ fun GalleryThumbnailImage(
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCacheRepository = remember(app) { app.mediaCacheRepository }
     val thumbCache = thumbnailCache ?: app.galleryThumbnailCache
+    val isGrid = style == GalleryThumbnailStyle.Grid
+    if (isGrid &&
+        item.kind == MediaKind.IMAGE &&
+        !item.hasBrowsableThumbnail(mediaCacheRepository)
+    ) {
+        MediaThumbnailPlaceholder(
+            modifier = modifier,
+            showCloudIcon = item.oneDriveItemId != null,
+            showLoading = false,
+        )
+        return
+    }
     var displayData by remember(item.canonicalPath, sizePx, style) {
         mutableStateOf<Any?>(
             GalleryThumbnailResolver.initialDisplayData(item, mediaCacheRepository, style),
@@ -85,10 +97,14 @@ fun GalleryThumbnailImage(
     }
     var resolvingThumb by remember(item.canonicalPath, sizePx) {
         mutableStateOf(
-            GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
+            GalleryThumbnailResolver.shouldShowResolvingSpinner(
+                displayData,
+                thumbCache,
+                item,
+                mediaCacheRepository,
+            ),
         )
     }
-    val isGrid = style == GalleryThumbnailStyle.Grid
     val zeroDecodeOnScroll = LocalZeroDecodeGridScroll.current
     val gpuThumbStyle = isGrid || style == GalleryThumbnailStyle.Filmstrip
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
@@ -164,12 +180,18 @@ fun GalleryThumbnailImage(
                 displayData,
                 thumbCache,
                 item,
+                mediaCacheRepository,
             )
         }
         try {
             resolveDisplayData(forceFullDecode = gridVideoRetry > 0)
         } finally {
-            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
+            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(
+                displayData,
+                thumbCache,
+                item,
+                mediaCacheRepository,
+            )
         }
     }
 
@@ -199,7 +221,12 @@ fun GalleryThumbnailImage(
                 }
             }
         } finally {
-            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
+            resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(
+                displayData,
+                thumbCache,
+                item,
+                mediaCacheRepository,
+            )
         }
     }
 
@@ -231,6 +258,7 @@ fun GalleryThumbnailImage(
                         displayData,
                         thumbCache,
                         item,
+                        mediaCacheRepository,
                     )
                 }
         }

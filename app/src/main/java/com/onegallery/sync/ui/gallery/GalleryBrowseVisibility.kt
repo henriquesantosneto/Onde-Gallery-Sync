@@ -54,6 +54,7 @@ fun GalleryDisplayItem.imageCountsAsLocalBrowseThumb(): Boolean {
     ) {
         return false
     }
+    if (needsCloudOriginalRecall()) return false
     if (cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null) return true
     return localUri != null
 }

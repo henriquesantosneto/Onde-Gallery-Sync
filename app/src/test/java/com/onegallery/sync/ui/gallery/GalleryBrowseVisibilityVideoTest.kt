@@ -52,7 +52,7 @@ class GalleryBrowseVisibilityVideoTest {
     }
 
     @Test
-    fun cloudOnlyImage_neverCountsAsLocalBrowseThumb() {
+    fun cloudOnlyImage_needsRecall_notLocalBrowseThumb() {
         val item = GalleryDisplayItem(
             canonicalPath = "p.jpg",
             displayName = "p.jpg",

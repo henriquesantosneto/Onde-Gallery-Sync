@@ -76,7 +76,9 @@ fun hasCachedThumbnailFile(
     )
     if (cached != null) return true
     val stub = item.cachedPlaceholderThumb
-    return stub != null && mediaCacheRepository.isDisplayableGalleryThumbFile(stub)
+    return stub != null &&
+        !mediaCacheRepository.isSyncFailurePlaceholderThumbnail(stub) &&
+        mediaCacheRepository.isDisplayableGalleryThumbFile(stub)
 }
 
 fun resolveAlbumCoverModel(

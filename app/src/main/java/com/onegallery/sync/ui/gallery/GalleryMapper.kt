@@ -87,7 +87,9 @@ object GalleryMapper {
                         videoEntityAllowsLocalBrowseThumb(entity) &&
                         videoEntityHasLocalCopy(entity))
             else ->
-                placeholderThumb != null ||
+                (placeholderThumb != null &&
+                    mediaCacheRepository.isDisplayableGalleryThumbFile(placeholderThumb) &&
+                    !mediaCacheRepository.isSyncFailurePlaceholderThumbnail(placeholderThumb)) ||
                     (localUri != null && imageEntityAllowsLocalBrowseGrid(entity))
         }
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
