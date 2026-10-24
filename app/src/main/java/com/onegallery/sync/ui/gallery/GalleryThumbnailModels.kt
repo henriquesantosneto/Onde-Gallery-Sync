@@ -32,6 +32,17 @@ object GalleryThumbnailModels {
         return null
     }
 
+    /** MediaStore / MINI_KIND — rápido para pintar célula de vídeo na grade. */
+    fun loadGridVideoBitmapFast(
+        context: Context,
+        item: GalleryDisplayItem,
+        sizePx: Int,
+    ): Bitmap? {
+        if (item.kind != MediaKind.VIDEO) return null
+        val uri = item.localUri ?: return null
+        return loadSystemThumbnail(context, uri, item.localMediaId, MediaKind.VIDEO, sizePx)
+    }
+
     fun resolveGridModel(
         context: Context,
         item: GalleryDisplayItem,

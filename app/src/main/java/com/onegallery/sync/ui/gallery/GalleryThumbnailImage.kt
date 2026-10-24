@@ -60,6 +60,16 @@ fun GalleryThumbnailImage(
     /** Faixa do detalhe: incrementar após prefetch para recarregar JPEG de vídeo. */
     refreshNonce: Int = 0,
 ) {
+    if (style == GalleryThumbnailStyle.Grid && item.kind == MediaKind.VIDEO) {
+        GridVideoThumbnail(
+            item = item,
+            contentDescription = contentDescription,
+            sizePx = sizePx,
+            modifier = modifier,
+            contentScale = contentScale,
+        )
+        return
+    }
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCacheRepository = remember(app) { app.mediaCacheRepository }
