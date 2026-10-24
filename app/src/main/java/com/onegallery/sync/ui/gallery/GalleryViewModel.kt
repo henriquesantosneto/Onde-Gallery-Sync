@@ -478,17 +478,7 @@ class GalleryViewModel(
                     onlyThumb,
                 )?.toLibrarySnapshot() ?: snapshot
         }
-        if (!onlyThumb) {
-            refreshed
-        } else {
-            val visible = filterVisibleForGalleryBrowse(
-                refreshed.catalogItems,
-                mediaCacheRepository,
-                true,
-            )
-            if (visible === refreshed.visibleItems) refreshed
-            else refreshed.copy(visibleItems = visible)
-        }
+        refreshed
         }
     }.distinctUntilChanged { previous, next ->
         previous.catalogItems === next.catalogItems &&
@@ -1432,6 +1422,7 @@ class GalleryViewModel(
 
     /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
     fun prefetchGridThumbnails(canonicalPaths: List<String>) {
+        if (GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch()) return
         val paths = canonicalPaths
             .asSequence()
             .filter { it.isNotBlank() }

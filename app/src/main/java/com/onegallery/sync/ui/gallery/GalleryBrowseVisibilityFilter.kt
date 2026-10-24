@@ -10,17 +10,8 @@ fun filterVisibleForGalleryBrowse(
     onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
     if (items.isEmpty()) return items
-    if (onlyItemsWithThumbnail) {
-        return items.filter { it.isVisibleInGalleryBrowseWithThumbnail(mediaCacheRepository) }
-    }
-    if (items.size >= 1_500) {
-        val out = ArrayList<GalleryDisplayItem>(items.size)
-        for (item in items) {
-            if (!item.showInBrowseGrid) continue
-            if (!item.hasBrowsableThumbnail(mediaCacheRepository)) continue
-            out.add(item)
-        }
-        return out
+    if (onlyItemsWithThumbnail || items.size >= 1_500) {
+        return items.filter { it.showInBrowseGrid }
     }
     return items.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
 }
