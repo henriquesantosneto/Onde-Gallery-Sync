@@ -61,7 +61,7 @@ object GalleryMapper {
         localMediaRepository: LocalMediaRepository? = null,
     ): GalleryDisplayItem {
         val kind = if (isVideoFileName(entity.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
-        val localUri = GalleryLocalContentUri.resolve(entity, kind, localMediaRepository)
+        val localUri = effectiveBrowseLocalUri(entity, kind, localMediaRepository)
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
         val placeholderThumb = when {
@@ -81,7 +81,7 @@ object GalleryMapper {
         val hasThumb = when (kind) {
             MediaKind.VIDEO ->
                 placeholderThumb != null ||
-                    (localUri != null && !entity.localReleasedForSpace)
+                    (localUri != null && videoLocalUriCountsAsBrowseThumb(entity))
             else ->
                 placeholderThumb != null ||
                     (localUri != null)
@@ -119,6 +119,34 @@ object GalleryMapper {
                 hasThumb = hasThumb,
             ),
         )
+    }
+
+    /** URI local só conta na grade se o arquivo ainda está no aparelho (não só na nuvem). */
+    fun effectiveBrowseLocalUri(
+        entity: SyncMetadataEntity,
+        kind: MediaKind,
+        localMediaRepository: LocalMediaRepository?,
+    ): android.net.Uri? {
+        if (entity.localReleasedForSpace) return null
+        if (kind == MediaKind.VIDEO &&
+            (
+                entity.cloudState == CloudSyncState.CLOUD_ONLY ||
+                    entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
+                )
+        ) {
+            return null
+        }
+        return GalleryLocalContentUri.resolve(entity, kind, localMediaRepository)
+    }
+
+    private fun videoLocalUriCountsAsBrowseThumb(entity: SyncMetadataEntity): Boolean {
+        if (entity.localReleasedForSpace) return false
+        if (entity.cloudState == CloudSyncState.CLOUD_ONLY ||
+            entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            return false
+        }
+        return true
     }
 
     private fun computeShowInBrowseGrid(

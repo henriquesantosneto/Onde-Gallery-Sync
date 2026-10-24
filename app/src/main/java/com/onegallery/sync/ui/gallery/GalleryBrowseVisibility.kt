@@ -36,9 +36,16 @@ fun GalleryDisplayItem.hasBrowsableThumbnail(
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
-    if (localUri != null) {
-        return kind == MediaKind.IMAGE || kind == MediaKind.VIDEO
+    if (kind == MediaKind.VIDEO) {
+        if (localUri == null) return false
+        if (cloudState == CloudSyncState.CLOUD_ONLY ||
+            cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            return false
+        }
+        return true
     }
+    if (localUri != null && kind == MediaKind.IMAGE) return true
     if (kind == MediaKind.IMAGE &&
         cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null
     ) {
