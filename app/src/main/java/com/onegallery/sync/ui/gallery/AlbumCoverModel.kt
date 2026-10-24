@@ -21,14 +21,18 @@ fun resolveAlbumCoverItem(
     mediaCacheRepository: MediaCacheRepository,
 ): GalleryDisplayItem? {
     if (items.isEmpty()) return null
-    val preferred = items.filter { isStrongCoverCandidate(it, mediaCacheRepository) }
-    if (preferred.isNotEmpty()) {
-        return preferred.maxWithOrNull(albumCoverComparator(mediaCacheRepository))
+    val browsable = items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+    if (browsable.isEmpty()) return null
+    val preferred = browsable.filter { isStrongCoverCandidate(it, mediaCacheRepository) }
+    val pool = if (preferred.isNotEmpty()) {
+        preferred
+    } else {
+        browsable.filter {
+            it.imageCountsAsLocalBrowseThumb() || it.videoCountsAsLocalBrowseThumb()
+        }
     }
-    return items
-        .asSequence()
-        .filter { galleryItemCoverReady(it, mediaCacheRepository) }
-        .maxWithOrNull(albumCoverComparator(mediaCacheRepository))
+    if (pool.isEmpty()) return null
+    return pool.maxWithOrNull(albumCoverComparator(mediaCacheRepository))
 }
 
 /** Miniatura em disco ou vídeo local (frame via MediaStore na UI). */
@@ -37,7 +41,7 @@ private fun isStrongCoverCandidate(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (hasCachedThumbnailFile(item, mediaCacheRepository)) return true
-    return item.videoCountsAsLocalBrowseThumb()
+    return item.videoCountsAsLocalBrowseThumb() || item.imageCountsAsLocalBrowseThumb()
 }
 
 private fun albumCoverComparator(mediaCacheRepository: MediaCacheRepository) =
@@ -95,6 +99,11 @@ fun resolveGalleryCoverModel(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository? = null,
 ): Any? {
+    if (mediaCacheRepository != null &&
+        !item.hasBrowsableThumbnail(mediaCacheRepository)
+    ) {
+        return null
+    }
     val cachedThumb = mediaCacheRepository?.displayableThumbnailIfCached(
         item.canonicalPath,
         item.oneDriveItemId,
@@ -102,13 +111,18 @@ fun resolveGalleryCoverModel(
         mediaCacheRepository?.isDisplayableGalleryThumbFile(thumb) == true
     }
     if (item.kind == MediaKind.VIDEO) {
-        cachedThumb?.takeIf { VideoThumbnailHelper.isAcceptableThumbnailFile(it) }?.let { return it }
-        return item.thumbnailModel
+        cachedThumb?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }?.let { return it }
+        if (item.videoCountsAsLocalBrowseThumb()) {
+            item.localUri?.let { return it }
+        }
+        return null
     }
-    item.localUri?.let { return it }
-    item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
-    cachedThumb?.let { return it }
-    return item.thumbnailModel
+    if (item.imageCountsAsLocalBrowseThumb()) {
+        cachedThumb?.let { return it }
+        item.localUri?.let { return it }
+        item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
+    }
+    return null
 }
 
 fun resolveLiveAlbumCover(

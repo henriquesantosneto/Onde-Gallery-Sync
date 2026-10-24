@@ -767,11 +767,13 @@ class GalleryViewModel(
         val albumItems = itemsForAlbumListGrouping(
             catalogItems,
             visibleItems,
+            mediaCacheRepository,
             onlyItemsWithThumbnail = onlyThumb,
         )
         val placeItems = itemsForPlaceAlbumGrouping(
             catalogItems,
             visibleItems,
+            mediaCacheRepository,
             onlyItemsWithThumbnail = onlyThumb,
         )
         val pending = deferredAlbumLists.value
@@ -1201,11 +1203,13 @@ class GalleryViewModel(
         val albumListItems = itemsForAlbumListGrouping(
             catalogItems,
             visibleItems,
+            mediaCacheRepository,
             onlyItemsWithThumbnail = onlyThumbBrowse,
         )
         val placeListItems = itemsForPlaceAlbumGrouping(
             catalogItems,
             visibleItems,
+            mediaCacheRepository,
             onlyItemsWithThumbnail = onlyThumbBrowse,
         )
         val (displayAlbums, displayPlaceAlbums) = albumListsForUi(
@@ -1373,6 +1377,7 @@ class GalleryViewModel(
             itemsForPlaceAlbumGrouping(
                 catalogItems,
                 latestLibraryItems,
+                mediaCacheRepository,
                 onlyItemsWithThumbnail = galleryPreferences.browseOnlyItemsWithThumbnail,
             ),
         ).forEach { (encoded, group) ->
@@ -1783,7 +1788,8 @@ internal fun buildAlbums(
     val grouped = mirrored.groupBy { it.albumName }
     val titles = (userAlbums.map { it.title } + grouped.keys).distinct()
     val albums = titles.mapNotNull { title ->
-        val items = grouped[title].orEmpty()
+        val rawItems = grouped[title].orEmpty()
+        val items = rawItems.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
         val userMeta = userAlbums.find { it.title == title }
         if (items.isEmpty() && userMeta == null) return@mapNotNull null
         val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
@@ -1828,7 +1834,8 @@ internal fun buildPlaceAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    return groupDisplayItemsForPlaceAlbums(items).mapNotNull { (encodedKey, group) ->
+    val browsable = items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+    return groupDisplayItemsForPlaceAlbums(browsable).mapNotNull { (encodedKey, group) ->
         if (group.isEmpty()) return@mapNotNull null
         val coverItem = if (resolveCoverModels) {
             resolveAlbumCoverItem(group, mediaCacheRepository)

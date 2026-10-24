@@ -1,23 +1,33 @@
 package com.onegallery.sync.ui.gallery
 
-/** Pastas: usa itens já filtrados para a grade; sem fallback para catálogo cheio com filtro de miniatura. */
+import com.onegallery.sync.data.local.MediaCacheRepository
+
+/** Pastas: mesma regra da grade — só itens com capa/miniatura exibível. */
 fun itemsForAlbumListGrouping(
     catalogItems: List<GalleryDisplayItem>,
     visibleItems: List<GalleryDisplayItem>,
+    mediaCacheRepository: MediaCacheRepository,
     onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
-    if (visibleItems.isNotEmpty()) return visibleItems
-    if (onlyItemsWithThumbnail) return emptyList()
-    return catalogItems
+    val raw = when {
+        visibleItems.isNotEmpty() -> visibleItems
+        onlyItemsWithThumbnail -> emptyList()
+        else -> catalogItems
+    }
+    return raw.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
 }
 
-/** Locais: mesma regra da grade — só itens com miniatura quando o filtro está ativo. */
+/** Locais: mesma regra da grade. */
 fun itemsForPlaceAlbumGrouping(
     catalogItems: List<GalleryDisplayItem>,
     visibleItems: List<GalleryDisplayItem>,
+    mediaCacheRepository: MediaCacheRepository,
     onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
-    if (visibleItems.isNotEmpty()) return visibleItems
-    if (onlyItemsWithThumbnail) return emptyList()
-    return catalogItems
+    val raw = when {
+        visibleItems.isNotEmpty() -> visibleItems
+        onlyItemsWithThumbnail -> emptyList()
+        else -> catalogItems
+    }
+    return raw.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
 }
