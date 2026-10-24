@@ -1588,8 +1588,24 @@ class SyncCoordinator(
                         "${uploadQueue.size} envio(s) · até $PARALLEL_UPLOADS em paralelo.",
                         alsoUpdateLastMessage = false,
                     )
+                    val uploadBatchSize = uploadQueue.size
                     uploaded += runParallelUploads(uploadQueue)
                     uploaded += applyPendingUploadRetries(remoteByPath)
+                    healStalePendingUploads(remoteByPath)
+                    clearRunQueueAndActiveTransfers()
+                    val uploadStillPending = syncMetadataDao.countPendingUploadOperations()
+                    setSyncProgress(
+                        SyncProgressPhase.RECONCILING_LOCAL,
+                        if (uploadStillPending == 0) "Envio concluído" else "Envio desta leva concluído",
+                        buildString {
+                            append("$uploaded de $uploadBatchSize enviado(s) nesta execução")
+                            if (uploadStillPending > 0) {
+                                append(" · $uploadStillPending ainda aguardando (próximo sync ou rede)")
+                            }
+                            append(" · registrando itens só na nuvem…")
+                        },
+                        alsoUpdateLastMessage = false,
+                    )
 
                     val cloudOnlyCandidates = remoteByPath.keys.count { it !in knownPaths }
                     var cloudOnlyProcessed = 0
@@ -2708,99 +2724,132 @@ class SyncCoordinator(
         galleryThumbnailService.localContentUri(row)
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
-        ensureSyncMayContinue()
-        upsertActiveSyncItem(
-            ActiveSyncItem(
-                canonicalPath = row.canonicalPath,
-                displayName = row.displayName,
-                operationLabel = "Enviando para OneDrive…",
-                showTransferProgress = true,
-            ),
-            force = true,
-        )
-        val localId = row.localMediaId ?: return 0.also { removeActiveSyncItem(row.canonicalPath) }
-        val item = indexPassLocalItemsById[localId]
-            ?: localMediaRepository.findById(localId)
-            ?: return 0.also { removeActiveSyncItem(row.canonicalPath) }
-        val temp = localMediaRepository.materializeToTempFile(item) ?: run {
-            syncMetadataDao.upsert(
-                row.copy(
-                    lastError = "Não foi possível ler o arquivo local.",
-                    cloudState = CloudSyncState.ERROR,
-                ),
-            )
-            removeActiveSyncItem(row.canonicalPath)
-            return 0
-        }
-        return runCatching {
-            val localHash = ContentFingerprint.quickXorHashBase64(temp)
-            val localSize = temp.length()
-            var remoteId = row.oneDriveItemId
-            var remoteHash = row.remoteQuickXorHash
-            var remoteSize = row.remoteSizeBytes
-            var remoteModified = row.remoteModifiedAt
-            var uploadedBytes = false
-            if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
-                val existingRemote = oneDriveRepository
-                    .lookupRemoteFileAtCanonicalPath(row.canonicalPath)
-                    .getOrNull()
-                if (existingRemote != null &&
-                    ContentFingerprint.matchesRemote(localHash, localSize, existingRemote)
-                ) {
-                    remoteId = existingRemote.itemId
-                    remoteHash = existingRemote.quickXorHash ?: remoteHash
-                    remoteSize = existingRemote.sizeBytes ?: remoteSize
-                    remoteModified = existingRemote.modifiedAtEpoch ?: remoteModified
-                } else {
-                    remoteId = uploadLocalFile(
-                        canonicalPath = row.canonicalPath,
-                        sourceFile = temp,
-                        mimeType = item.mimeType,
-                        displayName = row.displayName,
-                        operationLabel = "Enviando para OneDrive…",
-                    ).getOrThrow()
-                    uploadedBytes = true
-                }
-            } else {
-                remoteId = uploadLocalFile(
+        var temp: File? = null
+        try {
+            ensureSyncMayContinue()
+            upsertActiveSyncItem(
+                ActiveSyncItem(
                     canonicalPath = row.canonicalPath,
-                    sourceFile = temp,
-                    mimeType = item.mimeType,
                     displayName = row.displayName,
                     operationLabel = "Enviando para OneDrive…",
-                ).getOrThrow()
-                uploadedBytes = true
-            }
-            val synced = row.copy(
-                oneDriveItemId = remoteId,
-                localQuickXorHash = localHash,
-                localSizeBytes = localSize,
-                remoteQuickXorHash = remoteHash,
-                remoteSizeBytes = remoteSize,
-                remoteModifiedAt = if (uploadedBytes) {
-                    System.currentTimeMillis() / 1000
-                } else {
-                    remoteModified
-                },
-                cloudState = CloudSyncState.SYNCED,
-                lastError = null,
+                    showTransferProgress = true,
+                ),
+                force = true,
             )
-            syncMetadataDao.upsert(synced)
-            pathsUploadedThisSync.add(row.canonicalPath)
-            schedulePostUploadThumbnailRefresh(synced.canonicalPath)
-            if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
-                releaseLocalSpaceForRows(
-                    listOf(synced),
-                    allowSystemDialog = appForegroundState.isInForeground(),
+            val localId = row.localMediaId ?: run {
+                syncMetadataDao.upsert(
+                    row.copy(
+                        cloudState = CloudSyncState.ERROR,
+                        lastError = "Sem referência local para envio.",
+                    ),
                 )
+                return 0
             }
-            1
-        }.getOrElse { error ->
-            propagateCancellation(error)
-            syncMetadataDao.upsert(row.copy(cloudState = CloudSyncState.ERROR, lastError = error.message))
-            0
-        }.also {
-            temp.delete()
+            val item = indexPassLocalItemsById[localId]
+                ?: localMediaRepository.findById(localId)
+                ?: run {
+                    syncMetadataDao.upsert(
+                        row.copy(
+                            cloudState = CloudSyncState.ERROR,
+                            lastError = "Arquivo local não encontrado no aparelho.",
+                        ),
+                    )
+                    return 0
+                }
+            temp = localMediaRepository.materializeToTempFile(item) ?: run {
+                syncMetadataDao.upsert(
+                    row.copy(
+                        lastError = "Não foi possível ler o arquivo local.",
+                        cloudState = CloudSyncState.ERROR,
+                    ),
+                )
+                return 0
+            }
+            return withTimeout(UPLOAD_SINGLE_FILE_TIMEOUT_MS) {
+                runCatching {
+                    val localHash = ContentFingerprint.quickXorHashBase64(temp!!)
+                    val localSize = temp!!.length()
+                    var remoteId = row.oneDriveItemId
+                    var remoteHash = row.remoteQuickXorHash
+                    var remoteSize = row.remoteSizeBytes
+                    var remoteModified = row.remoteModifiedAt
+                    var uploadedBytes = false
+                    if (syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH) {
+                        val existingRemote = oneDriveRepository
+                            .lookupRemoteFileAtCanonicalPath(row.canonicalPath)
+                            .getOrNull()
+                        if (existingRemote != null &&
+                            ContentFingerprint.matchesRemote(localHash, localSize, existingRemote)
+                        ) {
+                            remoteId = existingRemote.itemId
+                            remoteHash = existingRemote.quickXorHash ?: remoteHash
+                            remoteSize = existingRemote.sizeBytes ?: remoteSize
+                            remoteModified = existingRemote.modifiedAtEpoch ?: remoteModified
+                        } else {
+                            remoteId = uploadLocalFile(
+                                canonicalPath = row.canonicalPath,
+                                sourceFile = temp!!,
+                                mimeType = item.mimeType,
+                                displayName = row.displayName,
+                                operationLabel = "Enviando para OneDrive…",
+                            ).getOrThrow()
+                            uploadedBytes = true
+                        }
+                    } else {
+                        remoteId = uploadLocalFile(
+                            canonicalPath = row.canonicalPath,
+                            sourceFile = temp!!,
+                            mimeType = item.mimeType,
+                            displayName = row.displayName,
+                            operationLabel = "Enviando para OneDrive…",
+                        ).getOrThrow()
+                        uploadedBytes = true
+                    }
+                    val synced = row.copy(
+                        oneDriveItemId = remoteId,
+                        localQuickXorHash = localHash,
+                        localSizeBytes = localSize,
+                        remoteQuickXorHash = remoteHash,
+                        remoteSizeBytes = remoteSize,
+                        remoteModifiedAt = if (uploadedBytes) {
+                            System.currentTimeMillis() / 1000
+                        } else {
+                            remoteModified
+                        },
+                        cloudState = CloudSyncState.SYNCED,
+                        lastError = null,
+                    )
+                    syncMetadataDao.upsert(synced)
+                    pathsUploadedThisSync.add(row.canonicalPath)
+                    schedulePostUploadThumbnailRefresh(synced.canonicalPath)
+                    if (syncPreferences.autoFreeLocalSpaceWhenSynced) {
+                        releaseLocalSpaceForRows(
+                            listOf(synced),
+                            allowSystemDialog = appForegroundState.isInForeground(),
+                        )
+                    }
+                    1
+                }.getOrElse { error ->
+                    when (error) {
+                        is TimeoutCancellationException ->
+                            syncMetadataDao.upsert(
+                                row.copy(
+                                    cloudState = CloudSyncState.ERROR,
+                                    lastError = "Envio expirou (tempo máximo por arquivo).",
+                                ),
+                            )
+                        else -> {
+                            propagateCancellation(error)
+                            syncMetadataDao.upsert(
+                                row.copy(cloudState = CloudSyncState.ERROR, lastError = error.message),
+                            )
+                        }
+                    }
+                    0
+                }
+            }
+        } finally {
+            temp?.delete()
             removeActiveSyncItem(row.canonicalPath)
             removeFromRunQueue(row.canonicalPath)
         }
@@ -3022,6 +3071,72 @@ class SyncCoordinator(
      * Corrige [CloudSyncState.PENDING_DOWNLOAD] fantasma (hash na listagem delta incompleto,
      * fingerprint local desatualizado, miniatura já em cache).
      */
+    /**
+     * Limpa [CloudSyncState.PENDING_UPLOAD] fantasma (já na nuvem, sem arquivo local, etc.)
+     * para a UI não ficar presa em “aguardando envio”.
+     */
+    private suspend fun healStalePendingUploads(remoteByPath: Map<String, RemoteDriveFile>) {
+        val pending = syncMetadataDao.getPendingUploadRows()
+        if (pending.isEmpty()) return
+        val healed = mutableListOf<SyncMetadataEntity>()
+        for (row in pending) {
+            ensureNotCancelled()
+            val remote = remoteByPath[row.canonicalPath]
+                ?: resolveRemoteForUploadCandidate(row, remoteByPath)
+            if (remote != null) {
+                if (markSyncedIfContentMatchesRemote(row, remote) != null) {
+                    continue
+                }
+                val work = ensureLocalContentFingerprint(row)
+                val effective = ContentFingerprint.remoteWithIndexedFallback(work, remote)
+                if (ContentFingerprint.matchesIndexedLocalWithFallback(work, effective)) {
+                    healed.add(syncedRowFromRemote(work, effective, CloudSyncState.SYNCED))
+                    continue
+                }
+                val liveHash = computeLiveLocalQuickXorHash(work)
+                if (liveHash != null &&
+                    ContentFingerprint.matchesRemote(liveHash.first, liveHash.second, effective)
+                ) {
+                    healed.add(
+                        syncedRowFromRemote(
+                            work.copy(
+                                localQuickXorHash = liveHash.first,
+                                localSizeBytes = liveHash.second,
+                            ),
+                            effective,
+                            CloudSyncState.SYNCED,
+                        ),
+                    )
+                    continue
+                }
+            }
+            val localId = row.localMediaId
+            if (localId == null) {
+                healed.add(
+                    row.copy(
+                        cloudState = CloudSyncState.ERROR,
+                        lastError = "Sem mídia local para enviar.",
+                    ),
+                )
+                continue
+            }
+            val item = indexPassLocalItemsById[localId]
+                ?: localMediaRepository.findById(localId)
+            if (item == null) {
+                healed.add(
+                    row.copy(
+                        cloudState = CloudSyncState.ERROR,
+                        lastError = "Arquivo local não encontrado no aparelho.",
+                    ),
+                )
+            }
+        }
+        if (healed.isEmpty()) return
+        healed.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+            syncMetadataDao.upsertAll(chunk)
+        }
+    }
+
     private suspend fun healStalePendingDownloads(remoteByPath: Map<String, RemoteDriveFile>?) {
         val pending = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
         if (pending.isEmpty()) return
@@ -4759,6 +4874,8 @@ class SyncCoordinator(
         const val GPS_LOCAL_BATCH = 500
         const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 5
+        /** Evita envio infinito na UI se a rede/Graph travar. */
+        const val UPLOAD_SINGLE_FILE_TIMEOUT_MS = 45L * 60L * 1000L
         /** Downloads Graph / decode local em paralelo por leva. */
         const val PARALLEL_THUMBNAILS = 8
         /** Fallback se [allowForegroundThumbnailPrefetch] for falso (modo econômico). */
