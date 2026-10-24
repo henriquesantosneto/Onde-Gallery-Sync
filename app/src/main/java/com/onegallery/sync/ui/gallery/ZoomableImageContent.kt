@@ -21,6 +21,14 @@ fun ZoomableImageContent(
     onSingleTap: () -> Unit = {},
     onContentAspectRatio: ((Float) -> Unit)? = null,
 ) {
+    if (model != null && shouldUseSubsamplingPhotoDetail(model)) {
+        SubsamplingPhotoContent(
+            model = model,
+            modifier = modifier,
+            onSingleTap = onSingleTap,
+        )
+        return
+    }
     ZoomableMediaContainer(
         resetKey = model,
         transform = transform,

@@ -57,14 +57,14 @@ fun MediaDetailFilmstrip(
     LaunchedEffect(items) {
         withContext(Dispatchers.IO) {
             items.asSequence()
-                .filter { it.kind == MediaKind.VIDEO }
-                .take(64)
+                .take(96)
                 .forEach { item ->
+                    val isVideo = item.kind == MediaKind.VIDEO
                     thumbCache.ensureThumbnailCached(
                         item.canonicalPath,
                         preferCloudFirst = item.oneDriveItemId != null,
-                        cloudVideoAggressive = true,
-                        lightweightPrefetch = false,
+                        cloudVideoAggressive = isVideo,
+                        lightweightPrefetch = !isVideo,
                     )
                 }
         }

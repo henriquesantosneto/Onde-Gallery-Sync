@@ -81,8 +81,8 @@ android {
         applicationId = "com.onegallery.sync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 413
-        versionName = "0.8.365"
+        versionCode = 414
+        versionName = "0.8.366"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -187,6 +187,8 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0")
+
+    implementation("com.davemorrissey.labs:subsampling-scale-image-view:3.10.0")
 
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")

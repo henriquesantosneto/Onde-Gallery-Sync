@@ -43,6 +43,7 @@ object CloudThumbnailStaging {
         source: File,
         destination: File,
         mediaCacheRepository: MediaCacheRepository,
+        maxSidePx: Int = THUMB_CACHE_MAX_SIDE_PX,
     ): Boolean {
         if (!source.isFile || source.length() <= 0L) return false
         val normalized = if (source.absolutePath == destination.absolutePath) {
@@ -55,7 +56,7 @@ object CloudThumbnailStaging {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(source.absolutePath, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
-            val sample = thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, THUMB_CACHE_MAX_SIDE_PX)
+            val sample = thumbnailInSampleSize(bounds.outWidth, bounds.outHeight, maxSidePx)
             val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = sample
                 inPreferredConfig = Bitmap.Config.RGB_565

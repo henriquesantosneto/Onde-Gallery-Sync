@@ -55,6 +55,11 @@ class GalleryPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_BROWSE_ONLY_WITH_THUMB, true)
         set(value) = prefs.edit().putBoolean(KEY_BROWSE_ONLY_WITH_THUMB, value).apply()
 
+    /** Logcat tag OneGalleryPerf (prefetch, etc.) mesmo em release. */
+    var logPerformanceTraces: Boolean
+        get() = prefs.getBoolean(KEY_LOG_PERF, false)
+        set(value) = prefs.edit().putBoolean(KEY_LOG_PERF, value).apply()
+
     companion object {
         private const val KEY_SORT = "sort_order"
         private const val KEY_ALBUM_SORT = "album_sort"
@@ -62,5 +67,6 @@ class GalleryPreferences(context: Context) {
         private const val KEY_GALLERY_GRID_ZOOM = "gallery_grid_zoom"
         private const val KEY_EXPERIMENTAL_MEDIA_LAB = "experimental_media_detail_lab"
         private const val KEY_BROWSE_ONLY_WITH_THUMB = "browse_only_items_with_thumbnail"
+        private const val KEY_LOG_PERF = "log_performance_traces"
     }
 }

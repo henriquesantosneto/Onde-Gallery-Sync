@@ -304,9 +304,14 @@ class GalleryThumbnailService(
                         staging,
                         localMediaId = row.localMediaId,
                         mediaStoreOnly = lightweightPrefetch && !isVideo,
+                        quickFrameScan = lightweightPrefetch,
                     )
                 } else {
-                    cacheImageThumbnailFromUri(uri, staging)
+                    cacheImageThumbnailFromUri(
+                        uri,
+                        staging,
+                        maxSidePx = thumbnailMaxSidePx(lightweightPrefetch),
+                    )
                 }
                 if (ok) {
                     successFromStaging().getOrNull()?.let { return Result.success(it) }
@@ -449,6 +454,13 @@ class GalleryThumbnailService(
         partial.delete()
         return thumbReady
     }
+
+    private fun thumbnailMaxSidePx(lightweightPrefetch: Boolean): Int =
+        if (lightweightPrefetch) {
+            GalleryThumbnailEncodePolicy.GRID_MAX_SIDE_PX
+        } else {
+            GalleryThumbnailEncodePolicy.FULL_MAX_SIDE_PX
+        }
 
     private fun cacheImageThumbnailFromUri(
         uri: Uri,

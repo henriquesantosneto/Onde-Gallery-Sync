@@ -139,7 +139,9 @@ class OneGalleryApplication : Application() {
             graphFolderConfigured = graphFolderPreferences.isConfigured(),
             localOneDriveFolderConnected = oneDriveFolderPreferences.treeUri != null,
         )
-        galleryPreferences = GalleryPreferences(this)
+        galleryPreferences = GalleryPreferences(this).also { prefs ->
+            com.onegallery.sync.util.GalleryPerfLogger.enabled = prefs.logPerformanceTraces
+        }
         runBlocking {
             withContext(Dispatchers.IO) {
                 GallerySessionCatalogSpill.hydrateProcessCache(

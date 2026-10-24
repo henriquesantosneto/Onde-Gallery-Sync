@@ -10,6 +10,7 @@ import com.onegallery.sync.sync.PendingDeleteTarget
     tableName = "sync_metadata",
     indices = [
         Index(value = ["cloudState"]),
+        Index(value = ["cloudState", "pendingDeleteTarget"]),
         Index(value = ["localMediaId"]),
         Index(value = ["oneDriveItemId"]),
     ],

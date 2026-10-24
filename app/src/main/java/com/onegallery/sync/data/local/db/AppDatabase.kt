@@ -25,7 +25,7 @@ class SyncEnumConverters {
 
 @Database(
     entities = [SyncMetadataEntity::class, UserAlbumEntity::class],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 @TypeConverters(SyncEnumConverters::class)

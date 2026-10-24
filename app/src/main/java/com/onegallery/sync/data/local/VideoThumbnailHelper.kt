@@ -42,9 +42,13 @@ object VideoThumbnailHelper {
         localMediaId: Long? = null,
         /** Fila de sync: só MediaStore (evita MediaMetadataRetriever bloquear threads). */
         mediaStoreOnly: Boolean = false,
+        /** Prefetch rápido: menos instantes no retriever quando MediaStore falha. */
+        quickFrameScan: Boolean = false,
     ): Boolean {
-        if (tryCaptureStrict(context, uri, destination, localMediaId, mediaStoreOnly)) return true
-        return tryCaptureLenient(context, uri, destination, localMediaId, mediaStoreOnly)
+        if (tryCaptureStrict(context, uri, destination, localMediaId, mediaStoreOnly, quickFrameScan)) {
+            return true
+        }
+        return tryCaptureLenient(context, uri, destination, localMediaId, mediaStoreOnly, quickFrameScan)
     }
 
     fun captureToFile(source: File, destination: File): Boolean {
@@ -139,6 +143,7 @@ object VideoThumbnailHelper {
         destination: File,
         localMediaId: Long?,
         mediaStoreOnly: Boolean,
+        quickFrameScan: Boolean,
     ): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -158,11 +163,11 @@ object VideoThumbnailHelper {
             if (writeBitmapIfValid(destination, bitmap, strict = true)) return true
         }
         if (mediaStoreOnly) return false
-        captureFromContentUri(context, uri, strictFrames = true)?.let { bitmap ->
+        captureFromContentUri(context, uri, strictFrames = true, quickFrameScan = quickFrameScan)?.let { bitmap ->
             writeBitmap(destination, downscale(bitmap))
             return destination.length() > 0L
         }
-        return captureToFileWithRetriever(destination, strictFrames = true) {
+        return captureToFileWithRetriever(destination, strictFrames = true, quickFrameScan = quickFrameScan) {
             it.setDataSource(context, uri)
         }
     }
@@ -173,6 +178,7 @@ object VideoThumbnailHelper {
         destination: File,
         localMediaId: Long?,
         mediaStoreOnly: Boolean,
+        quickFrameScan: Boolean,
     ): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -188,11 +194,11 @@ object VideoThumbnailHelper {
             if (writeBitmapIfValid(destination, bitmap, strict = false)) return true
         }
         if (mediaStoreOnly) return false
-        captureFromContentUri(context, uri, strictFrames = false)?.let { bitmap ->
+        captureFromContentUri(context, uri, strictFrames = false, quickFrameScan = quickFrameScan)?.let { bitmap ->
             writeBitmap(destination, downscale(bitmap))
             return destination.length() > 0L
         }
-        return captureToFileWithRetriever(destination, strictFrames = false) {
+        return captureToFileWithRetriever(destination, strictFrames = false, quickFrameScan = quickFrameScan) {
             it.setDataSource(context, uri)
         }
     }
@@ -247,12 +253,17 @@ object VideoThumbnailHelper {
     private inline fun captureToFileWithRetriever(
         destination: File,
         strictFrames: Boolean,
+        quickFrameScan: Boolean = false,
         setSource: (MediaMetadataRetriever) -> Unit,
     ): Boolean {
         val retriever = MediaMetadataRetriever()
         return runCatching {
             setSource(retriever)
-            extractFrameBitmap(retriever, strictFrames = strictFrames)?.let { frame ->
+            extractFrameBitmap(
+                retriever,
+                strictFrames = strictFrames,
+                quickFrameScan = quickFrameScan,
+            )?.let { frame ->
                 writeBitmap(destination, downscale(frame))
                 true
             } ?: false
@@ -264,6 +275,7 @@ object VideoThumbnailHelper {
     private fun extractFrameBitmap(
         retriever: MediaMetadataRetriever,
         strictFrames: Boolean,
+        quickFrameScan: Boolean = false,
     ): Bitmap? {
         retriever.embeddedPicture?.takeIf { it.isNotEmpty() }?.let { bytes ->
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.takeIf { bmp ->
@@ -274,7 +286,7 @@ object VideoThumbnailHelper {
             ?.toLongOrNull()
             ?.times(1_000L)
             ?: 0L
-        val times = buildFrameTimesUs(durationUs)
+        val times = buildFrameTimesUs(durationUs, quickOnly = quickFrameScan)
         var fallback: Bitmap? = null
         for (timeUs in times) {
             val frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
@@ -290,8 +302,9 @@ object VideoThumbnailHelper {
         return fallback
     }
 
-    private fun buildFrameTimesUs(durationUs: Long): LongArray {
-        if (durationUs <= 0L) return FRAME_TIMES_US
+    private fun buildFrameTimesUs(durationUs: Long, quickOnly: Boolean = false): LongArray {
+        val seed = if (quickOnly) FRAME_TIMES_US.take(4).toLongArray() else FRAME_TIMES_US
+        if (durationUs <= 0L) return seed
         val fromDuration = longArrayOf(
             durationUs / 20,
             durationUs / 10,
@@ -299,7 +312,8 @@ object VideoThumbnailHelper {
             durationUs / 4,
             durationUs / 2,
         ).filter { it in 1L until durationUs }
-        return (FRAME_TIMES_US.toList() + fromDuration).distinct().sorted().toLongArray()
+        val merged = (seed.toList() + fromDuration).distinct().sorted()
+        return if (quickOnly) merged.take(4).toLongArray() else merged.toLongArray()
     }
 
     private fun isMostlyBlackSample(sample: Bitmap): Boolean {
@@ -330,6 +344,7 @@ object VideoThumbnailHelper {
         uri: Uri,
         strictFrames: Boolean = true,
         mediaStoreOnly: Boolean = false,
+        quickFrameScan: Boolean = false,
     ): Bitmap? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -344,7 +359,11 @@ object VideoThumbnailHelper {
         val retriever = MediaMetadataRetriever()
         return runCatching {
             retriever.setDataSource(context, uri)
-            extractFrameBitmap(retriever, strictFrames = strictFrames)?.let(::downscale)
+            extractFrameBitmap(
+                retriever,
+                strictFrames = strictFrames,
+                quickFrameScan = quickFrameScan,
+            )?.let(::downscale)
         }.getOrNull().also {
             runCatching { retriever.release() }
         }

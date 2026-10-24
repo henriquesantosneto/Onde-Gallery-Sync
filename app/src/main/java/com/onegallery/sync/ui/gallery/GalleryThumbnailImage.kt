@@ -65,12 +65,14 @@ fun GalleryThumbnailImage(
             GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
         )
     }
+    val gpuThumbStyle = style == GalleryThumbnailStyle.Grid ||
+        style == GalleryThumbnailStyle.Filmstrip
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
-        mutableStateOf(style == GalleryThumbnailStyle.Grid)
+        mutableStateOf(gpuThumbStyle)
     }
 
     LaunchedEffect(displayData) {
-        allowHardwareBitmap = style == GalleryThumbnailStyle.Grid
+        allowHardwareBitmap = gpuThumbStyle
     }
 
     LaunchedEffect(
@@ -141,7 +143,7 @@ fun GalleryThumbnailImage(
             contentScale = contentScale,
             onState = { state ->
                 if (state is AsyncImagePainter.State.Error &&
-                    style == GalleryThumbnailStyle.Grid &&
+                    gpuThumbStyle &&
                     allowHardwareBitmap
                 ) {
                     allowHardwareBitmap = false

@@ -27,6 +27,7 @@ import com.onegallery.sync.sync.SyncCoordinator
 import com.onegallery.sync.sync.SyncPaths
 import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.ui.AppUserMessages
+import com.onegallery.sync.util.GalleryPerfLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1362,19 +1363,27 @@ class GalleryViewModel(
 
     private suspend fun prefetchThumbnailPathsParallel(paths: List<String>) {
         if (paths.isEmpty()) return
+        val startedNs = System.nanoTime()
         var cachedAny = false
         supervisorScope {
             val semaphore = Semaphore(GRID_THUMB_PREFETCH_PARALLEL)
             paths.map { path ->
                 async {
                     semaphore.withPermit {
-                        galleryThumbnailCache.ensureThumbnailCached(path).getOrNull()
+                        galleryThumbnailCache.ensureThumbnailCached(
+                            path,
+                            lightweightPrefetch = true,
+                        ).getOrNull()
                         val hit = mediaCacheRepository.displayableThumbnailIfCached(path) != null
                         if (hit) cachedAny = true
                     }
                 }
             }.awaitAll()
         }
+        GalleryPerfLogger.log(
+            "grid-thumb-prefetch count=${paths.size} " +
+                "ms=${(System.nanoTime() - startedNs) / 1_000_000} cached=$cachedAny",
+        )
         if (cachedAny) {
             syncCoordinator.notifyGalleryDisplayRefresh()
         }
@@ -1382,7 +1391,7 @@ class GalleryViewModel(
 
     private companion object {
         const val GRID_THUMB_PREFETCH_PARALLEL = 8
-        const val GRID_THUMB_PREFETCH_BATCH = 72
+        const val GRID_THUMB_PREFETCH_BATCH = 96
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
     }
 

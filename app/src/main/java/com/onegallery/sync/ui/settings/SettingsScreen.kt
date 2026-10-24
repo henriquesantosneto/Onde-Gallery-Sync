@@ -123,6 +123,9 @@ fun SettingsScreen(
     var experimentalMediaLab by remember {
         mutableStateOf(galleryPreferences.experimentalMediaDetailLab)
     }
+    var logPerformanceTraces by remember {
+        mutableStateOf(galleryPreferences.logPerformanceTraces)
+    }
     var browseOnlyWithThumb by remember {
         mutableStateOf(galleryPreferences.browseOnlyItemsWithThumbnail)
     }
@@ -794,6 +797,24 @@ fun SettingsScreen(
 
             item {
                 SettingsSectionTitle(title = "Laboratório", icon = Icons.Outlined.PhotoLibrary)
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Log de desempenho",
+                    summary = "Registra prefetch e tempos no Logcat (tag OneGalleryPerf).",
+                    info = SettingsInfoDialog(
+                        title = "Log de desempenho",
+                        body = "Útil para ver se prefetch de miniaturas e a grade estão rápidos. " +
+                            "Filtre no Logcat por OneGalleryPerf.",
+                    ),
+                    checked = logPerformanceTraces,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = { enabled ->
+                        logPerformanceTraces = enabled
+                        galleryPreferences.logPerformanceTraces = enabled
+                        com.onegallery.sync.util.GalleryPerfLogger.enabled = enabled
+                    },
+                )
             }
             item {
                 SettingsSwitchRow(

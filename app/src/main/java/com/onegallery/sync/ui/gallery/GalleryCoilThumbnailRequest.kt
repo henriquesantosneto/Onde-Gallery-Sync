@@ -12,16 +12,24 @@ internal fun ImageRequest.Builder.applyGalleryThumbnailLoading(
     style: GalleryThumbnailStyle,
     allowHardwareBitmap: Boolean,
 ): ImageRequest.Builder {
-    val grid = style == GalleryThumbnailStyle.Grid
-    val hardware = grid && allowHardwareBitmap
+    val gpuEligible = style == GalleryThumbnailStyle.Grid ||
+        style == GalleryThumbnailStyle.Filmstrip
+    val hardware = gpuEligible && allowHardwareBitmap
+    val rgb565 = style == GalleryThumbnailStyle.Grid ||
+        style == GalleryThumbnailStyle.Filmstrip
     return crossfade(style == GalleryThumbnailStyle.Detail)
         .allowHardware(hardware)
-        .allowRgb565(grid)
+        .allowRgb565(rgb565)
 }
 
 /** Camada de composição estável por célula — rolagem desenha a textura, não re-layout. */
 internal fun Modifier.galleryGridThumbnailLayer(style: GalleryThumbnailStyle): Modifier {
-    if (style != GalleryThumbnailStyle.Grid) return this
+    when (style) {
+        GalleryThumbnailStyle.Grid,
+        GalleryThumbnailStyle.Filmstrip,
+        -> Unit
+        else -> return this
+    }
     return graphicsLayer { clip = true }
 }
 
@@ -31,6 +39,8 @@ internal fun galleryThumbnailMemoryCacheKey(
     style: GalleryThumbnailStyle,
     allowHardwareBitmap: Boolean,
 ): String {
-    val hw = style == GalleryThumbnailStyle.Grid && allowHardwareBitmap
+    val gpuEligible = style == GalleryThumbnailStyle.Grid ||
+        style == GalleryThumbnailStyle.Filmstrip
+    val hw = gpuEligible && allowHardwareBitmap
     return "$baseKey:$sizePx:${style.name}:hw=$hw"
 }
