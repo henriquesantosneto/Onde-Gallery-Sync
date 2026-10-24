@@ -19,6 +19,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.imageLoader
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
@@ -65,8 +66,11 @@ fun GalleryThumbnailImage(
             GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
         )
     }
-    val gpuThumbStyle = style == GalleryThumbnailStyle.Grid ||
-        style == GalleryThumbnailStyle.Filmstrip
+    val isGrid = style == GalleryThumbnailStyle.Grid
+    val gridScrolling = LocalGalleryGridScrolling.current
+    val zeroDecodeOnScroll = LocalZeroDecodeGridScroll.current
+    val scrollDecodeLocked = isGrid && gridScrolling && zeroDecodeOnScroll
+    val gpuThumbStyle = isGrid || style == GalleryThumbnailStyle.Filmstrip
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
         mutableStateOf(gpuThumbStyle)
     }
@@ -84,7 +88,9 @@ fun GalleryThumbnailImage(
         sizePx,
         style,
         refreshNonce,
+        scrollDecodeLocked,
     ) {
+        if (scrollDecodeLocked) return@LaunchedEffect
         if (displayData is java.io.File &&
             !GalleryThumbnailResolver.isStaleDisplayData(item, displayData, mediaCacheRepository)
         ) {
@@ -119,20 +125,30 @@ fun GalleryThumbnailImage(
     val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
         item.kind == MediaKind.VIDEO &&
         (displayData == null || displayData is android.net.Uri)
-    if (displayData != null && !filmstripVideoPending) {
+    val memoryCacheKey = galleryThumbnailMemoryCacheKey(
+        item.canonicalPath,
+        sizePx,
+        style,
+        allowHardwareBitmap,
+    )
+    val mayPaint = displayData != null && !filmstripVideoPending &&
+        (
+            !scrollDecodeLocked ||
+                GalleryThumbnailDecodeGate.canPaintGridCellDuringScroll(
+                    item = item,
+                    displayData = displayData,
+                    mediaCacheRepository = mediaCacheRepository,
+                    imageLoader = context.imageLoader,
+                    memoryCacheKey = memoryCacheKey,
+                )
+            )
+    if (mayPaint) {
         val request = remember(displayData, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
             ImageRequest.Builder(context)
                 .data(displayData)
                 .size(sizePx)
                 .applyGalleryThumbnailLoading(style, allowHardwareBitmap)
-                .memoryCacheKey(
-                    galleryThumbnailMemoryCacheKey(
-                        item.canonicalPath,
-                        sizePx,
-                        style,
-                        allowHardwareBitmap,
-                    ),
-                )
+                .memoryCacheKey(memoryCacheKey)
                 .diskCacheKey("${item.canonicalPath}:$sizePx")
                 .build()
         }
@@ -167,7 +183,7 @@ fun GalleryThumbnailImage(
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         MediaThumbnailPlaceholder(
             modifier = modifier,
-            showCloudIcon = !resolvingThumb &&
+            showCloudIcon = !resolvingThumb && !scrollDecodeLocked &&
                 (
                     cloudOnly ||
                         (
@@ -175,7 +191,7 @@ fun GalleryThumbnailImage(
                                 item.cloudState != CloudSyncState.PENDING_DOWNLOAD
                             )
                     ),
-            showLoading = resolvingThumb,
+            showLoading = resolvingThumb && !scrollDecodeLocked,
         )
     }
 }

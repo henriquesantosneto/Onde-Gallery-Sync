@@ -129,6 +129,9 @@ fun SettingsScreen(
     var browseOnlyWithThumb by remember {
         mutableStateOf(galleryPreferences.browseOnlyItemsWithThumbnail)
     }
+    var zeroDecodeWhileScrolling by remember {
+        mutableStateOf(galleryPreferences.zeroDecodeWhileScrolling)
+    }
     var aggressiveThumbPrefetch by remember {
         mutableStateOf(syncPreferences.aggressiveThumbnailPrefetch)
     }
@@ -773,6 +776,24 @@ fun SettingsScreen(
                         browseOnlyWithThumb = enabled
                         galleryPreferences.browseOnlyItemsWithThumbnail = enabled
                         onGalleryBrowseFilterChanged()
+                    },
+                )
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Zero decode na rolagem",
+                    summary = "Enquanto rola, só mostra miniatura já pronta (estilo galeria rápida).",
+                    info = SettingsInfoDialog(
+                        title = "Zero decode na rolagem",
+                        body = "Ligado: durante o scroll a grade não decodifica fotos novas — só " +
+                            "cola JPEG/cache. Ao parar, preenche o que faltou. O sync em massa de " +
+                            "miniaturas pausa enquanto você rola.",
+                    ),
+                    checked = zeroDecodeWhileScrolling,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = { enabled ->
+                        zeroDecodeWhileScrolling = enabled
+                        galleryPreferences.zeroDecodeWhileScrolling = enabled
                     },
                 )
             }

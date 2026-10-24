@@ -3611,6 +3611,10 @@ class SyncCoordinator(
             repeat(THUMB_BACKGROUND_CONTINUE_PASSES) {
                 if (syncCancelRequested.get()) return@launch
                 if (_state.value.isRunning) return@launch
+                if (com.onegallery.sync.ui.gallery.GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch()) {
+                    delay(180)
+                    return@repeat
+                }
                 if (countIndexedMissingThumbnails() == 0) return@launch
                 val idleForeground = appForegroundState.isInForeground() &&
                     !allowForegroundThumbnailPrefetch()

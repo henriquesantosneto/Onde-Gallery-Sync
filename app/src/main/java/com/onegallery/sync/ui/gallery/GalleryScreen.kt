@@ -335,10 +335,29 @@ fun GalleryScreen(
                     enabled = dateTimeline,
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
+                var gridScrolling by remember { mutableStateOf(false) }
+                LaunchedEffect(gridState) {
+                    snapshotFlow { gridState.isScrollInProgress }
+                        .distinctUntilChanged()
+                        .collect { gridScrolling = it }
+                }
                 LaunchedEffect(gridItems) {
                     viewModel.prefetchGridThumbnails(
-                        gridItems.take(96).map { it.canonicalPath },
+                        paths = gridItems.take(96).map { it.canonicalPath },
+                        priority = GridThumbnailPrefetchPriority.WARMUP,
                     )
+                }
+                LaunchedEffect(gridState, gridEntries) {
+                    snapshotFlow {
+                        galleryGridVisiblePaths(gridState.layoutInfo, gridEntries)
+                    }
+                        .distinctUntilChanged()
+                        .collect { paths ->
+                            viewModel.prefetchGridThumbnails(
+                                paths = paths,
+                                priority = GridThumbnailPrefetchPriority.VISIBLE,
+                            )
+                        }
                 }
                 LaunchedEffect(gridState, gridEntries) {
                     snapshotFlow {
@@ -350,7 +369,10 @@ fun GalleryScreen(
                     }
                         .distinctUntilChanged()
                         .collect { paths ->
-                            viewModel.prefetchGridThumbnails(paths)
+                            viewModel.prefetchGridThumbnails(
+                                paths = paths,
+                                priority = GridThumbnailPrefetchPriority.AHEAD,
+                            )
                         }
                 }
                 LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
@@ -369,6 +391,10 @@ fun GalleryScreen(
                             }
                         }
                 }
+                ProvideGalleryGridScrollState(
+                    isScrolling = gridScrolling,
+                    zeroDecodeWhileScrolling = galleryPreferences.zeroDecodeWhileScrolling,
+                ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -433,6 +459,7 @@ fun GalleryScreen(
                             modifier = Modifier.align(Alignment.CenterEnd),
                         )
                     }
+                }
                 }
             }
         }

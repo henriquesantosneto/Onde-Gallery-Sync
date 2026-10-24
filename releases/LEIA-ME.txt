@@ -1,9 +1,9 @@
-OneGallery Sync — APK 0.8.366 (versionCode 414)
+OneGallery Sync — APK 0.8.367 (versionCode 415)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.366-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.367-debug/OneGallerySync-debug.apk
 
 Hash Azure (Assinatura debug deste build): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
 
@@ -14,8 +14,6 @@ Se a instalação falhar ("pacote inválido" / "app não instalado"):
   4. Se você compilou o APK no seu PC antes, a assinatura era outra — desinstale primeiro.
 
 Novidades desta build:
-  - Prefetch da grade alinhado ao scroll (2 telas à frente)
-  - Miniaturas sync/prefetch em 512px; filmstrip com GPU
-  - Fotos grandes no detalhe: tile view (subsampling)
-  - Índice SQLite (cloudState + pendingDeleteTarget)
-  - Log de desempenho em Ajustes → Laboratório
+  - Zero decode na rolagem (só miniatura pronta enquanto scrolla)
+  - Prefetch visível-first (tela → 2 telas → warmup)
+  - Sync em massa de miniaturas pausa enquanto você rola a grade

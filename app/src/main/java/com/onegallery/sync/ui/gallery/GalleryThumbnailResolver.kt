@@ -16,6 +16,18 @@ object GalleryThumbnailResolver {
     ): Any? {
         val isVideo = item.kind == MediaKind.VIDEO
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
+        if (style == GalleryThumbnailStyle.Grid) {
+            cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
+            item.cachedPlaceholderThumb?.let { thumb ->
+                if (mediaCacheRepository.isDisplayableGalleryThumbFile(thumb) &&
+                    (!isVideo || VideoThumbnailHelper.isGalleryVideoThumbnailFile(thumb))
+                ) {
+                    return thumb
+                }
+            }
+            cloudVideoCoilKey(item, forFilmstrip = false)?.let { return it }
+            return null
+        }
         if (!filmstripVideo) {
             item.localUri?.let { uri -> return uri }
         }

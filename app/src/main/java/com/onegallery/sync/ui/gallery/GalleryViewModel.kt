@@ -29,6 +29,7 @@ import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.util.GalleryPerfLogger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -157,8 +158,8 @@ class GalleryViewModel(
     @Volatile
     private var pendingPlacesMapFocus: PlacesMapFocus? = null
 
-    private var gridThumbnailPrefetchJob: Job? = null
-    private val gridThumbnailPrefetchQueued = ConcurrentHashMap.newKeySet<String>()
+    private var gridThumbnailPrefetchWorker: Job? = null
+    private val gridThumbnailPrefetchPriorities = ConcurrentHashMap<String, Int>()
 
     private val catalogSession = GalleryCatalogSession()
     private val displayBuildCache = GalleryDisplayBuildCache(mediaCacheRepository)
@@ -1342,21 +1343,43 @@ class GalleryViewModel(
     }
 
     /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
-    fun prefetchGridThumbnails(canonicalPaths: List<String>) {
-        val paths = canonicalPaths
-            .asSequence()
+    fun prefetchGridThumbnails(
+        paths: List<String>,
+        priority: Int = GridThumbnailPrefetchPriority.AHEAD,
+    ) {
+        var enqueued = false
+        paths.asSequence()
             .filter { it.isNotBlank() }
             .filter { path -> mediaCacheRepository.displayableThumbnailIfCached(path) == null }
-            .filter { path -> gridThumbnailPrefetchQueued.add(path) }
-            .take(GRID_THUMB_PREFETCH_BATCH)
-            .toList()
-        if (paths.isEmpty()) return
-        gridThumbnailPrefetchJob?.cancel()
-        gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            .forEach { path ->
+                gridThumbnailPrefetchPriorities.merge(path, priority) { existing, incoming ->
+                    minOf(existing, incoming)
+                }
+                enqueued = true
+            }
+        if (enqueued) {
+            ensureGridThumbnailPrefetchWorker()
+        }
+    }
+
+    private fun ensureGridThumbnailPrefetchWorker() {
+        if (gridThumbnailPrefetchWorker?.isActive == true) return
+        gridThumbnailPrefetchWorker = viewModelScope.launch(Dispatchers.IO) {
+            GalleryGridScrollGate.gridVisiblePrefetchPending = true
             try {
-                prefetchThumbnailPathsParallel(paths)
+                while (gridThumbnailPrefetchPriorities.isNotEmpty()) {
+                    val batch = gridThumbnailPrefetchPriorities.entries
+                        .sortedWith(compareBy({ it.value }, { it.key }))
+                        .take(GRID_THUMB_PREFETCH_BATCH)
+                        .map { it.key }
+                    batch.forEach { gridThumbnailPrefetchPriorities.remove(it) }
+                    prefetchThumbnailPathsParallel(batch)
+                    if (GalleryGridScrollGate.isUserScrollingGrid) {
+                        delay(32)
+                    }
+                }
             } finally {
-                paths.forEach { gridThumbnailPrefetchQueued.remove(it) }
+                GalleryGridScrollGate.gridVisiblePrefetchPending = false
             }
         }
     }
@@ -1365,8 +1388,13 @@ class GalleryViewModel(
         if (paths.isEmpty()) return
         val startedNs = System.nanoTime()
         var cachedAny = false
+        val parallel = if (GalleryGridScrollGate.isUserScrollingGrid) {
+            GRID_THUMB_PREFETCH_PARALLEL_SCROLL
+        } else {
+            GRID_THUMB_PREFETCH_PARALLEL
+        }
         supervisorScope {
-            val semaphore = Semaphore(GRID_THUMB_PREFETCH_PARALLEL)
+            val semaphore = Semaphore(parallel)
             paths.map { path ->
                 async {
                     semaphore.withPermit {
@@ -1391,6 +1419,7 @@ class GalleryViewModel(
 
     private companion object {
         const val GRID_THUMB_PREFETCH_PARALLEL = 8
+        const val GRID_THUMB_PREFETCH_PARALLEL_SCROLL = 12
         const val GRID_THUMB_PREFETCH_BATCH = 96
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
     }
