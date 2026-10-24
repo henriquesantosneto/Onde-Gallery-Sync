@@ -118,8 +118,18 @@ fun MediaDetailScreen(
     ) { pagerPaths.size.coerceAtLeast(1) }
 
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
+    var detailBadgeItem by remember { mutableStateOf<GalleryDisplayItem?>(null) }
+    var activePageRecalling by remember { mutableStateOf(false) }
+    LaunchedEffect(currentPath) {
+        detailBadgeItem = null
+        activePageRecalling = false
+    }
     val currentItem = currentPath?.let { path ->
-        preferDisplayItemForCloudBadge(null, itemsByPath[path], context)
+        preferDisplayItemForCloudBadge(
+            detailBadgeItem,
+            itemsByPath[path],
+            context,
+        )
     }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
     val barTitle = currentItem?.displayName ?: "Mídia"
@@ -297,6 +307,12 @@ fun MediaDetailScreen(
                         onDetailZoomActiveChanged = { active ->
                             if (pageActive) detailZoomBlocksPager = active
                         },
+                        onDisplayItemChanged = { display ->
+                            if (pageActive) detailBadgeItem = display
+                        },
+                        onRecallingChanged = { recalling ->
+                            if (pageActive) activePageRecalling = recalling
+                        },
                     )
                 }
 
@@ -327,7 +343,7 @@ fun MediaDetailScreen(
                         {
                             MediaDetailTopBarCloudStatus(
                                 item = statusItem,
-                                recalling = false,
+                                recalling = activePageRecalling,
                             )
                         }
                     },
@@ -619,6 +635,8 @@ private fun LabMediaDetailPage(
     viewModel: GalleryViewModel,
     onToggleImmersive: () -> Unit,
     onDetailZoomActiveChanged: (Boolean) -> Unit = {},
+    onDisplayItemChanged: (GalleryDisplayItem?) -> Unit = {},
+    onRecallingChanged: (Boolean) -> Unit = {},
 ) {
     val viewContext = LocalContext.current
     val app = viewContext.applicationContext as OneGalleryApplication
@@ -629,6 +647,14 @@ private fun LabMediaDetailPage(
     var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
     var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
     var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
+
+    LaunchedEffect(item, isActivePage) {
+        if (isActivePage) onDisplayItemChanged(item)
+    }
+
+    LaunchedEffect(loadingFull, isActivePage) {
+        if (isActivePage) onRecallingChanged(loadingFull)
+    }
 
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
         withContext(Dispatchers.Default) {
@@ -764,7 +790,7 @@ private fun LabMediaDetailPage(
                     GalleryMapper.isAudioFileName(display.displayName) -> {
                         val playback = display.playbackUri()
                         if (playback == null && loadingFull) {
-                            CircularProgressIndicator(color = Color.White)
+                            MediaThumbnailPlaceholder(modifier = Modifier.fillMaxSize(), showLoading = false)
                         } else if (playback == null) {
                             LabUnsupportedMediaMessage(
                                 message = error ?: "Áudio sem arquivo local. Sincronize ou baixe o original.",
@@ -784,7 +810,11 @@ private fun LabMediaDetailPage(
                     display.kind == MediaKind.VIDEO -> {
                         val playback = display.playbackUri()
                         if (playback == null && loadingFull) {
-                            CircularProgressIndicator(color = Color.White)
+                            MediaThumbnailPlaceholder(
+                                modifier = Modifier.fillMaxSize(),
+                                showCloudIcon = true,
+                                showLoading = false,
+                            )
                         } else if (playback == null) {
                             LabUnsupportedMediaMessage(
                                 message = error ?: "Vídeo indisponível neste aparelho. Aguarde o download.",
@@ -806,7 +836,11 @@ private fun LabMediaDetailPage(
                     }
                     display.detailPreviewModel(viewContext) != null || loadingFull -> {
                         if (loadingFull && display.detailPreviewModel(viewContext) == null) {
-                            CircularProgressIndicator(color = Color.White)
+                            MediaThumbnailPlaceholder(
+                                modifier = Modifier.fillMaxSize(),
+                                showCloudIcon = true,
+                                showLoading = false,
+                            )
                         } else {
                             LabSamsungStylePhotoViewer(
                                 item = display,
@@ -826,14 +860,6 @@ private fun LabMediaDetailPage(
                     }
                 }
             }
-        }
-        if (loadingFull && item != null) {
-            CircularProgressIndicator(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 72.dp),
-                color = Color.White.copy(alpha = 0.85f),
-            )
         }
     }
 }
