@@ -82,14 +82,16 @@ fun AlbumGridCoverImage(
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (displayModel != null) {
+            val coverSizePx = 480
             val request = remember(displayModel, coverCacheKey, allowHardwareBitmap) {
                 ImageRequest.Builder(context)
                     .data(displayModel)
+                    .size(coverSizePx)
                     .applyGalleryThumbnailLoading(GalleryThumbnailStyle.Grid, allowHardwareBitmap)
                     .memoryCacheKey(
                         galleryThumbnailMemoryCacheKey(
                             "album-cover:$coverCacheKey",
-                            480,
+                            coverSizePx,
                             GalleryThumbnailStyle.Grid,
                             allowHardwareBitmap,
                         ),
@@ -100,7 +102,9 @@ fun AlbumGridCoverImage(
             AsyncImage(
                 model = request,
                 contentDescription = contentDescription,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .galleryGridThumbnailLayer(GalleryThumbnailStyle.Grid),
                 contentScale = ContentScale.Crop,
                 onState = { state ->
                     if (state is AsyncImagePainter.State.Error && allowHardwareBitmap) {

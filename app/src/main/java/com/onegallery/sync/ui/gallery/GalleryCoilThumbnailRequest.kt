@@ -1,5 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import coil.request.ImageRequest
 
 /**
@@ -10,9 +12,17 @@ internal fun ImageRequest.Builder.applyGalleryThumbnailLoading(
     style: GalleryThumbnailStyle,
     allowHardwareBitmap: Boolean,
 ): ImageRequest.Builder {
-    val hardware = style == GalleryThumbnailStyle.Grid && allowHardwareBitmap
+    val grid = style == GalleryThumbnailStyle.Grid
+    val hardware = grid && allowHardwareBitmap
     return crossfade(style == GalleryThumbnailStyle.Detail)
         .allowHardware(hardware)
+        .allowRgb565(grid)
+}
+
+/** Camada de composição estável por célula — rolagem desenha a textura, não re-layout. */
+internal fun Modifier.galleryGridThumbnailLayer(style: GalleryThumbnailStyle): Modifier {
+    if (style != GalleryThumbnailStyle.Grid) return this
+    return graphicsLayer { clip = true }
 }
 
 internal fun galleryThumbnailMemoryCacheKey(

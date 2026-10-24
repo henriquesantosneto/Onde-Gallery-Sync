@@ -137,7 +137,7 @@ fun GalleryThumbnailImage(
         AsyncImage(
             model = request,
             contentDescription = contentDescription,
-            modifier = modifier,
+            modifier = modifier.galleryGridThumbnailLayer(style),
             contentScale = contentScale,
             onState = { state ->
                 if (state is AsyncImagePainter.State.Error &&
