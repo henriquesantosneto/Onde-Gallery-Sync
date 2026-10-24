@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaKind
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,9 @@ fun AlbumGridCoverImage(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val mediaCacheRepository = remember(context) {
+        (context.applicationContext as OneGalleryApplication).mediaCacheRepository
+    }
     var displayModel by remember(album.bucketId) { mutableStateOf<Any?>(fallbackCover) }
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(false) }
     var coverCacheKey by remember(album.bucketId) { mutableStateOf(album.bucketId) }
@@ -64,7 +68,7 @@ fun AlbumGridCoverImage(
         val isVideo = live.sourceItem?.kind == MediaKind.VIDEO
         val resolved = withContext(Dispatchers.IO) {
             live.sourceItem?.let { item ->
-                GalleryThumbnailModels.resolveGridModel(context, item, 480)
+                resolveGalleryCoverModel(item, mediaCacheRepository)
             } ?: live.displayModel
         }
         val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId

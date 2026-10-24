@@ -1216,7 +1216,12 @@ class GalleryViewModel(
             coverRevisionStamp = coverRevisionStamp,
         )
         val libraryItems = catalogSession.sortedLibraryItems(visibleItems, controls.order)
-        val items = catalogSession.browseItemsFor(visibleItems, controls.browseFilter, controls.order)
+        val items = catalogSession.browseItemsFor(
+            visibleItems,
+            controls.browseFilter,
+            controls.order,
+            mediaCacheRepository,
+        )
         val albumFilter = (controls.browseFilter as? GalleryBrowseFilter.AlbumFolder)?.name
         val placeBrowse = controls.browseFilter as? GalleryBrowseFilter.Place
         val locationFilter = placeBrowse?.displayName
@@ -1526,7 +1531,7 @@ class GalleryViewModel(
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {
         val all = latestCatalogItems
         if (all.isEmpty()) return emptyList()
-        return when {
+        val raw = when {
             album.bucketId.startsWith("place:") -> {
                 val encoded = album.bucketId.removePrefix("place:")
                 val matchKey = PlaceMatchKey.decode(encoded)
@@ -1537,6 +1542,7 @@ class GalleryViewModel(
             }
             else -> all.filter { it.albumName == album.filterKey }
         }
+        return raw.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
     }
 
     fun refresh() {

@@ -1,11 +1,13 @@
 package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -14,6 +16,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = com.onegallery.sync.TestApplication::class)
 class GalleryBrowseVisibilityVideoTest {
+
+    private lateinit var repo: MediaCacheRepository
+
+    @Before
+    fun setUp() {
+        repo = MediaCacheRepository(org.robolectric.RuntimeEnvironment.getApplication())
+    }
 
     @Test
     fun cloudOnlyVideo_neverCountsAsLocalBrowseThumb() {
@@ -103,5 +112,24 @@ class GalleryBrowseVisibilityVideoTest {
             sortTimestamp = 1L,
         )
         assertTrue(item.videoCountsAsLocalBrowseThumb())
+    }
+
+    @Test
+    fun cloudOnlyVideo_withoutPoster_notBrowsable() {
+        val item = GalleryDisplayItem(
+            canonicalPath = "v.mp4",
+            displayName = "v.mp4",
+            albumName = "A",
+            kind = MediaKind.VIDEO,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "remote",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            sortTimestamp = 1L,
+            showInBrowseGrid = true,
+        )
+        assertFalse(item.hasBrowsableThumbnail(repo))
     }
 }

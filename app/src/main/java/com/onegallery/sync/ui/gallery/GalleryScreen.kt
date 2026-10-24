@@ -109,6 +109,7 @@ fun GalleryScreen(
             routeAlbumFolderKey = routeAlbumFolderKey,
             routePlaceMatchKey = routePlaceMatchKey,
             routePlaceTitle = routePlaceTitle,
+            mediaCacheRepository = mediaCacheRepository,
         )
     }
     val gridItems = remember(fullBrowseGridItems, state.gridWindowLimit) {

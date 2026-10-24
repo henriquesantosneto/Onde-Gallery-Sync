@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.matchesPlace
 
@@ -12,18 +13,22 @@ fun resolveBrowseGridItems(
     routeAlbumFolderKey: String?,
     routePlaceMatchKey: String?,
     routePlaceTitle: String?,
+    mediaCacheRepository: MediaCacheRepository,
 ): List<GalleryDisplayItem> {
+    fun browsable(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> =
+        items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+
     if (!requiresActiveBrowseFilter) {
-        return libraryItems
+        return browsable(libraryItems)
     }
     if (!routeAlbumFolderKey.isNullOrBlank()) {
-        val fromRoute = libraryItems
-            .filter { it.albumName == routeAlbumFolderKey }
-            .sortedBy(sortOrder)
+        val fromRoute = browsable(
+            libraryItems.filter { it.albumName == routeAlbumFolderKey },
+        ).sortedBy(sortOrder)
         if (browseItemsFromState.isNotEmpty() &&
             browseItemsFromState.all { it.albumName == routeAlbumFolderKey }
         ) {
-            return browseItemsFromState
+            return browsable(browseItemsFromState).sortedBy(sortOrder)
         }
         return fromRoute
     }
@@ -34,11 +39,11 @@ fun resolveBrowseGridItems(
             !routePlaceTitle.isNullOrBlank() -> item.locationLabel == routePlaceTitle
             else -> false
         }
-        val fromRoute = libraryItems.filter(::matchesPlaceItem).sortedBy(sortOrder)
+        val fromRoute = browsable(libraryItems.filter(::matchesPlaceItem)).sortedBy(sortOrder)
         if (browseItemsFromState.isNotEmpty() &&
             browseItemsFromState.all(::matchesPlaceItem)
         ) {
-            return browseItemsFromState
+            return browsable(browseItemsFromState).sortedBy(sortOrder)
         }
         return fromRoute
     }

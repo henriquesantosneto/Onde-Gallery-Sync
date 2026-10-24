@@ -168,7 +168,11 @@ class GalleryCatalogSession {
         visibleItems: List<GalleryDisplayItem>,
         filter: GalleryBrowseFilter,
         order: GallerySortOrder,
+        mediaCacheRepository: MediaCacheRepository,
     ): List<GalleryDisplayItem> {
+        fun browsable(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> =
+            items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+
         when (filter) {
             GalleryBrowseFilter.All -> return sortedLibraryItems(visibleItems, order)
             is GalleryBrowseFilter.AlbumFolder -> {
@@ -181,7 +185,9 @@ class GalleryCatalogSession {
                 if (browseFilterCacheKey == cacheKey && browseFilterCachedItems.isNotEmpty()) {
                     return browseFilterCachedItems
                 }
-                val filtered = visibleItems.filter { it.albumName == filter.name }.sortedBy(order)
+                val filtered = browsable(
+                    visibleItems.filter { it.albumName == filter.name },
+                ).sortedBy(order)
                 browseFilterCacheKey = cacheKey
                 browseFilterCachedItems = filtered
                 return filtered
@@ -197,13 +203,15 @@ class GalleryCatalogSession {
                     return browseFilterCachedItems
                 }
                 val collapsed = collapseItemsForPlaceAlbums(visibleItems)
-                val filtered = collapsed.filter { item ->
-                    if (filter.matchKey.isNotBlank()) {
-                        item.matchesPlaceAlbumBucket(filter.matchKey)
-                    } else {
-                        item.locationLabel == filter.displayName
-                    }
-                }.sortedBy(order)
+                val filtered = browsable(
+                    collapsed.filter { item ->
+                        if (filter.matchKey.isNotBlank()) {
+                            item.matchesPlaceAlbumBucket(filter.matchKey)
+                        } else {
+                            item.locationLabel == filter.displayName
+                        }
+                    },
+                ).sortedBy(order)
                 browseFilterCacheKey = cacheKey
                 browseFilterCachedItems = filtered
                 return filtered
