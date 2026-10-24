@@ -324,6 +324,7 @@ class GalleryViewModel(
     }
 
     fun loadMoreGridItems() {
+        if (GalleryGridScrollGate.isUserScrollingGrid) return
         gridWindowLimit.update { current ->
             current + GalleryGridPagination.pageSize
         }
@@ -1347,6 +1348,7 @@ class GalleryViewModel(
 
     /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
     fun prefetchGridThumbnails(canonicalPaths: List<String>) {
+        if (GalleryGridScrollGate.isUserScrollingGrid) return
         val paths = canonicalPaths
             .asSequence()
             .filter { it.isNotBlank() }

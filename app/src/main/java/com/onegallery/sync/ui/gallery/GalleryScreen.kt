@@ -342,6 +342,10 @@ fun GalleryScreen(
                 }
                 LaunchedEffect(gridState, gridEntries) {
                     snapshotFlow {
+                        val scrolling = gridState.isScrollInProgress
+                        if (scrolling) {
+                            return@snapshotFlow emptyList()
+                        }
                         val layout = gridState.layoutInfo
                         val visible = layout.visibleItemsInfo
                         if (visible.isEmpty()) return@snapshotFlow emptyList<String>()
@@ -357,25 +361,32 @@ fun GalleryScreen(
                     }
                         .distinctUntilChanged()
                         .collect { paths ->
-                            viewModel.prefetchGridThumbnails(paths)
+                            if (paths.isNotEmpty()) {
+                                viewModel.prefetchGridThumbnails(paths)
+                            }
                         }
                 }
                 LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
                     if (!browseGridHasMore) return@LaunchedEffect
                     snapshotFlow {
+                        val scrolling = gridState.isScrollInProgress
                         val visible = gridState.layoutInfo.visibleItemsInfo
-                        if (visible.isEmpty()) return@snapshotFlow false
-                        val lastVisibleIndex = visible.last().index
-                        lastVisibleIndex >= gridEntries.lastIndex -
-                            GalleryGridPagination.loadMoreVisibleTailMargin
+                        val nearEnd = if (visible.isEmpty()) {
+                            false
+                        } else {
+                            visible.last().index >= gridEntries.lastIndex -
+                                GalleryGridPagination.loadMoreVisibleTailMargin
+                        }
+                        scrolling to nearEnd
                     }
                         .distinctUntilChanged()
-                        .collect { nearEnd ->
-                            if (nearEnd) {
+                        .collect { (scrolling, nearEnd) ->
+                            if (!scrolling && nearEnd) {
                                 viewModel.loadMoreGridItems()
                             }
                         }
                 }
+                val gridFlingBehavior = rememberGalleryGridFlingBehavior()
                 ProvideGalleryGridScrollState(
                     gridState = gridState,
                     zeroDecodeWhileScrolling = galleryPreferences.zeroDecodeWhileScrolling,
@@ -392,6 +403,7 @@ fun GalleryScreen(
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = mediaCellMin),
                         state = gridState,
+                        flingBehavior = gridFlingBehavior,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 8.dp,
@@ -423,8 +435,8 @@ fun GalleryScreen(
                                 is GalleryGridEntry.Photo -> {
                                     TimelinePhotoCell(
                                         item = entry.item,
-                                        state = state,
-                                        syncCoordinator = syncCoordinator,
+                                        selectionMode = state.selectionMode,
+                                        selected = entry.item.canonicalPath in state.selectedPaths,
                                         gridPinch = gridPinch,
                                         gridThumbPx = gridThumbPx,
                                         viewModel = viewModel,
@@ -544,24 +556,22 @@ fun GalleryScreen(
 @Composable
 private fun TimelinePhotoCell(
     item: GalleryDisplayItem,
-    state: GalleryUiState,
-    syncCoordinator: SyncCoordinator,
+    selectionMode: Boolean,
+    selected: Boolean,
     gridPinch: GalleryGridPinchZoom,
     gridThumbPx: Int,
     viewModel: GalleryViewModel,
     onOpenItem: (String) -> Unit,
 ) {
-    val selected = item.canonicalPath in state.selectedPaths
     MediaThumbnail(
         item = item,
-        syncCoordinator = syncCoordinator,
-        selectionMode = state.selectionMode,
+        selectionMode = selectionMode,
         selected = selected,
         gridZoomScale = gridPinch.scale,
         gridThumbPx = gridThumbPx,
         gesturesEnabled = !gridPinch.blockItemGestures,
         onClick = {
-            if (state.selectionMode) {
+            if (selectionMode) {
                 viewModel.toggleSelection(item.canonicalPath)
             } else {
                 val encoded = URLEncoder.encode(
@@ -610,7 +620,6 @@ private fun TimelineSectionHeader(
 @Composable
 private fun MediaThumbnail(
     item: GalleryDisplayItem,
-    syncCoordinator: SyncCoordinator,
     selectionMode: Boolean,
     selected: Boolean,
     gridZoomScale: Float,
