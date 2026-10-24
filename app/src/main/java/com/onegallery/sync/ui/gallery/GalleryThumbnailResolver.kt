@@ -86,12 +86,14 @@ object GalleryThumbnailResolver {
         mediaCacheRepository: MediaCacheRepository,
         sizePx: Int,
         style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
+        diskCacheOnly: Boolean = false,
     ): Any? {
         val isVideo = item.kind == MediaKind.VIDEO
         val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
         cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
+        if (diskCacheOnly) return null
         if (filmstripVideo && item.localUri != null) {
             GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
         }

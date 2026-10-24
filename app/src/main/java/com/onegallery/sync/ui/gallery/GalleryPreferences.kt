@@ -59,6 +59,11 @@ class GalleryPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_LOG_PERF, false)
         set(value) = prefs.edit().putBoolean(KEY_LOG_PERF, value).apply()
 
+    /** Durante a rolagem da grade: só JPEG em cache; decode/rede pesado ao parar. */
+    var zeroDecodeWhileScrolling: Boolean
+        get() = prefs.getBoolean(KEY_ZERO_DECODE_SCROLL, true)
+        set(value) = prefs.edit().putBoolean(KEY_ZERO_DECODE_SCROLL, value).apply()
+
     companion object {
         private const val KEY_SORT = "sort_order"
         private const val KEY_ALBUM_SORT = "album_sort"
@@ -67,5 +72,6 @@ class GalleryPreferences(context: Context) {
         private const val KEY_EXPERIMENTAL_MEDIA_LAB = "experimental_media_detail_lab"
         private const val KEY_BROWSE_ONLY_WITH_THUMB = "browse_only_items_with_thumbnail"
         private const val KEY_LOG_PERF = "log_performance_traces"
+        private const val KEY_ZERO_DECODE_SCROLL = "zero_decode_while_scrolling"
     }
 }

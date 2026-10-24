@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -27,6 +28,7 @@ import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.ui.theme.OneDriveBlue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 
 enum class GalleryThumbnailStyle {
@@ -65,12 +67,16 @@ fun GalleryThumbnailImage(
             GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
         )
     }
+    val isGrid = style == GalleryThumbnailStyle.Grid
+    val zeroDecodeOnScroll = LocalZeroDecodeGridScroll.current
+    val scrollLocked = isGrid && LocalGalleryGridScrolling.current && zeroDecodeOnScroll
+    val gpuThumbStyle = isGrid || style == GalleryThumbnailStyle.Filmstrip
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
-        mutableStateOf(style == GalleryThumbnailStyle.Grid)
+        mutableStateOf(gpuThumbStyle)
     }
 
     LaunchedEffect(displayData) {
-        allowHardwareBitmap = style == GalleryThumbnailStyle.Grid
+        allowHardwareBitmap = gpuThumbStyle
     }
 
     LaunchedEffect(
@@ -96,6 +102,9 @@ fun GalleryThumbnailImage(
                 item,
             )
         }
+        val diskOnly = isGrid &&
+            zeroDecodeOnScroll &&
+            GalleryGridScrollGate.isUserScrollingGrid
         try {
             withContext(Dispatchers.IO) {
                 GalleryThumbnailResolver.resolveForGrid(
@@ -105,6 +114,7 @@ fun GalleryThumbnailImage(
                     mediaCacheRepository = mediaCacheRepository,
                     sizePx = sizePx,
                     style = style,
+                    diskCacheOnly = diskOnly,
                 )
             }?.let { resolved ->
                 displayData = resolved
@@ -114,13 +124,56 @@ fun GalleryThumbnailImage(
         }
     }
 
+    if (isGrid && zeroDecodeOnScroll) {
+        LaunchedEffect(item.canonicalPath) {
+            snapshotFlow { GalleryGridScrollGate.isUserScrollingGrid }
+                .distinctUntilChanged()
+                .collect { scrolling ->
+                    if (scrolling) return@collect
+                    if (displayData is java.io.File &&
+                        !GalleryThumbnailResolver.isStaleDisplayData(
+                            item,
+                            displayData,
+                            mediaCacheRepository,
+                        )
+                    ) {
+                        return@collect
+                    }
+                    withContext(Dispatchers.IO) {
+                        GalleryThumbnailResolver.resolveForGrid(
+                            context = context,
+                            item = item,
+                            thumbnailCache = thumbCache,
+                            mediaCacheRepository = mediaCacheRepository,
+                            sizePx = sizePx,
+                            style = style,
+                            diskCacheOnly = false,
+                        )
+                    }?.let { resolved ->
+                        displayData = resolved
+                    }
+                }
+        }
+    }
+
+    val paintModel = if (isGrid) {
+        GalleryThumbnailScrollPaint.paintModelForGridCell(
+            displayData = displayData,
+            item = item,
+            scrollLocked = scrollLocked,
+            mediaCacheRepository = mediaCacheRepository,
+        )
+    } else {
+        displayData
+    }
+
     val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
         item.kind == MediaKind.VIDEO &&
-        (displayData == null || displayData is android.net.Uri)
-    if (displayData != null && !filmstripVideoPending) {
-        val request = remember(displayData, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
+        (paintModel == null || paintModel is android.net.Uri)
+    if (paintModel != null && !filmstripVideoPending) {
+        val request = remember(paintModel, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
             ImageRequest.Builder(context)
-                .data(displayData)
+                .data(paintModel)
                 .size(sizePx)
                 .applyGalleryThumbnailLoading(style, allowHardwareBitmap)
                 .memoryCacheKey(
@@ -141,8 +194,9 @@ fun GalleryThumbnailImage(
             contentScale = contentScale,
             onState = { state ->
                 if (state is AsyncImagePainter.State.Error &&
-                    style == GalleryThumbnailStyle.Grid &&
-                    allowHardwareBitmap
+                    gpuThumbStyle &&
+                    allowHardwareBitmap &&
+                    !GalleryGridScrollGate.isUserScrollingGrid
                 ) {
                     allowHardwareBitmap = false
                 }
@@ -165,7 +219,7 @@ fun GalleryThumbnailImage(
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         MediaThumbnailPlaceholder(
             modifier = modifier,
-            showCloudIcon = !resolvingThumb &&
+            showCloudIcon = !resolvingThumb && !scrollLocked &&
                 (
                     cloudOnly ||
                         (
@@ -173,7 +227,7 @@ fun GalleryThumbnailImage(
                                 item.cloudState != CloudSyncState.PENDING_DOWNLOAD
                             )
                     ),
-            showLoading = resolvingThumb,
+            showLoading = resolvingThumb && !scrollLocked,
         )
     }
 }

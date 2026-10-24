@@ -459,6 +459,9 @@ class GalleryViewModel(
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
         syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
     ) { snapshot, _, syncRunning ->
+        if (GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
+            snapshot
+        } else {
         val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
         val refreshed = when {
             snapshot.catalogItems.size > 1_500 && !onlyThumb -> snapshot
@@ -479,6 +482,7 @@ class GalleryViewModel(
             )
             if (visible === refreshed.visibleItems) refreshed
             else refreshed.copy(visibleItems = visible)
+        }
         }
     }.distinctUntilChanged { previous, next ->
         previous.catalogItems === next.catalogItems &&
@@ -1382,7 +1386,7 @@ class GalleryViewModel(
         GalleryPerfLogger.log(
             "grid-thumb-prefetch count=${paths.size} cached=$cachedAny",
         )
-        if (cachedAny) {
+        if (cachedAny && !GalleryGridScrollGate.isUserScrollingGrid) {
             syncCoordinator.notifyGalleryDisplayRefresh()
         }
     }
