@@ -359,15 +359,19 @@ fun SettingsScreen(
                                         .fillMaxWidth()
                                         .padding(top = 8.dp),
                                 )
-                                if (syncState.isRunning) {
-                                    OutlinedButton(
-                                        onClick = { syncCoordinator.requestCancelSync() },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 8.dp),
-                                    ) {
-                                        Text("Parar sincronismo")
-                                    }
+                                OutlinedButton(
+                                    onClick = { syncCoordinator.requestCancelSync() },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                ) {
+                                    Text(
+                                        if (syncState.isRunning) {
+                                            "Parar sincronismo"
+                                        } else {
+                                            "Parar miniaturas"
+                                        },
+                                    )
                                 }
                             } else {
                                 Text(

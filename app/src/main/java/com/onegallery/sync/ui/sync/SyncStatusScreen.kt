@@ -292,11 +292,19 @@ fun SyncStatusScreen(
                         enabled = !syncBusy,
                         modifier = Modifier.weight(1f),
                     ) { Text("Sincronizar agora") }
-                    if (coordinatorState.isRunning) {
+                    if (syncBusy) {
                         OutlinedButton(
                             onClick = { syncCoordinator.requestCancelSync() },
                             modifier = Modifier.weight(1f),
-                        ) { Text("Parar sincronismo") }
+                        ) {
+                            Text(
+                                if (coordinatorState.isRunning) {
+                                    "Parar sincronismo"
+                                } else {
+                                    "Parar miniaturas"
+                                },
+                            )
+                        }
                     }
                 }
             }
