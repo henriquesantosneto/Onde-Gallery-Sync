@@ -82,6 +82,13 @@ fun VideoPlayerView(
         }
     }
 
+    LaunchedEffect(uri, isActive) {
+        if (isActive) {
+            muted = true
+            player.volume = 0f
+        }
+    }
+
     val shouldPlay = isActive && playWhenReady && userPlaying
 
     fun unmuteIfNeeded() {
@@ -94,7 +101,8 @@ fun VideoPlayerView(
         player.volume = if (muted) 0f else 1f
         onDispose { }
     }
-    DisposableEffect(shouldPlay) {
+    DisposableEffect(shouldPlay, muted) {
+        player.volume = if (muted) 0f else 1f
         if (shouldPlay) {
             player.playWhenReady = true
             player.play()

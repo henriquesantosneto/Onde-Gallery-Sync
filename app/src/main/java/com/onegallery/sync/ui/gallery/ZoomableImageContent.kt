@@ -17,6 +17,7 @@ fun ZoomableImageContent(
     transform: ZoomTransformHolder,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
+    interceptSingleTap: Boolean = true,
     onZoomActiveChanged: (Boolean) -> Unit = {},
     onSingleTap: () -> Unit = {},
     onContentAspectRatio: ((Float) -> Unit)? = null,
@@ -25,7 +26,7 @@ fun ZoomableImageContent(
         resetKey = model,
         transform = transform,
         modifier = modifier,
-        interceptSingleTap = true,
+        interceptSingleTap = interceptSingleTap,
         onZoomActiveChanged = onZoomActiveChanged,
         onSingleTap = onSingleTap,
     ) {

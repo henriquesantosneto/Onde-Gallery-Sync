@@ -102,7 +102,7 @@ fun LabSamsungStyleMediaPlayer(
 ) {
     val context = LocalContext.current
     val focusRequester = remember(uri) { FocusRequester() }
-    var muted by remember(uri) { mutableStateOf(false) }
+    var muted by remember(uri) { mutableStateOf(true) }
     var userPlaying by remember(uri) { mutableStateOf(true) }
     var positionMs by remember(uri) { mutableLongStateOf(0L) }
     var durationMs by remember(uri) { mutableLongStateOf(0L) }
@@ -128,7 +128,7 @@ fun LabSamsungStyleMediaPlayer(
             .apply {
                 setMediaItem(MediaItem.fromUri(uri))
                 repeatMode = Player.REPEAT_MODE_OFF
-                volume = 1f
+                volume = 0f
                 playWhenReady = false
                 prepare()
             }
@@ -141,6 +141,8 @@ fun LabSamsungStyleMediaPlayer(
     LaunchedEffect(isActive) {
         userPlaying = isActive
         if (isActive) {
+            muted = true
+            player.volume = 0f
             focusRequester.requestFocus()
         }
     }
@@ -152,7 +154,8 @@ fun LabSamsungStyleMediaPlayer(
         onDispose { }
     }
 
-    DisposableEffect(shouldPlay) {
+    DisposableEffect(shouldPlay, muted) {
+        player.volume = if (muted) 0f else 1f
         if (shouldPlay) {
             player.playWhenReady = true
             player.play()
