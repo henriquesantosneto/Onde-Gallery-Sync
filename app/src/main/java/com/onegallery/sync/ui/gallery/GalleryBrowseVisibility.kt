@@ -11,23 +11,34 @@ import com.onegallery.sync.sync.CloudSyncState
 fun GalleryDisplayItem.isVisibleInGalleryBrowse(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (showInBrowseGrid) return true
-    if (localUri != null) return true
+    if (GalleryMapper.isAudioFileName(displayName)) return false
+    if (hasBrowsableThumbnail(mediaCacheRepository)) return true
+    if (showInBrowseGrid && kind == MediaKind.IMAGE) return true
+    if (localUri != null && kind == MediaKind.IMAGE) return true
     if (cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null) return true
+    if (kind == MediaKind.VIDEO) return false
     if (localMediaId != null && !localReleasedForSpace) return true
-    if (!oneDriveItemId.isNullOrBlank()) return true
-    if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
+    if (!oneDriveItemId.isNullOrBlank()) return false
     return cloudState != CloudSyncState.LOCAL_ONLY
 }
 
-/** Com [browseOnlyItemsWithThumbnail]: exige miniatura salva ou foto local imediata (sem vídeo/nuvem “cru”). */
+/** Com [browseOnlyItemsWithThumbnail]: exige miniatura ou foto/vídeo local exibível na hora. */
 fun GalleryDisplayItem.isVisibleInGalleryBrowseWithThumbnail(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
-    if (!isVisibleInGalleryBrowse(mediaCacheRepository)) return false
-    if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
+    return hasBrowsableThumbnail(mediaCacheRepository)
+}
+
+/** Miniatura real (JPEG) ou URI local que a grade consegue pintar imediatamente. */
+fun GalleryDisplayItem.hasBrowsableThumbnail(
+    mediaCacheRepository: MediaCacheRepository,
+): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
-    if (kind == MediaKind.IMAGE && localUri != null && !localReleasedForSpace) return true
+    if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
+    if (localReleasedForSpace) return false
+    if (localUri != null) {
+        return kind == MediaKind.IMAGE || kind == MediaKind.VIDEO
+    }
     if (kind == MediaKind.IMAGE &&
         cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null
     ) {

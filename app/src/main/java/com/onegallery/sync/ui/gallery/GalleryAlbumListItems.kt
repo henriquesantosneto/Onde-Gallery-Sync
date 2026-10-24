@@ -9,11 +9,11 @@ fun itemsForAlbumListGrouping(
     return catalogItems
 }
 
-/** Locais: sempre o índice completo (evita álbuns duplicados / contagens pela janela da grade). */
+/** Locais: mesma regra da grade — só itens com miniatura quando o filtro está ativo. */
 fun itemsForPlaceAlbumGrouping(
     catalogItems: List<GalleryDisplayItem>,
     visibleItems: List<GalleryDisplayItem>,
 ): List<GalleryDisplayItem> {
-    if (catalogItems.isNotEmpty()) return catalogItems
-    return visibleItems
+    if (visibleItems.isNotEmpty()) return visibleItems
+    return catalogItems
 }

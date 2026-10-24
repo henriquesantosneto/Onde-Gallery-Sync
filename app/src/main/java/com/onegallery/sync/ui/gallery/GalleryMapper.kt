@@ -78,8 +78,14 @@ object GalleryMapper {
                     requireVideoAcceptable = kind == MediaKind.VIDEO,
                 )
         }
-        val hasThumb = placeholderThumb != null ||
-            (kind == MediaKind.IMAGE && localUri != null)
+        val hasThumb = when (kind) {
+            MediaKind.VIDEO ->
+                placeholderThumb != null ||
+                    (localUri != null && !entity.localReleasedForSpace)
+            else ->
+                placeholderThumb != null ||
+                    (localUri != null)
+        }
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }
             ?: entity.localModifiedAt?.takeIf { it > 0L }
@@ -103,6 +109,7 @@ object GalleryMapper {
             videoDurationMs = entity.videoDurationMs,
             localReleasedForSpace = entity.localReleasedForSpace,
             showInBrowseGrid = computeShowInBrowseGrid(
+                kind = kind,
                 localUri = localUri,
                 cachedOriginal = cached,
                 localMediaId = entity.localMediaId,
@@ -115,6 +122,7 @@ object GalleryMapper {
     }
 
     private fun computeShowInBrowseGrid(
+        kind: MediaKind,
         localUri: Uri?,
         cachedOriginal: File?,
         localMediaId: Long?,
@@ -123,11 +131,16 @@ object GalleryMapper {
         cloudState: CloudSyncState,
         hasThumb: Boolean,
     ): Boolean {
+        if (kind == MediaKind.VIDEO) {
+            if (hasThumb) return true
+            if (localUri != null && !localReleasedForSpace) return true
+            return false
+        }
         if (localUri != null) return true
         if (cachedOriginal != null) return true
         if (localMediaId != null && !localReleasedForSpace) return true
-        if (!oneDriveItemId.isNullOrBlank()) return true
         if (hasThumb) return true
+        if (!oneDriveItemId.isNullOrBlank()) return hasThumb
         return cloudState != CloudSyncState.LOCAL_ONLY
     }
 
@@ -173,7 +186,9 @@ object GalleryMapper {
             longitude = item.longitude,
             videoDurationMs = item.durationMs,
             localReleasedForSpace = false,
-            showInBrowseGrid = true,
+            showInBrowseGrid = kind != MediaKind.VIDEO ||
+                item.uri != null ||
+                placeholderThumb != null,
         )
     }
 

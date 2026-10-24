@@ -128,13 +128,14 @@ class GalleryCatalogSession {
                 item
             }
         }
-        if (!changed) return current
+        val catalog = if (changed) updated else current.catalogItems
         val visible = filterVisibleForGalleryBrowse(
-            updated,
+            catalog,
             mediaCacheRepository,
             onlyItemsWithThumbnail,
         )
-        val next = current.copy(catalogItems = updated, visibleItems = visible)
+        if (!changed && visible === current.visibleItems) return current
+        val next = current.copy(catalogItems = catalog, visibleItems = visible)
         publish(next)
         return next
     }

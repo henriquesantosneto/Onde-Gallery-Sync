@@ -54,25 +54,25 @@ fun hasCachedThumbnailFile(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
+    if (item.kind == MediaKind.VIDEO) {
+        mediaCacheRepository.galleryThumbnailResolved(
+            item.canonicalPath,
+            item.oneDriveItemId,
+            requireVideoAcceptable = true,
+        )?.let { return true }
+        val stub = item.cachedPlaceholderThumb
+        if (stub != null && VideoThumbnailHelper.isGalleryVideoThumbnailFile(stub)) {
+            return true
+        }
+        return false
+    }
     val cached = mediaCacheRepository.displayableThumbnailIfCached(
         item.canonicalPath,
         item.oneDriveItemId,
     )
-    if (cached != null) {
-        if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isAcceptableThumbnailFile(cached)) {
-            mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
-        } else {
-            return true
-        }
-    }
+    if (cached != null) return true
     val stub = item.cachedPlaceholderThumb
-    if (stub != null && mediaCacheRepository.isDisplayableGalleryThumbFile(stub)) {
-        if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isAcceptableThumbnailFile(stub)) {
-            return false
-        }
-        return true
-    }
-    return false
+    return stub != null && mediaCacheRepository.isDisplayableGalleryThumbFile(stub)
 }
 
 fun resolveAlbumCoverModel(
