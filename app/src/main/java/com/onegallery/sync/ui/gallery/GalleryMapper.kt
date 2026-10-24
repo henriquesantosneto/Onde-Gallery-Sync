@@ -79,7 +79,9 @@ object GalleryMapper {
                 )
         }
         val hasThumb = when (kind) {
-            MediaKind.VIDEO -> placeholderThumb != null
+            MediaKind.VIDEO ->
+                placeholderThumb != null ||
+                    (localUri != null && videoEntityAllowsLocalBrowseThumb(entity))
             else ->
                 placeholderThumb != null ||
                     (localUri != null)
@@ -134,6 +136,16 @@ object GalleryMapper {
         return GalleryLocalContentUri.resolve(entity, kind, localMediaRepository)
     }
 
+    private fun videoEntityAllowsLocalBrowseThumb(entity: SyncMetadataEntity): Boolean {
+        if (entity.localReleasedForSpace) return false
+        if (entity.cloudState == CloudSyncState.CLOUD_ONLY ||
+            entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            return false
+        }
+        return true
+    }
+
     private fun computeShowInBrowseGrid(
         kind: MediaKind,
         localUri: Uri?,
@@ -144,7 +156,16 @@ object GalleryMapper {
         cloudState: CloudSyncState,
         hasThumb: Boolean,
     ): Boolean {
-        if (kind == MediaKind.VIDEO) return hasThumb
+        if (kind == MediaKind.VIDEO) {
+            if (hasThumb) return true
+            if (localUri != null && !localReleasedForSpace &&
+                cloudState != CloudSyncState.CLOUD_ONLY &&
+                cloudState != CloudSyncState.PENDING_DOWNLOAD
+            ) {
+                return true
+            }
+            return false
+        }
         if (localUri != null) return true
         if (cachedOriginal != null) return true
         if (localMediaId != null && !localReleasedForSpace) return true
@@ -195,7 +216,9 @@ object GalleryMapper {
             longitude = item.longitude,
             videoDurationMs = item.durationMs,
             localReleasedForSpace = false,
-            showInBrowseGrid = kind != MediaKind.VIDEO || placeholderThumb != null,
+            showInBrowseGrid = kind != MediaKind.VIDEO ||
+                placeholderThumb != null ||
+                item.uri != null,
         )
     }
 

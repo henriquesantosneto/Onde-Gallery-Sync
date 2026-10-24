@@ -19,7 +19,7 @@ class GalleryDisplayBuildCache(
 ) {
     companion object {
         /** Bump quando a montagem de [GalleryDisplayItem] mudar (ex.: URI local). */
-        const val DISPLAY_ITEM_BUILD_VERSION = 5
+        const val DISPLAY_ITEM_BUILD_VERSION = 6
     }
     private data class Entry(val signature: Long, val item: GalleryDisplayItem)
 
