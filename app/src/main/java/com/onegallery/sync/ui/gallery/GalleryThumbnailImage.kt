@@ -221,8 +221,18 @@ fun GalleryThumbnailImage(
                 item.canonicalPath,
                 item.oneDriveItemId,
             )
+        val deferVideoUriDecode = isGrid &&
+            item.kind == MediaKind.VIDEO &&
+            candidate is Uri &&
+            zeroDecodeOnScroll &&
+            GalleryGridScrollGate.isUserScrollingGrid
         when {
-            candidate != null -> {
+            deferVideoUriDecode -> lastStableGridPaint
+            candidate != null && !(isGrid && item.kind == MediaKind.VIDEO && candidate is Uri) -> {
+                lastStableGridPaint = candidate
+                candidate
+            }
+            candidate is java.io.File || candidate is Bitmap || candidate is OneDriveCloudThumbnailKey -> {
                 lastStableGridPaint = candidate
                 candidate
             }

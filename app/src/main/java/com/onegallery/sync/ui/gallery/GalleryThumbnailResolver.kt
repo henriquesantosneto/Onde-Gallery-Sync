@@ -32,7 +32,9 @@ object GalleryThumbnailResolver {
                 }
             }
             cloudVideoCoilKey(item, forFilmstrip = isVideo)?.let { return it }
-            item.localUri?.let { uri -> return uri }
+            if (!isVideo) {
+                item.localUri?.let { uri -> return uri }
+            }
             return null
         }
         if (!filmstripVideo) {
@@ -119,7 +121,11 @@ object GalleryThumbnailResolver {
             ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
             ?.let { return it }
         if (item.localUri != null) {
-            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
+            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { model ->
+                if (model !is android.net.Uri) return model
+            }
+            VideoThumbnailHelper.captureFromContentUri(context, item.localUri, strictFrames = false)
+                ?.let { return it }
         }
         cloudVideoCoilKey(item, forFilmstrip = true)?.let { return it }
         cloudVideoCoilKey(item)?.let { return it }

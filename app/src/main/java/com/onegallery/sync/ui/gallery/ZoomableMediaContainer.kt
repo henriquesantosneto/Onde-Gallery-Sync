@@ -110,7 +110,14 @@ fun ZoomableMediaContainer(
                                     val delta = change.positionChange()
                                     if (delta != Offset.Zero) {
                                         sumMove += delta
-                                        if (sumMove.getDistance() >= touchSlop) {
+                                        val dist = sumMove.getDistance()
+                                        if (dist >= touchSlop) {
+                                            tapCandidate = false
+                                        } else if (
+                                            abs(sumMove.x) > abs(sumMove.y) * 1.15f &&
+                                            abs(sumMove.x) > touchSlop * 0.35f
+                                        ) {
+                                            // Deslize horizontal → pager / carrossel
                                             tapCandidate = false
                                         }
                                     }
