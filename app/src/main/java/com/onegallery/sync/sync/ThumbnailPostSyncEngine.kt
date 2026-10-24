@@ -14,6 +14,7 @@ internal interface ThumbnailPostSyncHost {
     fun refreshThumbnailPrefetchUiFlag()
     fun shouldPublishSyncActivityUi(): Boolean
     suspend fun publishFullPendingThumbnailQueueToUi(): Int
+    suspend fun trimThumbnailRunQueueUi(): Int
     fun isSyncCancelRequested(): Boolean
     suspend fun ensureNotCancelled()
     suspend fun ensureSyncMayContinue()

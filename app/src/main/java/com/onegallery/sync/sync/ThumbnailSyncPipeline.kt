@@ -14,6 +14,7 @@ internal interface ThumbnailSyncPipelineHost {
         alsoUpdateLastMessage: Boolean,
     )
     suspend fun publishFullPendingThumbnailQueueToUi(): Int
+    suspend fun trimThumbnailRunQueueUi(): Int
     fun clearActiveSyncItems()
     suspend fun notifyGalleryDisplayRefresh()
     suspend fun warmLocalItemsForThumbnailPass()
@@ -53,7 +54,6 @@ internal class ThumbnailSyncPipeline(
             )
         }
         yield()
-        host.publishFullPendingThumbnailQueueToUi()
         val rows = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
@@ -102,7 +102,7 @@ internal class ThumbnailSyncPipeline(
         }
         if (showProgress) {
             host.clearActiveSyncItems()
-            host.publishFullPendingThumbnailQueueToUi()
+            host.trimThumbnailRunQueueUi()
             host.setSyncProgress(
                 SyncProgressPhase.PREFETCH_THUMBNAILS,
                 "Miniaturas locais concluídas",
@@ -136,7 +136,6 @@ internal class ThumbnailSyncPipeline(
             .take(maxPerRun)
             .toList()
         if (rows.isEmpty()) return
-        host.publishFullPendingThumbnailQueueToUi()
         host.setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Miniaturas do OneDrive…",
@@ -155,7 +154,7 @@ internal class ThumbnailSyncPipeline(
             )
         }
         host.clearActiveSyncItems()
-        host.publishFullPendingThumbnailQueueToUi()
+        host.trimThumbnailRunQueueUi()
         host.setSyncProgress(
             SyncProgressPhase.PREFETCH_THUMBNAILS,
             "Leva OneDrive concluída",

@@ -21,7 +21,10 @@ internal class GalleryThumbnailIndex(
         return syncMetadataDao.getAll().count { row -> thumbnails.needsThumbnailPrefetch(row) }
     }
 
-    suspend fun buildMissingBatch(maxPerRun: Int): List<SyncMetadataEntity> {
+    suspend fun buildMissingBatch(
+        maxPerRun: Int,
+        queuePathOrder: List<String>? = null,
+    ): List<SyncMetadataEntity> {
         val missing = syncMetadataDao.getAll()
             .asSequence()
             .filter { row ->
@@ -32,6 +35,15 @@ internal class GalleryThumbnailIndex(
             .sortedWith(missingThumbnailPrefetchComparator)
             .toList()
         if (missing.isEmpty()) return emptyList()
+        if (!queuePathOrder.isNullOrEmpty()) {
+            val missingByPath = missing.associateBy { it.canonicalPath }
+            val fromQueue = queuePathOrder.mapNotNull { missingByPath[it] }.take(maxPerRun)
+            if (fromQueue.size >= maxPerRun) return fromQueue
+            val picked = fromQueue.map { it.canonicalPath }.toHashSet()
+            val tail = missing.filter { it.canonicalPath !in picked }
+                .take(maxPerRun - fromQueue.size)
+            return fromQueue + tail
+        }
         val cursor = syncPreferences.thumbPrefetchCursor % missing.size
         val rotated = missing.drop(cursor) + missing.take(cursor)
         val batch = rotated.take(maxPerRun)

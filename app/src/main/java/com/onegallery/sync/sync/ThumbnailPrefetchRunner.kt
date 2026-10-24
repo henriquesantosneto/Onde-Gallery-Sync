@@ -22,6 +22,7 @@ internal interface ThumbnailPrefetchHost {
     suspend fun ensureSyncMayContinue()
     fun shouldPublishSyncActivityUi(): Boolean
     suspend fun publishFullPendingThumbnailQueueToUi(): Int
+    suspend fun publishThumbnailBatchAtFront(batch: List<SyncMetadataEntity>): Int
     fun upsertActiveSyncItem(item: ActiveSyncItem, force: Boolean)
     fun removeActiveSyncItem(canonicalPath: String)
     fun removeFromRunQueue(canonicalPath: String)
@@ -67,7 +68,7 @@ internal class ThumbnailPrefetchRunner(
         if (rows.isEmpty()) return 0
         if (honorSyncCancel && host.isSyncCancelRequested()) return 0
         val globalTotalAtStart = if (publishUi && host.shouldPublishSyncActivityUi()) {
-            host.publishFullPendingThumbnailQueueToUi().coerceAtLeast(rows.size)
+            host.publishThumbnailBatchAtFront(rows).coerceAtLeast(rows.size)
         } else {
             rows.size
         }

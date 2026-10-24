@@ -101,6 +101,8 @@ data class SyncUiState(
     val activeItems: List<ActiveSyncItem> = emptyList(),
     /** Fila prevista/em andamento nesta execução (uploads reais, não só PENDING_* no Room). */
     val runQueue: List<SyncQueueDisplayRow> = emptyList(),
+    /** Total no índice (miniaturas/GPS); a lista pode estar limitada a 1500 linhas. */
+    val runQueueGlobalPending: Int? = null,
     /** Contagem de miniaturas (atualizada após sync / prefetch e ao abrir Sync). */
     val thumbnailStats: ThumbnailCacheStats? = null,
     /** Prefetch de miniaturas (sync ou 2º plano com tela Sync aberta). */
@@ -969,15 +971,25 @@ class SyncCoordinator(
     }
 
     private fun removeFromRunQueue(canonicalPath: String) {
-        val next = _state.value.runQueue.filter { it.canonicalPath != canonicalPath }
-        if (next.size != _state.value.runQueue.size) {
-            val apply = { _state.value = _state.value.copy(runQueue = next) }
+        val prev = _state.value.runQueue
+        val next = prev.filter { it.canonicalPath != canonicalPath }
+        if (next.size != prev.size) {
+            val apply = {
+                _state.update { state ->
+                    val global = state.runQueueGlobalPending?.let { pending ->
+                        (pending - 1).coerceAtLeast(0)
+                    }
+                    state.copy(runQueue = next, runQueueGlobalPending = global)
+                }
+            }
             if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
         }
     }
 
     private fun clearRunQueueOnly() {
-        val apply = { _state.value = _state.value.copy(runQueue = emptyList()) }
+        val apply = {
+            _state.update { it.copy(runQueue = emptyList(), runQueueGlobalPending = null) }
+        }
         if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
     }
 
@@ -2797,17 +2809,59 @@ class SyncCoordinator(
     private suspend fun allPendingThumbnailEntitiesForUi(): List<SyncMetadataEntity> =
         galleryThumbnailIndex.allPendingEntitiesForUi()
 
-    /** Atualiza [SyncCoordinatorState.runQueue] com a fila total de miniaturas pendentes. */
+    /** Reconstrói a fila a partir do índice (início de leva / recuperação). */
     private suspend fun publishFullPendingThumbnailQueueToUi(): Int {
-        if (!shouldPublishSyncActivityUi()) return 0
-        val rows = allPendingThumbnailEntitiesForUi()
-        val total = rows.size
-        val capped = if (rows.size > GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP) {
-            rows.take(GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP)
-        } else {
-            rows
+        return refreshThumbnailRunQueueUi(ThumbnailRunQueueUiMode.FULL)
+    }
+
+    /** Remove da lista só o que já tem miniatura — sem repor itens no final. */
+    private suspend fun trimThumbnailRunQueueUi(): Int {
+        return refreshThumbnailRunQueueUi(ThumbnailRunQueueUiMode.TRIM)
+    }
+
+    /** Coloca a leva atual no topo da fila (abaixo dos downloads ativos na UI). */
+    private suspend fun publishThumbnailBatchAtFront(batch: List<SyncMetadataEntity>): Int {
+        return refreshThumbnailRunQueueUi(ThumbnailRunQueueUiMode.BATCH_AT_FRONT, batch)
+    }
+
+    private enum class ThumbnailRunQueueUiMode { FULL, TRIM, BATCH_AT_FRONT }
+
+    private suspend fun refreshThumbnailRunQueueUi(
+        mode: ThumbnailRunQueueUiMode,
+        batch: List<SyncMetadataEntity> = emptyList(),
+    ): Int {
+        if (!shouldPublishSyncActivityUi()) return galleryThumbnailIndex.countMissing()
+        val total = galleryThumbnailIndex.countMissing()
+        val cap = GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP
+        val allPending = allPendingThumbnailEntitiesForUi()
+        val pendingPathSet = allPending.map { it.canonicalPath }.toHashSet()
+        val entities = when (mode) {
+            ThumbnailRunQueueUiMode.FULL -> allPending.take(cap)
+            ThumbnailRunQueueUiMode.TRIM -> {
+                val fromQueue = _state.value.runQueue.mapNotNull { row ->
+                    syncMetadataDao.getByCanonicalPath(row.canonicalPath)
+                }.filter { it.canonicalPath in pendingPathSet }
+                if (fromQueue.isNotEmpty()) {
+                    fromQueue
+                } else {
+                    allPending.take(cap)
+                }
+            }
+            ThumbnailRunQueueUiMode.BATCH_AT_FRONT -> {
+                if (batch.isEmpty()) {
+                    allPending.take(cap)
+                } else {
+                    val batchPaths = batch.map { it.canonicalPath }.toHashSet()
+                    val rest = allPending.filter { it.canonicalPath !in batchPaths }
+                    (batch + rest).take(cap)
+                }
+            }
         }
-        setRunQueueFromEntities(capped, thumbnailQueue = true)
+        setRunQueueFromEntities(entities, thumbnailQueue = true)
+        val applyGlobal = {
+            _state.update { it.copy(runQueueGlobalPending = total) }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) applyGlobal() else mainHandler.post(applyGlobal)
         return total
     }
 
@@ -2815,8 +2869,14 @@ class SyncCoordinator(
         return countIndexedMissingThumbnails()
     }
 
-    private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> =
-        galleryThumbnailIndex.buildMissingBatch(maxPerRun)
+    private suspend fun buildMissingThumbnailEntities(maxPerRun: Int): List<SyncMetadataEntity> {
+        val queueOrder = if (shouldPublishSyncActivityUi() && _state.value.runQueue.isNotEmpty()) {
+            _state.value.runQueue.map { it.canonicalPath }
+        } else {
+            null
+        }
+        return galleryThumbnailIndex.buildMissingBatch(maxPerRun, queueOrder)
+    }
 
     private suspend fun countIndexedMissingThumbnails(): Int =
         galleryThumbnailIndex.countMissing()
@@ -4382,6 +4442,12 @@ class SyncCoordinator(
 
         override suspend fun publishFullPendingThumbnailQueueToUi(): Int =
             this@SyncCoordinator.publishFullPendingThumbnailQueueToUi()
+
+        override suspend fun trimThumbnailRunQueueUi(): Int =
+            this@SyncCoordinator.trimThumbnailRunQueueUi()
+
+        override suspend fun publishThumbnailBatchAtFront(batch: List<SyncMetadataEntity>): Int =
+            this@SyncCoordinator.publishThumbnailBatchAtFront(batch)
 
         override fun upsertActiveSyncItem(item: ActiveSyncItem, force: Boolean) {
             this@SyncCoordinator.upsertActiveSyncItem(item, force)
