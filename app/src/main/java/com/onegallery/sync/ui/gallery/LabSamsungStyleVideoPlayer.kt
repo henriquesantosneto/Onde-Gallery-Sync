@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -196,8 +198,8 @@ fun LabSamsungStyleMediaPlayer(
         else -> 0f
     }
 
-    val pillBottom = bottomChromeInset + 8.dp
-    val sliderBottom = bottomChromeInset - 4.dp
+    val sliderBottom = bottomChromeInset + 6.dp
+    val pillBottom = bottomChromeInset + 42.dp
 
     Box(
         modifier = modifier
@@ -359,27 +361,36 @@ private fun LabPlaybackControlPill(
     ) {
         Row(
             modifier = Modifier
-                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(28.dp))
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(22.dp))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onTogglePlay) {
+            IconButton(
+                onClick = onTogglePlay,
+                modifier = Modifier.size(36.dp),
+            ) {
                 Icon(
                     imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
                     tint = Color.White,
+                    modifier = Modifier.size(22.dp),
                 )
             }
             Text(
                 text = "${formatPlaybackClock(positionMs)} / ${formatPlaybackClock(durationMs)}",
                 color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
             )
             if (showMuteInPill) {
-                IconButton(onClick = onToggleMute) {
+                IconButton(
+                    onClick = onToggleMute,
+                    modifier = Modifier.size(36.dp),
+                ) {
                     Icon(
                         imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
                         contentDescription = if (muted) "Ativar som" else "Silenciar",
                         tint = if (muted) Color.White.copy(alpha = 0.65f) else Color.White,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }

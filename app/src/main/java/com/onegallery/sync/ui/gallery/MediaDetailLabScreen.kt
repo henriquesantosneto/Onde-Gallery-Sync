@@ -13,16 +13,16 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,8 +43,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.SyncCoordinator
-import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -53,7 +53,7 @@ import kotlinx.coroutines.withContext
  * Visualizador experimental (estilo Samsung). Rota separada — o [MediaDetailScreen] padrão
  * permanece intacto até você decidir trocar.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MediaDetailLabScreen(
     initialCanonicalPath: String,
@@ -113,6 +113,32 @@ fun MediaDetailLabScreen(
     ) { pagerPaths.size.coerceAtLeast(1) }
 
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
+    val currentItem = currentPath?.let { path ->
+        preferDisplayItemForCloudBadge(null, itemsByPath[path], context)
+    }
+    val currentSelected = currentPath != null && currentPath in state.selectedPaths
+    val barTitle = currentItem?.displayName ?: "Mídia"
+    val barSubtitle = if (pagerPaths.size > 1) {
+        "${pagerState.currentPage + 1} / ${pagerPaths.size}"
+    } else {
+        null
+    }
+
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showMoveDialog by remember { mutableStateOf(false) }
+    var showAllFilesForDelete by remember { mutableStateOf(false) }
+    var showAllFilesForRelease by remember { mutableStateOf(false) }
+    var pendingDeletePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingDeleteOnRemoved by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingReleasePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingReleaseOnDone by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun leaveDetail() {
+        viewModel.notifyLocalDisplayChanged()
+        onBack()
+    }
+
     val filmstripItems = remember(pagerPaths, itemsByPath, contextItems) {
         val pool = itemsByPath.ifEmpty { contextItems.associateBy { it.canonicalPath } }
         pagerPaths.mapNotNull { path -> pool[path] }
@@ -169,12 +195,17 @@ fun MediaDetailLabScreen(
 
     BackHandler {
         when {
+            showAllFilesForRelease -> showAllFilesForRelease = false
+            showAllFilesForDelete -> showAllFilesForDelete = false
+            showDeleteConfirm -> showDeleteConfirm = false
+            showMoveDialog -> showMoveDialog = false
+            state.selectionMode -> viewModel.clearSelection()
             detailsPanelOpen -> {
                 detailsSettleFraction = 0f
                 detailsDragFraction = 0f
                 detailsDragging = false
             }
-            else -> onBack()
+            else -> leaveDetail()
         }
     }
 
@@ -218,65 +249,11 @@ fun MediaDetailLabScreen(
         onDragEnd = onPanelDragEnd,
     )
 
-    Scaffold(
-        contentWindowInsets = ZeroScaffoldContentInsets,
-        containerColor = Color.Black,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = buildString {
-                            append("Player lab")
-                            currentPath?.let { path ->
-                                itemsByPath[path]?.displayName?.let { name ->
-                                    append(" · ")
-                                    append(name)
-                                }
-                            }
-                        },
-                        maxLines = 1,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            if (detailsPanelOpen) {
-                                detailsSettleFraction = 0f
-                                detailsDragFraction = 0f
-                                detailsDragging = false
-                            } else {
-                                onBack()
-                            }
-                        },
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
-                    }
-                },
-                actions = {
-                    if (currentPath != null) {
-                        IconButton(onClick = { openDetailsToSimple() }) {
-                            Icon(
-                                Icons.Outlined.Info,
-                                contentDescription = "Detalhes",
-                                tint = Color.White,
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black.copy(alpha = 0.55f),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                ),
-            )
-        },
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(Color.Black),
-        ) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -322,6 +299,114 @@ fun MediaDetailLabScreen(
                             .navigationBarsPadding(),
                     )
                 }
+
+                MediaDetailTransparentTopBar(
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    title = barTitle,
+                    subtitle = barSubtitle,
+                    belowActionsEnd = currentItem?.let { statusItem ->
+                        {
+                            MediaDetailTopBarCloudStatus(
+                                item = statusItem,
+                                recalling = false,
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = {
+                                when {
+                                    detailsPanelOpen -> {
+                                        detailsSettleFraction = 0f
+                                        detailsDragFraction = 0f
+                                        detailsDragging = false
+                                    }
+                                    state.selectionMode -> viewModel.clearSelection()
+                                    else -> leaveDetail()
+                                }
+                            },
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
+                        }
+                    },
+                    actions = {
+                        if (state.selectionMode) {
+                            IconButton(onClick = { showMoveDialog = true }) {
+                                Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
+                            }
+                            if (state.selectedPaths.isNotEmpty()) {
+                                IconButton(onClick = { showDeleteConfirm = true }) {
+                                    Icon(
+                                        Icons.Outlined.Delete,
+                                        contentDescription = "Excluir",
+                                        tint = Color.White,
+                                    )
+                                }
+                                MediaGalleryOverflowMenuButton(
+                                    expanded = showOverflowMenu,
+                                    onExpandedChange = { showOverflowMenu = it },
+                                    showDetails = detailPaths.isNotEmpty(),
+                                    onDetails = { openDetailsToSimple() },
+                                    onFreeSpace = {
+                                        val paths = state.selectedPaths.toList()
+                                        if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                                            viewModel.releaseLocalSpaceSelected()
+                                        } else {
+                                            pendingReleasePaths = paths
+                                            pendingReleaseOnDone = null
+                                            showAllFilesForRelease = true
+                                        }
+                                    },
+                                )
+                            }
+                            TextButton(onClick = { viewModel.clearSelection() }) {
+                                Text("Cancelar", color = Color.White)
+                            }
+                        } else if (currentPath != null) {
+                            IconButton(
+                                onClick = {
+                                    if (state.selectionMode) {
+                                        if (currentSelected && state.selectedPaths.size == 1) {
+                                            viewModel.clearSelection()
+                                        } else {
+                                            viewModel.toggleSelection(currentPath)
+                                        }
+                                    } else {
+                                        viewModel.enterSelectionMode(currentPath)
+                                    }
+                                },
+                            ) {
+                                Icon(
+                                    if (currentSelected) Icons.Outlined.CheckCircle
+                                    else Icons.Outlined.RadioButtonUnchecked,
+                                    contentDescription = "Selecionar",
+                                )
+                            }
+                            IconButton(onClick = { showDeleteConfirm = true }) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = "Excluir",
+                                    tint = Color.White,
+                                )
+                            }
+                            MediaGalleryOverflowMenuButton(
+                                expanded = showOverflowMenu,
+                                onExpandedChange = { showOverflowMenu = it },
+                                showDetails = detailPaths.isNotEmpty(),
+                                onDetails = { openDetailsToSimple() },
+                                onFreeSpace = {
+                                    if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                                        viewModel.releaseSingle(currentPath)
+                                    } else {
+                                        pendingReleasePaths = listOf(currentPath)
+                                        pendingReleaseOnDone = null
+                                        showAllFilesForRelease = true
+                                    }
+                                },
+                            )
+                        }
+                    },
+                )
             }
 
             if (showDetailsSheet) {
@@ -354,7 +439,126 @@ fun MediaDetailLabScreen(
                         ),
                 )
             }
+    }
+
+    if (showDeleteConfirm) {
+        val deleteCount = if (state.selectionMode && state.selectedPaths.isNotEmpty()) {
+            state.selectedPaths.size
+        } else if (currentPath != null) {
+            1
+        } else {
+            0
         }
+        if (deleteCount > 0) {
+            DeleteSelectionDialog(
+                count = deleteCount,
+                onDismiss = { showDeleteConfirm = false },
+                onConfirm = {
+                    showDeleteConfirm = false
+                    val paths = when {
+                        state.selectionMode && state.selectedPaths.isNotEmpty() ->
+                            state.selectedPaths.toList()
+                        currentPath != null -> listOf(currentPath)
+                        else -> emptyList()
+                    }
+                    if (paths.isEmpty()) return@DeleteSelectionDialog
+                    val onRemoved = if (paths.size == 1 && currentPath != null) {
+                        { leaveDetail() }
+                    } else {
+                        null
+                    }
+                    if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
+                        if (onRemoved != null) {
+                            viewModel.deleteSingle(paths.single(), onRemoved)
+                        } else {
+                            viewModel.deleteSelected()
+                        }
+                    } else {
+                        pendingDeletePaths = paths
+                        pendingDeleteOnRemoved = onRemoved
+                        showAllFilesForDelete = true
+                    }
+                },
+            )
+        }
+    }
+
+    if (showAllFilesForDelete && pendingDeletePaths.isNotEmpty()) {
+        AllFilesAccessForLocalRemovalDialog(
+            count = pendingDeletePaths.size,
+            purpose = LocalMediaRemovalPrompt.DELETE,
+            onDismiss = { showAllFilesForDelete = false },
+            onOpenSettings = {
+                showAllFilesForDelete = false
+                viewModel.queueDeleteAfterAllFilesAccess(
+                    pendingDeletePaths,
+                    pendingDeleteOnRemoved,
+                )
+                if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+                    viewModel.showMessage(
+                        "Abra Configurações → Apps → One Gallery Sync → Permissões → Arquivos.",
+                    )
+                }
+                pendingDeletePaths = emptyList()
+                pendingDeleteOnRemoved = null
+            },
+            onContinueWithSystemPrompt = {
+                showAllFilesForDelete = false
+                val paths = pendingDeletePaths
+                val onRemoved = pendingDeleteOnRemoved
+                pendingDeletePaths = emptyList()
+                pendingDeleteOnRemoved = null
+                if (paths.size == 1 && onRemoved != null) {
+                    viewModel.deleteSingle(paths.single(), onRemoved)
+                } else {
+                    viewModel.deleteSelected()
+                }
+            },
+        )
+    }
+
+    if (showAllFilesForRelease && pendingReleasePaths.isNotEmpty()) {
+        AllFilesAccessForLocalRemovalDialog(
+            count = pendingReleasePaths.size,
+            purpose = LocalMediaRemovalPrompt.RELEASE_SPACE,
+            onDismiss = { showAllFilesForRelease = false },
+            onOpenSettings = {
+                showAllFilesForRelease = false
+                viewModel.queueReleaseAfterAllFilesAccess(
+                    pendingReleasePaths,
+                    pendingReleaseOnDone,
+                )
+                if (!MediaStorageAccess.openAllFilesAccessSettings(context)) {
+                    viewModel.showMessage(
+                        "Abra Configurações → Apps → One Gallery Sync → Permissões → Arquivos.",
+                    )
+                }
+                pendingReleasePaths = emptyList()
+                pendingReleaseOnDone = null
+            },
+            onContinueWithSystemPrompt = {
+                showAllFilesForRelease = false
+                pendingReleasePaths = emptyList()
+                pendingReleaseOnDone = null
+            },
+        )
+    }
+
+    if (showMoveDialog) {
+        MoveToAlbumDialog(
+            userAlbumTitles = state.userAlbums.map { it.title },
+            onDismiss = { showMoveDialog = false },
+            onMove = { album ->
+                showMoveDialog = false
+                viewModel.moveSelectedToAlbum(album)
+            },
+            onCreateAlbum = { name ->
+                viewModel.createUserAlbum(name) { title ->
+                    showMoveDialog = false
+                    viewModel.moveSelectedToAlbum(title)
+                }
+            },
+        )
     }
 }
 

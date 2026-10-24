@@ -48,6 +48,8 @@ fun GalleryThumbnailImage(
     style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
     sizePx: Int,
     onContentAspectRatio: ((Float) -> Unit)? = null,
+    /** Faixa do detalhe: incrementar após prefetch para recarregar JPEG de vídeo. */
+    refreshNonce: Int = 0,
 ) {
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
@@ -64,7 +66,16 @@ fun GalleryThumbnailImage(
         )
     }
 
-    LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx, style) {
+    LaunchedEffect(
+        item.canonicalPath,
+        item.localUri,
+        item.thumbnailModel,
+        item.oneDriveItemId,
+        item.cachedPlaceholderThumb?.absolutePath,
+        sizePx,
+        style,
+        refreshNonce,
+    ) {
         if (displayData is java.io.File &&
             !GalleryThumbnailResolver.isStaleDisplayData(item, displayData, mediaCacheRepository)
         ) {
