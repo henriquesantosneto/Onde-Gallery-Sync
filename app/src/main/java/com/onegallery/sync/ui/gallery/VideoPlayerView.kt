@@ -43,6 +43,8 @@ fun VideoPlayerView(
     playWhenReady: Boolean = true,
     /** false = toques passam ao pager (detalhe com swipe horizontal). */
     usePlaybackControls: Boolean = true,
+    /** Pausa imediatamente ao trocar de página no carrossel. */
+    isActive: Boolean = true,
 ) {
     val context = LocalContext.current
     var muted by remember(uri) { mutableStateOf(true) }
@@ -53,7 +55,7 @@ fun VideoPlayerView(
             setMediaItem(MediaItem.fromUri(uri))
             repeatMode = Player.REPEAT_MODE_OFF
             volume = 0f
-            this.playWhenReady = playWhenReady
+            playWhenReady = false
             prepare()
         }
     }
@@ -68,9 +70,24 @@ fun VideoPlayerView(
         player.volume = if (muted) 0f else 1f
         onDispose { }
     }
+    DisposableEffect(isActive, playWhenReady) {
+        if (isActive && playWhenReady) {
+            player.playWhenReady = true
+            player.play()
+        } else {
+            player.playWhenReady = false
+            player.pause()
+        }
+        onDispose { }
+    }
     DisposableEffect(uri) {
-        focusRequester.requestFocus()
-        onDispose { player.release() }
+        if (isActive) {
+            focusRequester.requestFocus()
+        }
+        onDispose {
+            player.stop()
+            player.release()
+        }
     }
     Box(
         modifier = modifier
@@ -108,18 +125,30 @@ fun VideoPlayerView(
                 }
             },
         )
-        IconButton(
-            onClick = { muted = !muted },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp)
-                .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-        ) {
-            Icon(
-                imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
-                contentDescription = if (muted) "Ativar som" else "Silenciar",
-                tint = Color.White,
-            )
+        if (isActive) {
+            IconButton(
+                onClick = { muted = !muted },
+                modifier = Modifier
+                    .align(
+                        if (usePlaybackControls) {
+                            Alignment.TopEnd
+                        } else {
+                            Alignment.BottomEnd
+                        },
+                    )
+                    .padding(
+                        end = 12.dp,
+                        top = if (usePlaybackControls) 12.dp else 0.dp,
+                        bottom = if (usePlaybackControls) 0.dp else 96.dp,
+                    )
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+            ) {
+                Icon(
+                    imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                    contentDescription = if (muted) "Ativar som" else "Silenciar",
+                    tint = Color.White,
+                )
+            }
         }
     }
 }

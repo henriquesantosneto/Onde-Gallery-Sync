@@ -257,6 +257,18 @@ fun MediaDetailScreen(
         activePageRecalling = false
     }
 
+    var activeVideoPlaybackPath by remember(pagerPaths) {
+        mutableStateOf(pagerPaths.getOrNull(pagerState.currentPage))
+    }
+    LaunchedEffect(pagerState.currentPage, pagerPaths) {
+        activeVideoPlaybackPath = pagerPaths.getOrNull(pagerState.currentPage)
+    }
+    LaunchedEffect(pagerState.isScrollInProgress, pagerState.currentPage, pagerPaths) {
+        if (pagerState.isScrollInProgress) {
+            activeVideoPlaybackPath = pagerPaths.getOrNull(pagerState.currentPage)
+        }
+    }
+
     val chromeVisible = !immersive
 
     val filmstripItems = remember(pagerPaths, itemsByPath, contextItems) {
@@ -363,6 +375,7 @@ fun MediaDetailScreen(
                     canonicalPath = path,
                     liveItem = live,
                     isActivePage = page == pagerState.currentPage,
+                    shouldPlayVideo = path == activeVideoPlaybackPath,
                     suppressAutoRecall = path in suppressAutoRecallPaths,
                     suppressAutoRecallRevision = suppressAutoRecallRevision,
                     syncCoordinator = syncCoordinator,
@@ -401,6 +414,7 @@ fun MediaDetailScreen(
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding(),
                     onSelectPath = { path ->
+                        activeVideoPlaybackPath = path
                         val index = pagerPaths.indexOf(path)
                         if (index >= 0) {
                             pagerScope.launch {
@@ -718,6 +732,7 @@ fun MediaDetailScreen(
 private fun VideoPlayerWithZoom(
     playback: android.net.Uri,
     canonicalPath: String,
+    shouldPlayVideo: Boolean,
     zoomTransform: ZoomTransformHolder,
     onZoomActiveChanged: (Boolean) -> Unit,
     onToggleImmersive: () -> Unit,
@@ -733,8 +748,9 @@ private fun VideoPlayerWithZoom(
         VideoPlayerView(
             uri = playback,
             modifier = Modifier.fillMaxSize(),
-            playWhenReady = true,
+            playWhenReady = shouldPlayVideo,
             usePlaybackControls = false,
+            isActive = shouldPlayVideo,
         )
     }
 }
@@ -745,6 +761,7 @@ private fun MediaDetailPage(
     canonicalPath: String,
     liveItem: GalleryDisplayItem?,
     isActivePage: Boolean,
+    shouldPlayVideo: Boolean,
     suppressAutoRecall: Boolean,
     suppressAutoRecallRevision: Int,
     syncCoordinator: SyncCoordinator,
@@ -962,6 +979,7 @@ private fun MediaDetailPage(
                                 VideoPlayerWithZoom(
                                     playback = playback,
                                     canonicalPath = canonicalPath,
+                                    shouldPlayVideo = shouldPlayVideo,
                                     zoomTransform = zoomTransform,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onToggleImmersive = onToggleImmersive,

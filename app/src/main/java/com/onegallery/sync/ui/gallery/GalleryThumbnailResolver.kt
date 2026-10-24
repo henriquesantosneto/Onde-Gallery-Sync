@@ -12,32 +12,44 @@ object GalleryThumbnailResolver {
     fun initialDisplayData(
         item: GalleryDisplayItem,
         mediaCacheRepository: MediaCacheRepository,
+        style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
     ): Any? {
-        item.localUri?.let { uri ->
-            return uri
+        val isVideo = item.kind == MediaKind.VIDEO
+        val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
+        if (!filmstripVideo) {
+            item.localUri?.let { uri -> return uri }
         }
-        mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
-            ?.let { cached ->
-                if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)) {
-                    mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
-                } else {
-                    return cached
-                }
-            }
-        val thumb = item.cachedPlaceholderThumb
-        if (thumb != null && mediaCacheRepository.isDisplayableGalleryThumbFile(thumb)) {
-            if (item.kind != MediaKind.VIDEO ||
-                VideoThumbnailHelper.isGalleryVideoThumbnailFile(thumb)
+        cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
+        item.cachedPlaceholderThumb?.let { thumb ->
+            if (mediaCacheRepository.isDisplayableGalleryThumbFile(thumb) &&
+                (!isVideo || VideoThumbnailHelper.isGalleryVideoThumbnailFile(thumb))
             ) {
                 return thumb
             }
         }
         cloudVideoCoilKey(item)?.let { return it }
-        if (item.kind == MediaKind.VIDEO) {
+        if (filmstripVideo) {
+            item.localUri?.let { return it }
             return null
         }
+        if (isVideo) return null
         item.cachedOriginal?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
         return null
+    }
+
+    private fun cachedDisplayableThumb(
+        item: GalleryDisplayItem,
+        mediaCacheRepository: MediaCacheRepository,
+    ): Any? {
+        return mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
+            ?.let { cached ->
+                if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)) {
+                    mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
+                    null
+                } else {
+                    cached
+                }
+            }
     }
 
     fun isStaleDisplayData(
@@ -73,51 +85,50 @@ object GalleryThumbnailResolver {
         thumbnailCache: GalleryThumbnailCache?,
         mediaCacheRepository: MediaCacheRepository,
         sizePx: Int,
+        style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
     ): Any? {
         val isVideo = item.kind == MediaKind.VIDEO
         val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
-        mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
-            ?.let { cached ->
-                if (isVideo && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)) {
-                    mediaCacheRepository.invalidateCommittedThumbnail(
-                        item.canonicalPath,
-                        item.oneDriveItemId,
-                    )
-                } else {
-                    return cached
-                }
+        val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
+        cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
+        if (isVideo && thumbnailCache != null) {
+            if (filmstripVideo || preferCloud) {
+                thumbnailCache.ensureThumbnailCached(
+                    item.canonicalPath,
+                    preferCloudFirst = true,
+                    cloudSourcesOnly = !item.oneDriveItemId.isNullOrBlank(),
+                    cloudVideoAggressive = true,
+                    lightweightPrefetch = !filmstripVideo,
+                ).getOrNull()
+                    ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
+                    ?.let { return it }
             }
-        if (isVideo && preferCloud && thumbnailCache != null) {
-            thumbnailCache.ensureThumbnailCached(
-                item.canonicalPath,
-                preferCloudFirst = true,
-                cloudSourcesOnly = !item.oneDriveItemId.isNullOrBlank(),
-                cloudVideoAggressive = true,
-            ).getOrNull()
-                ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
-                ?.let { return it }
+            if (item.localUri != null) {
+                thumbnailCache.ensureThumbnailCached(
+                    item.canonicalPath,
+                    preferCloudFirst = false,
+                    localSourcesOnly = true,
+                ).getOrNull()
+                    ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
+                    ?.let { return it }
+            }
         }
-        if (isVideo && item.localUri != null && thumbnailCache != null) {
-            thumbnailCache.ensureThumbnailCached(
-                item.canonicalPath,
-                preferCloudFirst = false,
-                localSourcesOnly = true,
-            ).getOrNull()
-                ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
-                ?.let { return it }
-        }
-        if (item.localUri != null) {
+        if (item.localUri != null && !filmstripVideo) {
             GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
             if (isVideo) {
                 return item.localUri
             }
         }
+        if (filmstripVideo && item.localUri != null) {
+            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
+            return item.localUri
+        }
         thumbnailCache?.ensureThumbnailCached(
             item.canonicalPath,
             preferCloudFirst = preferCloud,
             cloudSourcesOnly = isVideo && preferCloud && !item.oneDriveItemId.isNullOrBlank(),
-            cloudVideoAggressive = isVideo && preferCloud,
+            cloudVideoAggressive = isVideo && (preferCloud || filmstripVideo),
         )?.getOrNull()
             ?.takeIf {
                 if (isVideo) {

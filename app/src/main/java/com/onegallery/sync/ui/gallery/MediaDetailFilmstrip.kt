@@ -82,7 +82,7 @@ fun MediaDetailFilmstrip(
                     contentDescription = item.displayName,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
-                    style = GalleryThumbnailStyle.Grid,
+                    style = GalleryThumbnailStyle.Filmstrip,
                     sizePx = thumbPx,
                 )
             }

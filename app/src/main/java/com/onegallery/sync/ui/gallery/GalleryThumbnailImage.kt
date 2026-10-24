@@ -33,6 +33,8 @@ enum class GalleryThumbnailStyle {
     Grid,
     /** Detalhe / zoom: crossfade suave. */
     Detail,
+    /** Carrossel do detalhe: JPEG/cache antes de decodificar vídeo inteiro. */
+    Filmstrip,
 }
 
 @Composable
@@ -50,8 +52,10 @@ fun GalleryThumbnailImage(
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCacheRepository = remember(app) { app.mediaCacheRepository }
     val thumbCache = thumbnailCache ?: app.galleryThumbnailCache
-    var displayData by remember(item.canonicalPath, sizePx) {
-        mutableStateOf<Any?>(GalleryThumbnailResolver.initialDisplayData(item, mediaCacheRepository))
+    var displayData by remember(item.canonicalPath, sizePx, style) {
+        mutableStateOf<Any?>(
+            GalleryThumbnailResolver.initialDisplayData(item, mediaCacheRepository, style),
+        )
     }
     var resolvingThumb by remember(item.canonicalPath, sizePx) {
         mutableStateOf(
@@ -59,7 +63,7 @@ fun GalleryThumbnailImage(
         )
     }
 
-    LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx) {
+    LaunchedEffect(item.canonicalPath, item.localUri, item.thumbnailModel, item.oneDriveItemId, sizePx, style) {
         if (displayData is java.io.File &&
             !GalleryThumbnailResolver.isStaleDisplayData(item, displayData, mediaCacheRepository)
         ) {
@@ -81,6 +85,7 @@ fun GalleryThumbnailImage(
                     thumbnailCache = thumbCache,
                     mediaCacheRepository = mediaCacheRepository,
                     sizePx = sizePx,
+                    style = style,
                 )
             }?.let { resolved ->
                 displayData = resolved
