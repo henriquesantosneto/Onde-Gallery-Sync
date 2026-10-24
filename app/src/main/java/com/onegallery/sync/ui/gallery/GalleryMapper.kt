@@ -78,12 +78,16 @@ object GalleryMapper {
                     requireVideoAcceptable = kind == MediaKind.VIDEO,
                 )
         }
+        val cloudBacked = !entity.oneDriveItemId.isNullOrBlank() ||
+            entity.cloudState == CloudSyncState.CLOUD_ONLY ||
+            entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
         val hasThumb = when (kind) {
             MediaKind.VIDEO ->
                 (placeholderThumb != null &&
                     com.onegallery.sync.data.local.VideoThumbnailHelper
                         .isGalleryVideoThumbnailFile(placeholderThumb)) ||
-                    (localUri != null &&
+                    (!cloudBacked &&
+                        localUri != null &&
                         videoEntityAllowsLocalBrowseThumb(entity) &&
                         videoEntityHasLocalCopy(entity))
             else ->

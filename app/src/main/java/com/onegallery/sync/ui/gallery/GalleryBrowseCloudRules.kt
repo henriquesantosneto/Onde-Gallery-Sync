@@ -20,6 +20,7 @@ fun GalleryDisplayItem.mediaCountsAsLocalBrowseThumb(): Boolean {
     }
     if (localUri == null) return false
     if (kind == MediaKind.IMAGE && needsCloudOriginalRecall()) return false
+    if (kind == MediaKind.VIDEO && !oneDriveItemId.isNullOrBlank()) return false
     if (!oneDriveItemId.isNullOrBlank() && cloudState != CloudSyncState.LOCAL_ONLY) {
         val hasLocalCopy = cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null
         if (!hasLocalCopy) return false

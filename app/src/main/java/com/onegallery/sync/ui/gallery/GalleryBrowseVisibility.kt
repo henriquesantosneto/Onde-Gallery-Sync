@@ -23,13 +23,7 @@ fun GalleryDisplayItem.hasBrowsableThumbnail(
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
-    if (
-        kind == MediaKind.VIDEO &&
-        (cloudState == CloudSyncState.CLOUD_ONLY ||
-            cloudState == CloudSyncState.PENDING_DOWNLOAD)
-    ) {
-        return false
-    }
+    if (kind == MediaKind.VIDEO && isCloudBackedInIndex()) return false
     return mediaCountsAsLocalBrowseThumb()
 }
 
