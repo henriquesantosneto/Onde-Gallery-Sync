@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -245,15 +246,19 @@ fun GalleryThumbnailImage(
         paintModel == null &&
         resolvingThumb
     if (paintModel != null && !filmstripVideoPending) {
-        val videoUriModel = isGrid &&
+        val gridVideoDecode = isGrid &&
             item.kind == MediaKind.VIDEO &&
-            paintModel is Uri
-        val requestHardware = allowHardwareBitmap && !videoUriModel
-        val request = remember(paintModel, sizePx, style, item.canonicalPath, requestHardware) {
+            (paintModel is Uri || paintModel is Bitmap)
+        val requestHardware = allowHardwareBitmap && !gridVideoDecode
+        val request = remember(paintModel, sizePx, style, item.canonicalPath, requestHardware, gridVideoDecode) {
             ImageRequest.Builder(context)
                 .data(paintModel)
                 .size(sizePx)
-                .applyGalleryThumbnailLoading(style, requestHardware)
+                .applyGalleryThumbnailLoading(
+                    style = style,
+                    allowHardwareBitmap = requestHardware,
+                    videoDecode = gridVideoDecode,
+                )
                 .memoryCacheKey(
                     galleryThumbnailMemoryCacheKey(
                         item.canonicalPath,

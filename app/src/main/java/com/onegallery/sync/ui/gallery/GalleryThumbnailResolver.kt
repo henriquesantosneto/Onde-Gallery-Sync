@@ -98,6 +98,34 @@ object GalleryThumbnailResolver {
             (item.kind == MediaKind.VIDEO && item.localUri != null)
     }
 
+    suspend fun resolveGridVideoThumbnail(
+        context: Context,
+        item: GalleryDisplayItem,
+        thumbnailCache: GalleryThumbnailCache?,
+        mediaCacheRepository: MediaCacheRepository,
+        sizePx: Int,
+        diskCacheOnly: Boolean = false,
+    ): Any? {
+        if (item.kind != MediaKind.VIDEO) return null
+        cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
+        if (diskCacheOnly) return null
+        thumbnailCache?.ensureThumbnailCached(
+            item.canonicalPath,
+            preferCloudFirst = item.localUri == null && item.oneDriveItemId != null,
+            cloudVideoAggressive = true,
+            lightweightPrefetch = false,
+            localSourcesOnly = item.localUri != null,
+        )?.getOrNull()
+            ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
+            ?.let { return it }
+        if (item.localUri != null) {
+            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
+        }
+        cloudVideoCoilKey(item, forFilmstrip = true)?.let { return it }
+        cloudVideoCoilKey(item)?.let { return it }
+        return null
+    }
+
     suspend fun resolveForGrid(
         context: Context,
         item: GalleryDisplayItem,
@@ -111,6 +139,16 @@ object GalleryThumbnailResolver {
         val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
+        if (isVideo && style == GalleryThumbnailStyle.Grid) {
+            return resolveGridVideoThumbnail(
+                context,
+                item,
+                thumbnailCache,
+                mediaCacheRepository,
+                sizePx,
+                diskCacheOnly,
+            )
+        }
         cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
         if (diskCacheOnly) return null
         if (filmstripVideo && item.localUri != null) {

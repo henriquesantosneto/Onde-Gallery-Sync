@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +38,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import android.view.LayoutInflater
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -155,38 +158,45 @@ fun VideoPlayerView(
             Box(
                 modifier = Modifier
                     .matchParentSize()
+                    .zIndex(1f)
                     .pointerInput(uri, onVideoAreaTap) {
                         detectTapGestures(onTap = { onVideoAreaTap.invoke() })
                     },
             )
         }
         if (isActive && !usePlaybackControls) {
-            IconButton(
-                onClick = { userPlaying = !userPlaying },
+            Row(
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(72.dp)
-                    .background(Color.Black.copy(alpha = 0.42f), CircleShape),
+                    .align(Alignment.BottomCenter)
+                    .zIndex(2f)
+                    .padding(bottom = 96.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
-                    tint = Color.White,
-                    modifier = Modifier.size(40.dp),
-                )
-            }
-            IconButton(
-                onClick = { muted = !muted },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
-            ) {
-                Icon(
-                    imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
-                    contentDescription = if (muted) "Ativar som" else "Silenciar",
-                    tint = Color.White,
-                )
+                IconButton(
+                    onClick = { userPlaying = !userPlaying },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                ) {
+                    Icon(
+                        imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
+                        tint = Color.White,
+                    )
+                }
+                IconButton(
+                    onClick = { muted = !muted },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                ) {
+                    Icon(
+                        imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                        contentDescription = if (muted) "Ativar som" else "Silenciar",
+                        tint = Color.White,
+                    )
+                }
             }
         } else if (isActive && usePlaybackControls) {
             IconButton(

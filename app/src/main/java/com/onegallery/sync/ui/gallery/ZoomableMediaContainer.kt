@@ -66,15 +66,19 @@ fun ZoomableMediaContainer(
                     translationY = transform.offset.y
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .pointerInput(resetKey) {
+                .pointerInput(resetKey, interceptSingleTap) {
+                    val touchSlop = viewConfiguration.touchSlop
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+                        var sumMove = Offset.Zero
+                        var sawMultiTouch = false
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Main)
                             val pressed = event.changes.filter { it.pressed }
                             val t = transformRef.value
                             when {
                                 pressed.size >= 2 -> {
+                                    sawMultiTouch = true
                                     publishZoomActive(true)
                                     val zoom = event.calculateZoom()
                                     val pan = event.calculatePan()
@@ -96,7 +100,12 @@ fun ZoomableMediaContainer(
                                     if (delta != Offset.Zero) {
                                         change.consume()
                                         t.panBy(delta)
+                                        sumMove += delta
                                     }
+                                }
+                                pressed.size == 1 -> {
+                                    val change = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+                                    sumMove += change.positionChange()
                                 }
                                 pressed.isEmpty() -> {
                                     publishZoomActive(t.scale > ZOOM_ACTIVE_THRESHOLD)
@@ -106,17 +115,14 @@ fun ZoomableMediaContainer(
                         publishZoomActive(
                             transformRef.value.scale > ZOOM_ACTIVE_THRESHOLD,
                         )
+                        if (interceptSingleTap &&
+                            !sawMultiTouch &&
+                            sumMove.getDistance() < touchSlop &&
+                            abs(transformRef.value.scale - MIN_SCALE) < 0.05f
+                        ) {
+                            onSingleTap()
+                        }
                     }
-                }
-                .pointerInput(resetKey, interceptSingleTap) {
-                    if (!interceptSingleTap) return@pointerInput
-                    detectTapGestures(
-                        onTap = {
-                            if (abs(transformRef.value.scale - MIN_SCALE) < 0.05f) {
-                                onSingleTap()
-                            }
-                        },
-                    )
                 },
         ) {
             content()

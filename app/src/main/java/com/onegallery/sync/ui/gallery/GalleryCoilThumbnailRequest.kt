@@ -11,12 +11,13 @@ import coil.request.ImageRequest
 internal fun ImageRequest.Builder.applyGalleryThumbnailLoading(
     style: GalleryThumbnailStyle,
     allowHardwareBitmap: Boolean,
+    videoDecode: Boolean = false,
 ): ImageRequest.Builder {
     val gpuEligible = style == GalleryThumbnailStyle.Grid ||
         style == GalleryThumbnailStyle.Filmstrip
-    val hardware = gpuEligible && allowHardwareBitmap
-    val rgb565 = style == GalleryThumbnailStyle.Grid ||
-        style == GalleryThumbnailStyle.Filmstrip
+    val hardware = gpuEligible && allowHardwareBitmap && !videoDecode
+    val rgb565 = (style == GalleryThumbnailStyle.Grid ||
+        style == GalleryThumbnailStyle.Filmstrip) && !videoDecode
     return crossfade(style == GalleryThumbnailStyle.Detail)
         .allowHardware(hardware)
         .allowRgb565(rgb565)

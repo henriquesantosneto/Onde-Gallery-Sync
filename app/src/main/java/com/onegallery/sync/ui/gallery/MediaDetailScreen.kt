@@ -751,7 +751,7 @@ private fun VideoPlayerWithZoom(
         resetKey = canonicalPath,
         transform = zoomTransform,
         modifier = Modifier.fillMaxSize(),
-        interceptSingleTap = false,
+        interceptSingleTap = true,
         onZoomActiveChanged = onZoomActiveChanged,
         onSingleTap = onToggleImmersive,
     ) {
@@ -1005,6 +1005,7 @@ private fun MediaDetailPage(
                                     resetKey = canonicalPath,
                                     transform = zoomTransform,
                                     modifier = Modifier.fillMaxSize(),
+                                    interceptSingleTap = true,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onSingleTap = onToggleImmersive,
                                 ) {
@@ -1083,6 +1084,7 @@ private fun DetailZoomablePhoto(
             resetKey = display.canonicalPath,
             transform = transform,
             modifier = Modifier.fillMaxSize(),
+            interceptSingleTap = true,
             onZoomActiveChanged = onZoomActiveChanged,
             onSingleTap = onToggleImmersive,
         ) {
