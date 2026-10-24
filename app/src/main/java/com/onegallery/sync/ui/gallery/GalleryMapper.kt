@@ -183,19 +183,18 @@ object GalleryMapper {
         cloudState: CloudSyncState,
         hasThumb: Boolean,
     ): Boolean {
-        if (kind == MediaKind.VIDEO) return hasThumb
-        if (hasThumb) return true
-        if (cloudState == CloudSyncState.CLOUD_ONLY ||
+        val cloudBacked = !oneDriveItemId.isNullOrBlank() ||
+            cloudState == CloudSyncState.CLOUD_ONLY ||
             cloudState == CloudSyncState.PENDING_DOWNLOAD
-        ) {
-            return false
+        if (kind == MediaKind.VIDEO || cloudBacked) {
+            return hasThumb
         }
+        if (hasThumb) return true
         if (localUri != null) return true
         if (cachedOriginal != null) return true
         if (localMediaId != null && !localReleasedForSpace && oneDriveItemId.isNullOrBlank()) {
             return true
         }
-        if (!oneDriveItemId.isNullOrBlank()) return false
         return cloudState != CloudSyncState.LOCAL_ONLY
     }
 

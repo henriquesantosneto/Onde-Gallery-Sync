@@ -13,7 +13,7 @@ fun filterVisibleForGalleryBrowse(
     if (items.isEmpty()) return items
     return items.filter { item ->
         when {
-            item.kind == MediaKind.VIDEO ->
+            item.kind == MediaKind.IMAGE || item.kind == MediaKind.VIDEO ->
                 item.hasBrowsableThumbnail(mediaCacheRepository)
             onlyItemsWithThumbnail || items.size >= 1_500 ->
                 item.showInBrowseGrid

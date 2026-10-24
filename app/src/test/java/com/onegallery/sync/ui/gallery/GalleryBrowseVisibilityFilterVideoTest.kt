@@ -26,6 +26,26 @@ class GalleryBrowseVisibilityFilterVideoTest {
     }
 
     @Test
+    fun cloudPhotoWithoutThumb_notListed() {
+        val item = GalleryDisplayItem(
+            canonicalPath = "cloud/p.jpg",
+            displayName = "p.jpg",
+            albumName = "cloud",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "remote-id",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            sortTimestamp = 1L,
+            showInBrowseGrid = true,
+        )
+        val visible = filterVisibleForGalleryBrowse(listOf(item), repo, onlyItemsWithThumbnail = false)
+        assertTrue(visible.isEmpty())
+    }
+
+    @Test
     fun cloudVideoWithoutThumb_notListed_evenInLargeLibraryMode() {
         val item = GalleryDisplayItem(
             canonicalPath = "cloud/v.mp4",

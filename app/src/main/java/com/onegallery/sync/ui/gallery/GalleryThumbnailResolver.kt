@@ -198,6 +198,13 @@ object GalleryThumbnailResolver {
         val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
+        if (!isVideo &&
+            style == GalleryThumbnailStyle.Grid &&
+            preferCloud &&
+            item.localUri == null
+        ) {
+            return cachedDisplayableThumb(item, mediaCacheRepository)
+        }
         if (isVideo && style == GalleryThumbnailStyle.Grid) {
             return resolveGridVideoThumbnail(
                 context,
@@ -262,11 +269,13 @@ object GalleryThumbnailResolver {
                 }
             }
             ?.let { return it }
-        return cloudVideoCoilKey(item) ?: if (isVideo) {
-            null
-        } else {
-            item.thumbnailModel
+        if (isVideo) {
+            return cloudVideoCoilKey(item)
         }
+        if (style == GalleryThumbnailStyle.Grid && preferCloud && item.localUri == null) {
+            return null
+        }
+        return item.thumbnailModel
     }
 
     fun cloudVideoCoilKey(

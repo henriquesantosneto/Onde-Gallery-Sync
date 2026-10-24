@@ -3,7 +3,6 @@ package com.onegallery.sync.ui.gallery
 import android.content.Context
 import android.net.Uri
 import com.onegallery.sync.data.local.MediaKind
-import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 import java.io.DataInputStream
@@ -220,44 +219,6 @@ object GallerySessionCatalogSpill {
                 oneDriveItemId = oneDriveItemId,
             ),
         )
-    }
-
-    private fun spillShowInBrowseGrid(
-        kind: MediaKind,
-        cloudState: CloudSyncState,
-        placeholder: File?,
-        localUri: Uri?,
-        cachedOriginal: File?,
-        localReleasedForSpace: Boolean,
-        oneDriveItemId: String?,
-    ): Boolean {
-        if (kind == MediaKind.VIDEO) {
-            if (placeholder != null &&
-                VideoThumbnailHelper.isGalleryVideoThumbnailFile(placeholder)
-            ) {
-                return true
-            }
-            if (localReleasedForSpace) return false
-            if (cloudState == CloudSyncState.CLOUD_ONLY ||
-                cloudState == CloudSyncState.PENDING_DOWNLOAD
-            ) {
-                return false
-            }
-            if (localUri == null) return false
-            if (!oneDriveItemId.isNullOrBlank() && cloudState != CloudSyncState.LOCAL_ONLY) {
-                if (cachedOriginal == null) return false
-            }
-            return true
-        }
-        if (cloudState == CloudSyncState.CLOUD_ONLY ||
-            cloudState == CloudSyncState.PENDING_DOWNLOAD
-        ) {
-            return placeholder != null
-        }
-        if (localUri != null) return true
-        if (cachedOriginal != null) return true
-        if (placeholder != null) return true
-        return false
     }
 
     private fun writeNullableUtf(out: DataOutputStream, value: String?) {

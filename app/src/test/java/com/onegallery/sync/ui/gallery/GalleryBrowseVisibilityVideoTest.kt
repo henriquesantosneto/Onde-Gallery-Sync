@@ -34,6 +34,24 @@ class GalleryBrowseVisibilityVideoTest {
     }
 
     @Test
+    fun syncedCloudPhoto_staleUriWithoutLocalCopy_notBrowsableAsLocal() {
+        val item = GalleryDisplayItem(
+            canonicalPath = "p.jpg",
+            displayName = "p.jpg",
+            albumName = "A",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.SYNCED,
+            localMediaId = 99L,
+            oneDriveItemId = "remote",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = Uri.parse("content://media/external/images/media/99"),
+            cachedOriginal = null,
+            sortTimestamp = 1L,
+        )
+        assertFalse(item.imageCountsAsLocalBrowseThumb())
+    }
+
+    @Test
     fun syncedCloudVideo_staleUriWithoutLocalCopy_notBrowsableAsLocal() {
         val item = GalleryDisplayItem(
             canonicalPath = "v.mp4",
