@@ -50,7 +50,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import android.view.LayoutInflater
 import androidx.compose.ui.viewinterop.AndroidView
+import com.onegallery.sync.R
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -218,21 +220,34 @@ fun LabSamsungStyleMediaPlayer(
             },
     ) {
         if (kind == LabMediaPlaybackKind.Video) {
-            AndroidView(
+            val zoomTransform = remember(uri) { ZoomTransformHolder() }
+            ZoomableMediaContainer(
+                resetKey = uri,
+                transform = zoomTransform,
                 modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        this.player = player
-                        useController = false
-                        isClickable = false
-                        isFocusable = false
-                        setOnTouchListener { _, _ -> false }
-                    }
-                },
-                update = { view ->
-                    if (view.player != player) view.player = player
-                },
-            )
+                interceptSingleTap = false,
+            ) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        (LayoutInflater.from(ctx).inflate(
+                            R.layout.gallery_detail_player_view,
+                            null,
+                            false,
+                        ) as PlayerView).apply {
+                            this.player = player
+                            useController = false
+                            isClickable = false
+                            isFocusable = false
+                            isFocusableInTouchMode = false
+                            setOnTouchListener { _, _ -> false }
+                        }
+                    },
+                    update = { view ->
+                        if (view.player != player) view.player = player
+                    },
+                )
+            }
         } else {
             LabAudioArtworkPanel(
                 displayName = displayName,

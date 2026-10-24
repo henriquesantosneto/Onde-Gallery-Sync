@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FullscreenExit
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -402,6 +403,8 @@ fun MediaDetailScreen(
                             activePageRecalling = recalling
                         }
                     },
+                    onOpenDetails = { openDetailsToSimple() },
+                    detailsSwipeEnabled = panelPullEnabled,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -516,6 +519,15 @@ fun MediaDetailScreen(
                                     contentDescription = "Excluir",
                                     tint = Color.White,
                                 )
+                            }
+                            if (detailPaths.isNotEmpty()) {
+                                IconButton(onClick = { openDetailsToSimple() }) {
+                                    Icon(
+                                        Icons.Outlined.Info,
+                                        contentDescription = "Detalhes",
+                                        tint = Color.White,
+                                    )
+                                }
                             }
                             MediaGalleryOverflowMenuButton(
                                 expanded = showOverflowMenu,
@@ -736,21 +748,36 @@ private fun VideoPlayerWithZoom(
     zoomTransform: ZoomTransformHolder,
     onZoomActiveChanged: (Boolean) -> Unit,
     onToggleImmersive: () -> Unit,
+    onOpenDetails: () -> Unit = {},
+    detailsSwipeEnabled: Boolean = false,
+    isActivePage: Boolean = false,
 ) {
-    ZoomableMediaContainer(
-        resetKey = canonicalPath,
-        transform = zoomTransform,
-        modifier = Modifier.fillMaxSize(),
-        interceptSingleTap = false,
-        onZoomActiveChanged = onZoomActiveChanged,
-        onSingleTap = onToggleImmersive,
-    ) {
-        VideoPlayerView(
-            uri = playback,
+    Box(modifier = Modifier.fillMaxSize()) {
+        ZoomableMediaContainer(
+            resetKey = canonicalPath,
+            transform = zoomTransform,
             modifier = Modifier.fillMaxSize(),
-            playWhenReady = shouldPlayVideo,
-            usePlaybackControls = false,
-            isActive = shouldPlayVideo,
+            interceptSingleTap = false,
+            onZoomActiveChanged = onZoomActiveChanged,
+            onSingleTap = onToggleImmersive,
+        ) {
+            VideoPlayerView(
+                uri = playback,
+                modifier = Modifier.fillMaxSize(),
+                playWhenReady = shouldPlayVideo,
+                usePlaybackControls = false,
+                isActive = shouldPlayVideo,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.72f)
+                .openDetailsOnSwipeUp(
+                    enabled = isActivePage && detailsSwipeEnabled,
+                    onSwipeUp = onOpenDetails,
+                ),
         )
     }
 }
@@ -773,6 +800,8 @@ private fun MediaDetailPage(
     onDisplayItemChanged: (GalleryDisplayItem) -> Unit = {},
     onRegisterZoomTransform: (ZoomTransformHolder) -> Unit = {},
     onRecallingChanged: (Boolean) -> Unit = {},
+    onOpenDetails: () -> Unit = {},
+    detailsSwipeEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
@@ -983,6 +1012,9 @@ private fun MediaDetailPage(
                                     zoomTransform = zoomTransform,
                                     onZoomActiveChanged = onZoomActiveChanged,
                                     onToggleImmersive = onToggleImmersive,
+                                    onOpenDetails = onOpenDetails,
+                                    detailsSwipeEnabled = detailsSwipeEnabled,
+                                    isActivePage = isActivePage,
                                 )
                             }
                         }
@@ -1007,41 +1039,17 @@ private fun MediaDetailPage(
                                 }
                             }
                         }
-                        display.detailPreviewModel() != null -> {
-                            MediaDetailMediaShell(
-                                modifier = mediaModifier,
-                            ) {
-                                ZoomableImageContent(
-                                    model = display.detailPreviewModel(),
-                                    contentDescription = display.displayName,
-                                    transform = zoomTransform,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit,
-                                    onZoomActiveChanged = onZoomActiveChanged,
-                                    onSingleTap = onToggleImmersive,
-                                    onContentAspectRatio = { contentAspectRatio = it },
-                                )
-                            }
-                        }
                         else -> {
                             MediaDetailMediaShell(
                                 modifier = mediaModifier,
                             ) {
-                                ZoomableMediaContainer(
-                                    resetKey = canonicalPath,
+                                DetailZoomablePhoto(
+                                    display = display,
                                     transform = zoomTransform,
-                                    modifier = Modifier.fillMaxSize(),
                                     onZoomActiveChanged = onZoomActiveChanged,
-                                    onSingleTap = onToggleImmersive,
-                                ) {
-                                    MediaThumbnailImage(
-                                        item = display,
-                                        contentDescription = display.displayName,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Fit,
-                                        onContentAspectRatio = { contentAspectRatio = it },
-                                    )
-                                }
+                                    onToggleImmersive = onToggleImmersive,
+                                    onContentAspectRatio = { contentAspectRatio = it },
+                                )
                             }
                         }
                     }
@@ -1058,5 +1066,56 @@ private fun MediaDetailMediaShell(
 ) {
     Box(modifier = modifier) {
         content()
+    }
+}
+
+@Composable
+private fun DetailZoomablePhoto(
+    display: GalleryDisplayItem,
+    transform: ZoomTransformHolder,
+    onZoomActiveChanged: (Boolean) -> Unit,
+    onToggleImmersive: () -> Unit,
+    onContentAspectRatio: (Float) -> Unit,
+) {
+    val context = LocalContext.current
+    val fullModel = remember(display.canonicalPath, display.localUri, display.cachedOriginal) {
+        display.detailFullImageModel()
+    }
+    val useThumbnailPipeline = remember(fullModel) {
+        display.detailImageUsesThumbnailPipeline(fullModel)
+    }
+    val detailSizePx = remember(context) {
+        val m = context.resources.displayMetrics
+        (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
+    }
+    if (fullModel != null && !useThumbnailPipeline) {
+        ZoomableImageContent(
+            model = fullModel,
+            contentDescription = display.displayName,
+            transform = transform,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+            onZoomActiveChanged = onZoomActiveChanged,
+            onSingleTap = onToggleImmersive,
+            onContentAspectRatio = onContentAspectRatio,
+        )
+    } else {
+        ZoomableMediaContainer(
+            resetKey = display.canonicalPath,
+            transform = transform,
+            modifier = Modifier.fillMaxSize(),
+            onZoomActiveChanged = onZoomActiveChanged,
+            onSingleTap = onToggleImmersive,
+        ) {
+            GalleryThumbnailImage(
+                item = display,
+                contentDescription = display.displayName,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+                style = GalleryThumbnailStyle.Detail,
+                sizePx = detailSizePx,
+                onContentAspectRatio = onContentAspectRatio,
+            )
+        }
     }
 }

@@ -20,19 +20,24 @@ fun LabSamsungStylePhotoViewer(
     modifier: Modifier = Modifier,
 ) {
     val transform = remember(item.canonicalPath) { ZoomTransformHolder() }
-    val model = item.detailPreviewModel()
+    val fullModel = remember(item.canonicalPath, item.localUri, item.cachedOriginal) {
+        item.detailFullImageModel()
+    }
+    val useThumbnailPipeline = remember(fullModel) {
+        item.detailImageUsesThumbnailPipeline(fullModel)
+    }
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when {
-            model == null -> Text("Prévia indisponível.", color = Color.White.copy(alpha = 0.85f))
-            else -> {
+            fullModel == null -> Text("Prévia indisponível.", color = Color.White.copy(alpha = 0.85f))
+            !useThumbnailPipeline -> {
                 val context = LocalContext.current
                 val decodeMaxPx = remember(context) {
                     val m = context.resources.displayMetrics
                     (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
                 }
-                val request = remember(model, decodeMaxPx) {
+                val request = remember(fullModel, decodeMaxPx) {
                     ImageRequest.Builder(context)
-                        .data(model)
+                        .data(fullModel)
                         .size(decodeMaxPx)
                         .crossfade(true)
                         .allowHardware(false)
@@ -49,6 +54,28 @@ fun LabSamsungStylePhotoViewer(
                         contentDescription = item.displayName,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            else -> {
+                val context = LocalContext.current
+                val detailSizePx = remember(context) {
+                    val m = context.resources.displayMetrics
+                    (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
+                }
+                ZoomableMediaContainer(
+                    resetKey = item.canonicalPath,
+                    transform = transform,
+                    modifier = Modifier.fillMaxSize(),
+                    interceptSingleTap = false,
+                ) {
+                    GalleryThumbnailImage(
+                        item = item,
+                        contentDescription = item.displayName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                        style = GalleryThumbnailStyle.Detail,
+                        sizePx = detailSizePx,
                     )
                 }
             }

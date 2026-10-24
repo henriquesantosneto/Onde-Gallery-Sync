@@ -35,11 +35,13 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.view.LayoutInflater
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.onegallery.sync.R
 
 @Composable
 fun VideoPlayerView(
@@ -123,7 +125,11 @@ fun VideoPlayerView(
         AndroidView(
             modifier = Modifier.matchParentSize(),
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                (LayoutInflater.from(ctx).inflate(
+                    R.layout.gallery_detail_player_view,
+                    null,
+                    false,
+                ) as PlayerView).apply {
                     this.player = player
                     useController = usePlaybackControls
                     controllerShowTimeoutMs = 5_000
@@ -131,6 +137,7 @@ fun VideoPlayerView(
                     if (!usePlaybackControls) {
                         isClickable = false
                         isFocusable = false
+                        isFocusableInTouchMode = false
                         setOnTouchListener { _, _ -> false }
                     }
                 }

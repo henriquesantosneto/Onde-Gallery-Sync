@@ -37,8 +37,25 @@ fun GalleryDisplayItem.playbackUri(): android.net.Uri? {
 }
 
 fun GalleryDisplayItem.detailPreviewModel(): Any? {
-    cachedOriginal?.takeIf { it.exists() }?.let { return it }
-    return thumbnailModel
+    cachedOriginal?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
+    localUri?.let { return it }
+    cachedPlaceholderThumb?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
+    return when (val model = thumbnailModel) {
+        is File -> model.takeIf { it.isFile && it.length() > 0L }
+        else -> model
+    }
+}
+
+/** Foto em tela cheia: URI/arquivo local preferido; senão o mesmo modelo da grade. */
+fun GalleryDisplayItem.detailFullImageModel(): Any? {
+    detailPreviewModel()?.let { return it }
+    playbackUri()?.let { return it }
+    return null
+}
+
+fun GalleryDisplayItem.detailImageUsesThumbnailPipeline(model: Any?): Boolean {
+    if (model == null) return true
+    return model !is android.net.Uri && model !is File
 }
 
 fun GalleryDisplayItem.withCachedThumb(file: File): GalleryDisplayItem =

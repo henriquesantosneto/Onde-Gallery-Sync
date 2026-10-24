@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -388,6 +389,15 @@ fun MediaDetailLabScreen(
                                     contentDescription = "Excluir",
                                     tint = Color.White,
                                 )
+                            }
+                            if (detailPaths.isNotEmpty()) {
+                                IconButton(onClick = { openDetailsToSimple() }) {
+                                    Icon(
+                                        Icons.Outlined.Info,
+                                        contentDescription = "Detalhes",
+                                        tint = Color.White,
+                                    )
+                                }
                             }
                             MediaGalleryOverflowMenuButton(
                                 expanded = showOverflowMenu,
