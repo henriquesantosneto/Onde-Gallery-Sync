@@ -4,6 +4,7 @@ import android.content.Context
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.VideoThumbnailHelper
+import com.onegallery.sync.data.onedrive.CloudThumbnailStaging
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.GalleryThumbnailCache
 
@@ -116,20 +117,62 @@ object GalleryThumbnailResolver {
             preferCloudFirst = item.localUri == null && item.oneDriveItemId != null,
             cloudVideoAggressive = true,
             lightweightPrefetch = false,
-            localSourcesOnly = item.localUri != null,
+            localSourcesOnly = false,
         )?.getOrNull()
             ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
             ?.let { return it }
         if (item.localUri != null) {
+            captureAndCommitLocalVideoThumb(context, item, mediaCacheRepository)?.let { return it }
             GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { model ->
                 if (model !is android.net.Uri) return model
             }
-            VideoThumbnailHelper.captureFromContentUri(context, item.localUri, strictFrames = false)
-                ?.let { return it }
+            VideoThumbnailHelper.captureFromContentUri(
+                context,
+                item.localUri,
+                strictFrames = false,
+                quickFrameScan = false,
+            )?.let { return it }
+            return item.localUri
         }
         cloudVideoCoilKey(item, forFilmstrip = true)?.let { return it }
         cloudVideoCoilKey(item)?.let { return it }
         return null
+    }
+
+    private fun captureAndCommitLocalVideoThumb(
+        context: Context,
+        item: GalleryDisplayItem,
+        mediaCacheRepository: MediaCacheRepository,
+    ): java.io.File? {
+        val uri = item.localUri ?: return null
+        val staging = mediaCacheRepository.thumbStagingFile(item.canonicalPath)
+        staging.delete()
+        val captured = VideoThumbnailHelper.captureToFile(
+            context = context,
+            uri = uri,
+            destination = staging,
+            localMediaId = item.localMediaId,
+            mediaStoreOnly = false,
+            quickFrameScan = false,
+        )
+        if (!captured) {
+            staging.delete()
+            return null
+        }
+        return CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
+            staging = staging,
+            mediaCacheRepository = mediaCacheRepository,
+            canonicalPath = item.canonicalPath,
+            oneDriveItemId = item.oneDriveItemId,
+            fromGraphPoster = false,
+        ) ?: run {
+            if (VideoThumbnailHelper.isAcceptableThumbnailFile(staging)) {
+                mediaCacheRepository.commitThumbnail(staging, item.canonicalPath, item.oneDriveItemId)
+            } else {
+                staging.delete()
+                null
+            }
+        }
     }
 
     suspend fun resolveForGrid(

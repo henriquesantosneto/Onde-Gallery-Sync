@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -11,6 +12,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -135,7 +138,7 @@ fun GalleryThumbnailImage(
                 cachedFile,
                 mediaCacheRepository,
             )
-            val okVideoThumb = !filmstripVideo ||
+            val okVideoThumb = item.kind != MediaKind.VIDEO ||
                 VideoThumbnailHelper.isGalleryVideoThumbnailFile(cachedFile)
             if (!stale && okVideoThumb) {
                 resolvingThumb = false
@@ -202,7 +205,11 @@ fun GalleryThumbnailImage(
                     ) {
                         return@collect
                     }
-                    if (displayData != null && displayData !is Uri) {
+                    if (
+                        item.kind != MediaKind.VIDEO &&
+                        displayData != null &&
+                        displayData !is Uri
+                    ) {
                         return@collect
                     }
                     resolveDisplayData(forceFullDecode = true)
@@ -216,29 +223,39 @@ fun GalleryThumbnailImage(
     }
 
     val paintModel = if (isGrid) {
-        val candidate = displayData
-            ?: mediaCacheRepository.displayableThumbnailIfCached(
+        val cachedOnDisk = if (item.kind == MediaKind.VIDEO) {
+            mediaCacheRepository.galleryThumbnailResolved(
+                item.canonicalPath,
+                item.oneDriveItemId,
+                requireVideoAcceptable = true,
+            )
+        } else {
+            mediaCacheRepository.displayableThumbnailIfCached(
                 item.canonicalPath,
                 item.oneDriveItemId,
             )
-        val deferVideoUriDecode = isGrid &&
-            item.kind == MediaKind.VIDEO &&
+        }
+        val candidate = displayData ?: cachedOnDisk
+        val deferVideoUriDecode = item.kind == MediaKind.VIDEO &&
             candidate is Uri &&
             zeroDecodeOnScroll &&
             GalleryGridScrollGate.isUserScrollingGrid
-        when {
+        val chosen = when {
             deferVideoUriDecode -> lastStableGridPaint
-            candidate != null && !(isGrid && item.kind == MediaKind.VIDEO && candidate is Uri) -> {
-                lastStableGridPaint = candidate
-                candidate
+            candidate is java.io.File && item.kind == MediaKind.VIDEO &&
+                !VideoThumbnailHelper.isGalleryVideoThumbnailFile(candidate) -> {
+                item.localUri ?: lastStableGridPaint
             }
-            candidate is java.io.File || candidate is Bitmap || candidate is OneDriveCloudThumbnailKey -> {
-                lastStableGridPaint = candidate
-                candidate
-            }
-            lastStableGridPaint != null -> lastStableGridPaint
-            else -> null
+            candidate != null -> candidate
+            item.kind == MediaKind.VIDEO -> item.localUri ?: lastStableGridPaint
+            else -> lastStableGridPaint
         }
+        SideEffect {
+            if (chosen != null && !deferVideoUriDecode) {
+                lastStableGridPaint = chosen
+            }
+        }
+        chosen
     } else {
         val raw = displayData
         if (style == GalleryThumbnailStyle.Filmstrip &&
@@ -255,10 +272,17 @@ fun GalleryThumbnailImage(
         item.kind == MediaKind.VIDEO &&
         paintModel == null &&
         resolvingThumb
-    if (paintModel != null && !filmstripVideoPending) {
+    if (paintModel is Bitmap && isGrid && !filmstripVideoPending) {
+        Image(
+            bitmap = paintModel.asImageBitmap(),
+            contentDescription = contentDescription,
+            modifier = modifier.galleryGridThumbnailLayer(style),
+            contentScale = contentScale,
+        )
+    } else if (paintModel != null && !filmstripVideoPending) {
         val gridVideoDecode = isGrid &&
             item.kind == MediaKind.VIDEO &&
-            (paintModel is Uri || paintModel is Bitmap)
+            paintModel is Uri
         val requestHardware = allowHardwareBitmap && !gridVideoDecode
         val request = remember(paintModel, sizePx, style, item.canonicalPath, requestHardware, gridVideoDecode) {
             ImageRequest.Builder(context)
