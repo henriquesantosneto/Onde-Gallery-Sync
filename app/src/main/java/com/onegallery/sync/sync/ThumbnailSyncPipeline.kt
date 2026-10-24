@@ -235,7 +235,7 @@ internal class ThumbnailSyncPipeline(
     companion object {
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
         const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
-        const val PARALLEL_THUMB_PREFETCH = 5
+        const val PARALLEL_THUMB_PREFETCH = 8
         const val CLOUD_THUMB_PREFETCH_MAX_PER_PASS = 2_000
     }
 }

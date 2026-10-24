@@ -126,6 +126,9 @@ fun SettingsScreen(
     var browseOnlyWithThumb by remember {
         mutableStateOf(galleryPreferences.browseOnlyItemsWithThumbnail)
     }
+    var aggressiveThumbPrefetch by remember {
+        mutableStateOf(syncPreferences.aggressiveThumbnailPrefetch)
+    }
     var autoFreeLocalWhenIdle by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenIdle)
     }
@@ -767,6 +770,24 @@ fun SettingsScreen(
                         browseOnlyWithThumb = enabled
                         galleryPreferences.browseOnlyItemsWithThumbnail = enabled
                         onGalleryBrowseFilterChanged()
+                    },
+                )
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Miniaturas agressivas em 1º plano",
+                    summary = "Mais paralelismo e levas maiores com o app aberto (usa mais rede/CPU).",
+                    info = SettingsInfoDialog(
+                        title = "Prefetch agressivo",
+                        body = "Ligado (padrão): o app continua gerando miniaturas mesmo na galeria, " +
+                            "até 8 itens em paralelo e levas maiores. Desligue se o aparelho esquentar " +
+                            "ou a UI ficar pesada.",
+                    ),
+                    checked = aggressiveThumbPrefetch,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = { enabled ->
+                        aggressiveThumbPrefetch = enabled
+                        syncPreferences.aggressiveThumbnailPrefetch = enabled
                     },
                 )
             }

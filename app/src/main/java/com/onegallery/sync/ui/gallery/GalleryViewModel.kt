@@ -319,6 +319,7 @@ class GalleryViewModel(
 
     fun onReturningToForeground() {
         loading.value = false
+        syncCoordinator.kickThumbnailPrefetchIfIdle()
     }
 
     fun loadMoreGridItems() {

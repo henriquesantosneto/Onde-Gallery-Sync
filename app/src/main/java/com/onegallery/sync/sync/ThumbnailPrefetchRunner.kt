@@ -223,9 +223,9 @@ internal class ThumbnailPrefetchRunner(
     }
 
     private companion object {
-        const val THUMB_PREFETCH_RUN_CHUNK = 16
-        const val PARALLEL_THUMB_PREFETCH = 5
-        const val PARALLEL_THUMBNAILS = 5
+        const val THUMB_PREFETCH_RUN_CHUNK = 40
+        const val PARALLEL_THUMB_PREFETCH = 8
+        const val PARALLEL_THUMBNAILS = 8
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
         const val THUMB_PREFETCH_LOCAL_VIDEO_TIMEOUT_MS = 75_000L
         const val THUMB_PREFETCH_VIDEO_TIMEOUT_MS = 120_000L

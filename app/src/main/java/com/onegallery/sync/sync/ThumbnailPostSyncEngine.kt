@@ -223,13 +223,13 @@ internal class ThumbnailPostSyncEngine(
         const val THUMB_PREFETCH_BATCH = 512
         const val THUMB_PREFETCH_EXTRA_ROUNDS = 12
         const val THUMB_PREFETCH_MAX_ROUNDS = 48
-        const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 6_000
-        const val THUMB_POST_SYNC_COMPLETION_MAX_ROUNDS = 96
-        const val THUMB_POST_SYNC_OUTER_PASSES = 2
-        const val THUMB_POST_SYNC_MAX_STALL_PASSES = 2
-        const val THUMB_POST_SYNC_MAX_TOTAL_PER_PASS = 3_000
-        const val THUMB_STALL_MIN_PROGRESS = 32
-        const val THUMB_STUBBORN_PLACEHOLDER_CAP = 64
-        const val PARALLEL_THUMBNAILS = 5
+        const val THUMB_PREFETCH_MAX_TOTAL_PER_SYNC = 14_000
+        const val THUMB_POST_SYNC_COMPLETION_MAX_ROUNDS = 128
+        const val THUMB_POST_SYNC_OUTER_PASSES = 5
+        const val THUMB_POST_SYNC_MAX_STALL_PASSES = 4
+        const val THUMB_POST_SYNC_MAX_TOTAL_PER_PASS = 8_000
+        const val THUMB_STALL_MIN_PROGRESS = 24
+        const val THUMB_STUBBORN_PLACEHOLDER_CAP = 96
+        const val PARALLEL_THUMBNAILS = 8
     }
 }

@@ -19,6 +19,7 @@ import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.ui.gallery.AlbumCoverBucketKeys
 import com.onegallery.sync.ui.gallery.AlbumCoverThumbnailPlanner
 import com.onegallery.sync.ui.gallery.GalleryMapper
+import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.data.cloud.CloudSyncBackendRegistry
 import com.onegallery.sync.data.cloud.toRemoteCloudFile
 import com.onegallery.sync.data.cloud.toRemoteDriveFile
@@ -750,12 +751,17 @@ class SyncCoordinator(
         }
     }
 
-    private fun allowForegroundThumbnailPrefetch(): Boolean =
-        syncStatusScreenVisibleCount.get() > 0
+    private fun galleryPreferences(): GalleryPreferences = GalleryPreferences(appContext)
+
+    /** Modo agressivo: prefetch forte em 1º plano (grade só com miniatura ou opção explícita). */
+    private fun allowForegroundThumbnailPrefetch(): Boolean {
+        if (syncStatusScreenVisibleCount.get() > 0) return true
+        if (syncPreferences.aggressiveThumbnailPrefetch) return true
+        return galleryPreferences().browseOnlyItemsWithThumbnail
+    }
 
     /**
-     * Prefetch pós-sync de miniaturas compete com galeria/álbuns em 1º plano — adia até ir para 2º plano,
-     * exceto enquanto a tela Sync estiver aberta.
+     * Prefetch pós-sync: em modo agressivo continua com app aberto; senão só tela Sync ou 2º plano.
      */
     fun onAppUiVisibilityChanged(inForeground: Boolean) {
         if (inForeground) {
@@ -3639,7 +3645,7 @@ class SyncCoordinator(
                     if (after == 0) return@launch
                     if (after >= before) {
                         stalledPasses++
-                        if (stalledPasses >= 3) return@launch
+                        if (stalledPasses >= 6) return@launch
                     } else {
                         stalledPasses = 0
                     }
@@ -4593,10 +4599,10 @@ class SyncCoordinator(
 
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
-        const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 4_000
-        const val THUMB_BACKGROUND_CONTINUE_PASSES = 24
-        const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 2_500L
-        const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 4_000L
+        const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 10_000
+        const val THUMB_BACKGROUND_CONTINUE_PASSES = 64
+        const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 600L
+        const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 1_200L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 5
         const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 12
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
@@ -4608,13 +4614,13 @@ class SyncCoordinator(
         /** Leva mista: aparelho + Graph/amostra parcial no mesmo item. */
         const val THUMB_PREFETCH_VIDEO_TIMEOUT_MS = 120_000L
         /** Evita milhares de coroutines e fila “congelada” após os primeiros itens. */
-        const val THUMB_PREFETCH_RUN_CHUNK = 16
+        const val THUMB_PREFETCH_RUN_CHUNK = 40
         /** Depois disso o item sai da leva nesta sessão (grade tenta de novo sob demanda). */
         const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 8
         /** Lista na tela Sync — evita OOM com dezenas de milhares pendentes. */
         const val THUMB_RUN_QUEUE_UI_CAP = 1_500
         const val GPS_RUN_QUEUE_UI_CAP = 1_500
-        const val PARALLEL_THUMB_PREFETCH = 5
+        const val PARALLEL_THUMB_PREFETCH = 8
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
@@ -4631,7 +4637,7 @@ class SyncCoordinator(
         const val CLOUD_THUMB_PREFETCH_MAX_PER_PASS = 2_000
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
-        const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 5_000L
+        const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 2_000L
         const val THUMBNAIL_STATS_MIN_REFRESH_MS = 8_000L
         const val GPS_BACKFILL_ROUNDS = 8
         /** Indexação manual (mapa): varre a biblioteca inteira em várias levas. */
@@ -4640,11 +4646,11 @@ class SyncCoordinator(
         const val GPS_CLOUD_BATCH = 500
         const val PARALLEL_UPLOADS = 5
         /** Downloads Graph / decode local em paralelo por leva. */
-        const val PARALLEL_THUMBNAILS = 5
-        /** Com a galeria aberta (fora da tela Sync): miniaturas seguem, sem competir com a UI. */
-        const val PARALLEL_THUMBNAILS_FOREGROUND_IDLE = 5
-        const val THUMB_FOREGROUND_IDLE_MAX_PER_PASS = 320
-        const val THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS = 8_000L
+        const val PARALLEL_THUMBNAILS = 8
+        /** Fallback se [allowForegroundThumbnailPrefetch] for falso (modo econômico). */
+        const val PARALLEL_THUMBNAILS_FOREGROUND_IDLE = 6
+        const val THUMB_FOREGROUND_IDLE_MAX_PER_PASS = 2_000
+        const val THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS = 2_500L
         const val PARALLEL_GPS_BACKFILL = 5
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L

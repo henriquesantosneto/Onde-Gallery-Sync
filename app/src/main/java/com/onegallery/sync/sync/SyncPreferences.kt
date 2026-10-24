@@ -54,6 +54,11 @@ class SyncPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_BACKGROUND_SYNC_ALWAYS, true)
         set(value) = prefs.edit().putBoolean(KEY_BACKGROUND_SYNC_ALWAYS, value).apply()
 
+    /** Miniaturas em 1º plano com mais paralelismo e levas maiores (padrão ligado). */
+    var aggressiveThumbnailPrefetch: Boolean
+        get() = prefs.getBoolean(KEY_AGGRESSIVE_THUMB_PREFETCH, true)
+        set(value) = prefs.edit().putBoolean(KEY_AGGRESSIVE_THUMB_PREFETCH, value).apply()
+
     var hasCompletedSetup: Boolean
         get() = prefs.getBoolean(KEY_SETUP_DONE, false)
         set(value) = prefs.edit().putBoolean(KEY_SETUP_DONE, value).apply()
@@ -225,6 +230,7 @@ class SyncPreferences(context: Context) {
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_BACKGROUND_SYNC_ALWAYS = "background_sync_always"
+        private const val KEY_AGGRESSIVE_THUMB_PREFETCH = "aggressive_thumbnail_prefetch"
         private const val KEY_SETUP_DONE = "setup_done"
         private const val KEY_SYNC_MODE = "sync_mode"
         private const val KEY_CLOUD_PROVIDER = "cloud_provider"
