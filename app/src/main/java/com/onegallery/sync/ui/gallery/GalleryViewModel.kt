@@ -762,10 +762,20 @@ class GalleryViewModel(
         localRevision: Long,
     ) {
         if (catalogItems.isEmpty()) return
-        val albumItems = itemsForAlbumListGrouping(catalogItems, visibleItems)
-        val placeItems = itemsForPlaceAlbumGrouping(catalogItems, visibleItems)
+        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        val albumItems = itemsForAlbumListGrouping(
+            catalogItems,
+            visibleItems,
+            onlyItemsWithThumbnail = onlyThumb,
+        )
+        val placeItems = itemsForPlaceAlbumGrouping(
+            catalogItems,
+            visibleItems,
+            onlyItemsWithThumbnail = onlyThumb,
+        )
         val pending = deferredAlbumLists.value
-        if (pending.albums.isNotEmpty() &&
+        if (!onlyThumb &&
+            pending.albums.isNotEmpty() &&
             pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
             pending.albumSort == albumSort
         ) {
@@ -1043,10 +1053,13 @@ class GalleryViewModel(
         deferAlbumCoverModels: Boolean,
         coverRevisionStamp: Long,
     ): Pair<List<MediaAlbum>, List<MediaAlbum>> {
-        if (albumLists.albums.isNotEmpty() && albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true) {
+        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        if (!onlyThumb &&
+            albumLists.albums.isNotEmpty() &&
+            albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true
+        ) {
             return albumLists.albums to albumLists.placeAlbums
         }
-        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
         if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS || onlyThumb) {
             val folderItems = if (onlyThumb) {
                 filterVisibleForGalleryBrowse(catalogItems, mediaCacheRepository, true)
@@ -1183,8 +1196,17 @@ class GalleryViewModel(
         }
         val userAlbums = snapshot.userAlbums
         val coverRevisionStamp = coverRevisions.values.fold(0L) { acc, stamp -> acc xor stamp }
-        val albumListItems = itemsForAlbumListGrouping(catalogItems, visibleItems)
-        val placeListItems = itemsForPlaceAlbumGrouping(catalogItems, visibleItems)
+        val onlyThumbBrowse = galleryPreferences.browseOnlyItemsWithThumbnail
+        val albumListItems = itemsForAlbumListGrouping(
+            catalogItems,
+            visibleItems,
+            onlyItemsWithThumbnail = onlyThumbBrowse,
+        )
+        val placeListItems = itemsForPlaceAlbumGrouping(
+            catalogItems,
+            visibleItems,
+            onlyItemsWithThumbnail = onlyThumbBrowse,
+        )
         val (displayAlbums, displayPlaceAlbums) = albumListsForUi(
             albumLists = albumLists,
             fingerprint = fingerprint,
@@ -1347,7 +1369,11 @@ class GalleryViewModel(
             }
         }
         groupDisplayItemsForPlaceAlbums(
-            itemsForPlaceAlbumGrouping(catalogItems, latestLibraryItems),
+            itemsForPlaceAlbumGrouping(
+                catalogItems,
+                latestLibraryItems,
+                onlyItemsWithThumbnail = galleryPreferences.browseOnlyItemsWithThumbnail,
+            ),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
             val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L

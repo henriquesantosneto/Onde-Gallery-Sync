@@ -1,11 +1,13 @@
 package com.onegallery.sync.ui.gallery
 
-/** Pastas: pode usar janela visível; locais usam [itemsForPlaceAlbumGrouping]. */
+/** Pastas: usa itens já filtrados para a grade; sem fallback para catálogo cheio com filtro de miniatura. */
 fun itemsForAlbumListGrouping(
     catalogItems: List<GalleryDisplayItem>,
     visibleItems: List<GalleryDisplayItem>,
+    onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
     if (visibleItems.isNotEmpty()) return visibleItems
+    if (onlyItemsWithThumbnail) return emptyList()
     return catalogItems
 }
 
@@ -13,7 +15,9 @@ fun itemsForAlbumListGrouping(
 fun itemsForPlaceAlbumGrouping(
     catalogItems: List<GalleryDisplayItem>,
     visibleItems: List<GalleryDisplayItem>,
+    onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
     if (visibleItems.isNotEmpty()) return visibleItems
+    if (onlyItemsWithThumbnail) return emptyList()
     return catalogItems
 }
