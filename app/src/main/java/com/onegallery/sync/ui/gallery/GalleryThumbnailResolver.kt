@@ -32,10 +32,8 @@ object GalleryThumbnailResolver {
                     return thumb
                 }
             }
-            cloudVideoCoilKey(item, forFilmstrip = isVideo)?.let { return it }
-            if (!isVideo) {
-                item.localUri?.let { uri -> return uri }
-            }
+            cloudVideoCoilKey(item, forFilmstrip = false)?.let { return it }
+            item.localUri?.let { uri -> return uri }
             return null
         }
         if (!filmstripVideo) {
@@ -159,20 +157,17 @@ object GalleryThumbnailResolver {
             staging.delete()
             return null
         }
-        return CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
+        val committed = CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
             staging = staging,
             mediaCacheRepository = mediaCacheRepository,
             canonicalPath = item.canonicalPath,
             oneDriveItemId = item.oneDriveItemId,
             fromGraphPoster = false,
-        ) ?: run {
-            if (VideoThumbnailHelper.isAcceptableThumbnailFile(staging)) {
-                mediaCacheRepository.commitThumbnail(staging, item.canonicalPath, item.oneDriveItemId)
-            } else {
-                staging.delete()
-                null
-            }
+        )
+        if (committed == null) {
+            staging.delete()
         }
+        return committed
     }
 
     suspend fun resolveForGrid(
@@ -266,6 +261,7 @@ object GalleryThumbnailResolver {
         if (item.kind != MediaKind.VIDEO) return null
         val itemId = item.oneDriveItemId?.takeIf { it.isNotBlank() } ?: return null
         if (!forFilmstrip &&
+            item.kind != MediaKind.VIDEO &&
             item.localUri != null &&
             item.cloudState != CloudSyncState.CLOUD_ONLY &&
             item.cloudState != CloudSyncState.PENDING_DOWNLOAD

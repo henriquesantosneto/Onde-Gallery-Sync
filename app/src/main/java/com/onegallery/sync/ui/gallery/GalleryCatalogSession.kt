@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.PlaceMatchKey
 import com.onegallery.sync.data.local.collapseItemsForPlaceAlbums
@@ -104,10 +105,18 @@ class GalleryCatalogSession {
         val current = lastBundle ?: return null
         var changed = false
         val updated = current.catalogItems.map { item ->
-            val thumb = mediaCacheRepository.displayableThumbnailIfCached(
-                item.canonicalPath,
-                item.oneDriveItemId,
-            )
+            val thumb = if (item.kind == MediaKind.VIDEO) {
+                mediaCacheRepository.galleryThumbnailResolved(
+                    item.canonicalPath,
+                    item.oneDriveItemId,
+                    requireVideoAcceptable = true,
+                )
+            } else {
+                mediaCacheRepository.displayableThumbnailIfCached(
+                    item.canonicalPath,
+                    item.oneDriveItemId,
+                )
+            }
             if (thumb != null) {
                 if (item.cachedPlaceholderThumb?.absolutePath != thumb.absolutePath) {
                     changed = true

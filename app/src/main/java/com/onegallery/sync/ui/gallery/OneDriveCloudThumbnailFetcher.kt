@@ -36,18 +36,25 @@ class OneDriveCloudThumbnailFetcher(
             "coil-cloud-vid-${key.oneDriveItemId.hashCode()}.jpg",
         )
         staging.delete()
+        val remoteSizeBytes = app.database.syncMetadataDao()
+            .getByCanonicalPath(key.canonicalPath)
+            ?.remoteSizeBytes
         val loaded = CloudVideoThumbnailLoader.loadIntoFile(
             repository = app.oneDriveRepository,
             mediaCacheRepository = app.mediaCacheRepository,
             itemId = key.oneDriveItemId,
             staging = staging,
-            remoteSizeBytes = null,
+            remoteSizeBytes = remoteSizeBytes,
             aggressive = true,
             onProgress = null,
         )
-        if (loaded == CloudVideoThumbnailLoader.Outcome.NONE ||
-            !VideoThumbnailHelper.isGalleryVideoThumbnailFile(staging)
-        ) {
+        val stagingOk = loaded != CloudVideoThumbnailLoader.Outcome.NONE &&
+            (
+                VideoThumbnailHelper.isGalleryVideoThumbnailFile(staging) ||
+                    VideoThumbnailHelper.isCloudPosterThumbnailFile(staging) ||
+                    VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
+                )
+        if (!stagingOk) {
             staging.delete()
             error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
         }

@@ -812,7 +812,11 @@ private fun MediaDetailPage(
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
         withContext(Dispatchers.Default) {
             syncCoordinator.getMetadata(canonicalPath)?.let { entity ->
-                val mapped = GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
+                val mapped = GalleryMapper.toDisplayItem(
+                    entity,
+                    mediaCacheRepository,
+                    (viewContext.applicationContext as OneGalleryApplication).localMediaRepository,
+                )
                 if (includeOriginalFile != null) {
                     mapped.copy(cachedOriginal = includeOriginalFile)
                 } else {

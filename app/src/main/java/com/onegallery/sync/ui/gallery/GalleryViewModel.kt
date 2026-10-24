@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.onegallery.sync.data.local.LocalMediaRepository
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.PlaceComponents
@@ -161,7 +162,10 @@ class GalleryViewModel(
     private val gridThumbnailPrefetchQueued = ConcurrentHashMap.newKeySet<String>()
 
     private val catalogSession = GalleryCatalogSession()
-    private val displayBuildCache = GalleryDisplayBuildCache(mediaCacheRepository)
+    private val displayBuildCache = GalleryDisplayBuildCache(
+        mediaCacheRepository,
+        localMediaRepository,
+    )
     private val localOverlayCache = GalleryLocalOverlayCache()
 
     /** Só catálogo completo já montado neste processo (RAM); sem disco warm. */
@@ -1351,7 +1355,7 @@ class GalleryViewModel(
         val paths = canonicalPaths
             .asSequence()
             .filter { it.isNotBlank() }
-            .filter { path -> mediaCacheRepository.displayableThumbnailIfCached(path) == null }
+            .filter { path -> !gridThumbnailCached(path) }
             .filter { path -> gridThumbnailPrefetchQueued.add(path) }
             .take(GRID_THUMB_PREFETCH_BATCH)
             .toList()
@@ -1387,7 +1391,7 @@ class GalleryViewModel(
                             lightweightPrefetch = lightweightPrefetch,
                             cloudVideoAggressive = videoAggressive,
                         ).getOrNull()
-                        val hit = mediaCacheRepository.displayableThumbnailIfCached(path) != null
+                        val hit = gridThumbnailCached(path)
                         if (hit) cachedAny = true
                     }
                 }
@@ -1405,6 +1409,25 @@ class GalleryViewModel(
         const val GRID_THUMB_PREFETCH_PARALLEL = 14
         const val GRID_THUMB_PREFETCH_BATCH = 96
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
+    }
+
+    private fun gridThumbnailCached(canonicalPath: String): Boolean {
+        val item = latestCatalogItems.find { it.canonicalPath == canonicalPath }
+        if (item == null) {
+            return mediaCacheRepository.displayableThumbnailIfCached(canonicalPath) != null
+        }
+        if (item.kind == MediaKind.VIDEO) {
+            return mediaCacheRepository.galleryThumbnailResolved(
+                item.canonicalPath,
+                item.oneDriveItemId,
+                requireVideoAcceptable = true,
+            ) != null
+        }
+        if (item.localUri != null) return true
+        return mediaCacheRepository.displayableThumbnailIfCached(
+            item.canonicalPath,
+            item.oneDriveItemId,
+        ) != null
     }
 
     private fun itemNeedsGeneratedThumbnail(item: GalleryDisplayItem): Boolean {

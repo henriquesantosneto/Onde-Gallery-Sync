@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import java.util.concurrent.ConcurrentHashMap
@@ -14,7 +15,12 @@ import kotlinx.coroutines.withContext
  */
 class GalleryDisplayBuildCache(
     private val mediaCacheRepository: MediaCacheRepository,
+    private val localMediaRepository: LocalMediaRepository,
 ) {
+    companion object {
+        /** Bump quando a montagem de [GalleryDisplayItem] mudar (ex.: URI local). */
+        const val DISPLAY_ITEM_BUILD_VERSION = 2
+    }
     private data class Entry(val signature: Long, val item: GalleryDisplayItem)
 
     private val byPath = ConcurrentHashMap<String, Entry>(8192)
@@ -42,7 +48,11 @@ class GalleryDisplayBuildCache(
             if (cached != null && cached.signature == sig) {
                 out.add(cached.item)
             } else {
-                GalleryMapper.toDisplayItem(entity, mediaCacheRepository).also { item ->
+                GalleryMapper.toDisplayItem(
+                    entity,
+                    mediaCacheRepository,
+                    localMediaRepository,
+                ).also { item ->
                     byPath[entity.canonicalPath] = Entry(sig, item)
                     out.add(item)
                 }
@@ -71,6 +81,7 @@ class GalleryDisplayBuildCache(
         h = h * 31L + pendingDeleteTarget.ordinal
         h = h * 31L + localReleasedForSpace.hashCode()
         h = h * 31L + (capturedAtSeconds ?: 0L)
+        h = h * 31L + DISPLAY_ITEM_BUILD_VERSION
         return h
     }
 }

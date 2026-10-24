@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import com.onegallery.sync.data.local.LocalMediaItem
+import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.PendingDeleteTarget
@@ -57,9 +58,10 @@ object GalleryMapper {
     fun toDisplayItem(
         entity: SyncMetadataEntity,
         mediaCacheRepository: MediaCacheRepository,
+        localMediaRepository: LocalMediaRepository? = null,
     ): GalleryDisplayItem {
         val kind = if (isVideoFileName(entity.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
-        val localUri = entity.localContentUri?.let { Uri.parse(it) }
+        val localUri = GalleryLocalContentUri.resolve(entity, kind, localMediaRepository)
         val cached = entity.cachedFilePath?.let { path -> File(path) }
             ?.takeIf { it.isFile && it.length() > 0L }
         val placeholderThumb = when {
@@ -140,7 +142,11 @@ object GalleryMapper {
     ): GalleryDisplayItem {
         val canonical = SyncPaths.canonicalFromLocal(item)
         val kind = if (isVideoFileName(item.displayName)) MediaKind.VIDEO else MediaKind.IMAGE
-        val placeholderThumb = mediaCacheRepository.displayableThumbnailIfCached(canonical, null)
+        val placeholderThumb = if (kind == MediaKind.VIDEO) {
+            mediaCacheRepository.galleryThumbnailResolved(canonical, null, requireVideoAcceptable = true)
+        } else {
+            mediaCacheRepository.displayableThumbnailIfCached(canonical, null)
+        }
         val sort = item.dateTakenSeconds?.takeIf { it > 0L }
             ?: item.dateAddedSeconds.takeIf { it > 0L }
             ?: item.dateModifiedSeconds.takeIf { it > 0L }
