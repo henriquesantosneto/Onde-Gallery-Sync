@@ -4,13 +4,16 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,6 +26,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,7 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,6 +62,7 @@ fun MediaDetailLabScreen(
     mediaCacheRepository: MediaCacheRepository,
     onBack: () -> Unit,
     onOpenStandardDetail: (canonicalPath: String) -> Unit,
+    onOpenPlacesMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val liveItems = state.libraryItems
@@ -118,10 +125,98 @@ fun MediaDetailLabScreen(
         activeVideoPath = pagerPaths.getOrNull(pagerState.currentPage)
     }
 
-    BackHandler(onBack = onBack)
+    var detailsSettleFraction by remember { mutableFloatStateOf(0f) }
+    var detailsDragFraction by remember { mutableFloatStateOf(0f) }
+    var detailsDragging by remember { mutableStateOf(false) }
+    var detailsContentLevel by remember { mutableStateOf(MediaDetailContentLevel.Simple) }
 
-    val filmstripVisible = filmstripItems.size > 1
+    LaunchedEffect(pagerState.currentPage) {
+        detailsSettleFraction = 0f
+        detailsDragFraction = 0f
+        detailsDragging = false
+        detailsContentLevel = MediaDetailContentLevel.Simple
+    }
+
+    fun snapDetailsPanel(velocityYPxPerSec: Float = 0f) {
+        val snapped = MediaDetailSheetAnchors.snap(detailsDragFraction, velocityYPxPerSec)
+        detailsSettleFraction = snapped
+        detailsDragFraction = snapped
+    }
+
+    fun openDetailsToSimple() {
+        if (currentPath == null) return
+        detailsSettleFraction = MediaDetailSheetAnchors.SIMPLE
+        detailsDragFraction = MediaDetailSheetAnchors.SIMPLE
+    }
+
+    val detailsDisplayFraction = rememberMediaDetailSheetFraction(
+        settleTarget = detailsSettleFraction,
+        dragFraction = detailsDragFraction,
+        dragging = detailsDragging,
+        resetKey = pagerState.currentPage,
+    )
+
+    LaunchedEffect(detailsDragging, detailsDragFraction, detailsSettleFraction) {
+        val fraction = if (detailsDragging) detailsDragFraction else detailsSettleFraction
+        detailsContentLevel = contentLevelForPanelFraction(fraction, detailsContentLevel)
+    }
+
+    val detailPaths = currentPath?.let { listOf(it) } ?: emptyList()
+    val detailsPanelOpen = when {
+        detailsDragging -> detailsDragFraction > 0.14f
+        else -> detailsSettleFraction > 0.05f
+    } && detailPaths.isNotEmpty()
+
+    BackHandler {
+        when {
+            detailsPanelOpen -> {
+                detailsSettleFraction = 0f
+                detailsDragFraction = 0f
+                detailsDragging = false
+            }
+            else -> onBack()
+        }
+    }
+
+    val filmstripVisible = filmstripItems.size > 1 && !detailsPanelOpen
     val playerBottomChromeInset = if (filmstripVisible) 100.dp else 36.dp
+
+    val configuration = LocalConfiguration.current
+    val screenHeightPx = with(LocalDensity.current) {
+        configuration.screenHeightDp.dp.toPx()
+    }
+    val showDetailsSheet = detailPaths.isNotEmpty() &&
+        (detailsDragging || detailsSettleFraction > 0.02f)
+    val useSplitPhotoLayout = showDetailsSheet || detailsDisplayFraction > 0.03f
+    val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
+    val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
+    gestureBaseFraction.floatValue = if (detailsDragging) {
+        detailsDragFraction
+    } else {
+        detailsSettleFraction
+    }
+    val panelDragBaseFraction = gestureBaseFraction.floatValue
+    val panelPullEnabled = currentPath != null && detailPaths.isNotEmpty()
+    val onPanelDragStart = {
+        detailsDragging = true
+        detailsDragFraction = gestureBaseFraction.floatValue
+    }
+    val onPanelDragFraction: (Float) -> Unit = { fraction ->
+        detailsDragging = true
+        detailsDragFraction = fraction
+    }
+    val onPanelDragEnd: (Float) -> Unit = { velocityY ->
+        snapDetailsPanel(velocityY)
+        detailsDragging = false
+    }
+    val panelDragModifier = Modifier.draggableDetailPanelHeight(
+        enabled = panelPullEnabled,
+        screenHeightPx = screenHeightPx,
+        fractionBaseState = gestureBaseFraction,
+        onDragStart = onPanelDragStart,
+        onDragFraction = onPanelDragFraction,
+        onDragEnd = onPanelDragEnd,
+    )
 
     Scaffold(
         contentWindowInsets = ZeroScaffoldContentInsets,
@@ -143,8 +238,29 @@ fun MediaDetailLabScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (detailsPanelOpen) {
+                                detailsSettleFraction = 0f
+                                detailsDragFraction = 0f
+                                detailsDragging = false
+                            } else {
+                                onBack()
+                            }
+                        },
+                    ) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar")
+                    }
+                },
+                actions = {
+                    if (currentPath != null) {
+                        IconButton(onClick = { openDetailsToSimple() }) {
+                            Icon(
+                                Icons.Outlined.Info,
+                                contentDescription = "Detalhes",
+                                tint = Color.White,
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -161,41 +277,81 @@ fun MediaDetailLabScreen(
                 .padding(padding)
                 .background(Color.Black),
         ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                key = { page -> pagerPaths.getOrElse(page) { "empty-$page" } },
-            ) { page ->
-                val path = pagerPaths.getOrNull(page) ?: return@HorizontalPager
-                val liveItem = itemsByPath[path]
-                val pageActive = pagerState.currentPage == page
-                LabMediaDetailPage(
-                    canonicalPath = path,
-                    liveItem = liveItem,
-                    isActivePage = pageActive,
-                    shouldPlayVideo = activeVideoPath == path,
-                    bottomChromeInset = playerBottomChromeInset,
-                    syncCoordinator = syncCoordinator,
-                    mediaCacheRepository = mediaCacheRepository,
-                    onOpenStandardDetail = { onOpenStandardDetail(path) },
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (useSplitPhotoLayout) photoHeightFraction else 1f)
+                    .align(Alignment.TopCenter)
+                    .then(panelDragModifier),
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = !detailsDragging,
+                    key = { page -> pagerPaths.getOrElse(page) { "empty-$page" } },
+                ) { page ->
+                    val path = pagerPaths.getOrNull(page) ?: return@HorizontalPager
+                    val liveItem = itemsByPath[path]
+                    val pageActive = pagerState.currentPage == page
+                    LabMediaDetailPage(
+                        canonicalPath = path,
+                        liveItem = liveItem,
+                        isActivePage = pageActive,
+                        shouldPlayVideo = activeVideoPath == path,
+                        bottomChromeInset = playerBottomChromeInset,
+                        syncCoordinator = syncCoordinator,
+                        mediaCacheRepository = mediaCacheRepository,
+                        onOpenStandardDetail = { onOpenStandardDetail(path) },
+                    )
+                }
+
+                if (filmstripVisible) {
+                    MediaDetailFilmstrip(
+                        items = filmstripItems,
+                        currentCanonicalPath = currentPath,
+                        onSelectPath = { path ->
+                            val index = pagerPaths.indexOf(path)
+                            if (index >= 0) {
+                                activeVideoPath = path
+                                pagerScope.launch { pagerState.scrollToPage(index) }
+                            }
+                        },
+                        syncCoordinator = syncCoordinator,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding(),
+                    )
+                }
             }
 
-            if (filmstripVisible) {
-                MediaDetailFilmstrip(
-                    items = filmstripItems,
-                    currentCanonicalPath = currentPath,
-                    onSelectPath = { path ->
-                        val index = pagerPaths.indexOf(path)
-                        if (index >= 0) {
-                            activeVideoPath = path
-                            pagerScope.launch { pagerState.scrollToPage(index) }
-                        }
-                    },
+            if (showDetailsSheet) {
+                MediaDetailPushDetailsSheet(
+                    canonicalPaths = detailPaths,
+                    displayItems = liveItems,
                     syncCoordinator = syncCoordinator,
+                    mediaCacheRepository = mediaCacheRepository,
+                    panelFraction = detailsDisplayFraction,
+                    panelDragBaseFraction = panelDragBaseFraction,
+                    contentLevel = detailsContentLevel,
+                    onPanelDragStart = {
+                        detailsDragging = true
+                        detailsDragFraction = gestureBaseFraction.floatValue
+                    },
+                    onPanelFractionChange = { fraction ->
+                        detailsDragging = true
+                        detailsDragFraction = fraction
+                    },
+                    onPanelDragEnd = { velocityY ->
+                        snapDetailsPanel(velocityY)
+                        detailsDragging = false
+                    },
+                    onOpenPlacesMap = onOpenPlacesMap,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .navigationBarsPadding(),
+                        .fillMaxWidth()
+                        .fillMaxHeight(
+                            detailsDisplayFraction.coerceIn(0.08f, MediaDetailSheetAnchors.FULL),
+                        ),
                 )
             }
         }

@@ -754,8 +754,9 @@ fun SettingsScreen(
                     info = SettingsInfoDialog(
                         title = "Player experimental",
                         body = "Quando ligado, tocar em uma mídia abre o visualizador de laboratório " +
-                            "(rota media-lab): fotos com zoom, vídeos com pílula de tempo e áudio com " +
-                            "controles de som. O detalhe padrão não é alterado. Desligue para voltar ao fluxo normal.",
+                            "(rota media-lab): fotos com zoom, vídeos com pílula de tempo, áudio com " +
+                            "controles de som e painel de detalhes (ícone ℹ ou arrastar para cima). " +
+                            "O detalhe padrão não é alterado.",
                     ),
                     checked = experimentalMediaLab,
                     onInfoClick = { settingsInfo = it },

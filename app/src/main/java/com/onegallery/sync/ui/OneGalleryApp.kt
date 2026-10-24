@@ -577,6 +577,10 @@ fun OneGalleryApp(
                             popUpTo(MEDIA_LAB_ROUTE) { inclusive = true }
                         }
                     },
+                    onOpenPlacesMap = { lat, lng ->
+                        galleryViewModel.requestPlacesMapFocus(lat, lng)
+                        navController.navigate(PLACES_MAP_ROUTE)
+                    },
                 )
             }
         }
