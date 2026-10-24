@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
@@ -33,12 +35,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -60,6 +72,7 @@ fun LabSamsungStyleVideoPlayer(
     kind: LabMediaPlaybackKind = LabMediaPlaybackKind.Video,
     displayName: String? = null,
     artworkItem: GalleryDisplayItem? = null,
+    bottomChromeInset: Dp = 32.dp,
 ) {
     LabSamsungStyleMediaPlayer(
         uri = uri,
@@ -68,6 +81,7 @@ fun LabSamsungStyleVideoPlayer(
         kind = kind,
         displayName = displayName,
         artworkItem = artworkItem,
+        bottomChromeInset = bottomChromeInset,
     )
 }
 
@@ -79,10 +93,12 @@ fun LabSamsungStyleMediaPlayer(
     kind: LabMediaPlaybackKind = LabMediaPlaybackKind.Video,
     displayName: String? = null,
     artworkItem: GalleryDisplayItem? = null,
+    /** Espaço acima da faixa de miniaturas / barra de gestos. */
+    bottomChromeInset: Dp = 32.dp,
 ) {
     val context = LocalContext.current
-    val startMuted = kind == LabMediaPlaybackKind.Video
-    var muted by remember(uri) { mutableStateOf(startMuted) }
+    val focusRequester = remember(uri) { FocusRequester() }
+    var muted by remember(uri) { mutableStateOf(false) }
     var userPlaying by remember(uri) { mutableStateOf(true) }
     var positionMs by remember(uri) { mutableLongStateOf(0L) }
     var durationMs by remember(uri) { mutableLongStateOf(0L) }
@@ -90,17 +106,39 @@ fun LabSamsungStyleMediaPlayer(
     var scrubbing by remember { mutableStateOf(false) }
 
     val player = remember(uri) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
-            repeatMode = Player.REPEAT_MODE_OFF
-            volume = if (startMuted) 0f else 1f
-            playWhenReady = false
-            prepare()
-        }
+        ExoPlayer.Builder(context)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(
+                        if (kind == LabMediaPlaybackKind.Audio) {
+                            C.AUDIO_CONTENT_TYPE_MUSIC
+                        } else {
+                            C.AUDIO_CONTENT_TYPE_MOVIE
+                        },
+                    )
+                    .build(),
+                true,
+            )
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(uri))
+                repeatMode = Player.REPEAT_MODE_OFF
+                volume = 1f
+                playWhenReady = false
+                prepare()
+            }
+    }
+
+    fun unmuteIfNeeded() {
+        if (muted) muted = false
     }
 
     LaunchedEffect(isActive) {
         userPlaying = isActive
+        if (isActive) {
+            focusRequester.requestFocus()
+        }
     }
 
     val shouldPlay = isActive && userPlaying
@@ -158,9 +196,25 @@ fun LabSamsungStyleMediaPlayer(
         else -> 0f
     }
 
-    val controlsBottomPadding = if (kind == LabMediaPlaybackKind.Audio) 108.dp else 108.dp
+    val pillBottom = bottomChromeInset + 8.dp
+    val sliderBottom = bottomChromeInset - 4.dp
 
-    Box(modifier = modifier.background(Color.Black)) {
+    Box(
+        modifier = modifier
+            .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.VolumeUp || event.key == Key.VolumeDown)
+                ) {
+                    unmuteIfNeeded()
+                    false
+                } else {
+                    false
+                }
+            },
+    ) {
         if (kind == LabMediaPlaybackKind.Video) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -190,9 +244,12 @@ fun LabSamsungStyleMediaPlayer(
                 onTogglePlay = { userPlaying = !userPlaying },
                 positionMs = positionMs,
                 durationMs = durationMs,
+                muted = muted,
+                onToggleMute = { muted = !muted },
+                showMuteInPill = kind == LabMediaPlaybackKind.Video,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 16.dp, end = 16.dp, bottom = controlsBottomPadding)
+                    .padding(start = 16.dp, end = 16.dp, bottom = pillBottom)
                     .fillMaxWidth(),
             )
 
@@ -210,7 +267,7 @@ fun LabSamsungStyleMediaPlayer(
                 },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 20.dp, end = 20.dp, bottom = 92.dp)
+                    .padding(start = 20.dp, end = 20.dp, bottom = sliderBottom)
                     .fillMaxWidth(),
                 colors = SliderDefaults.colors(
                     thumbColor = Color.White,
@@ -219,18 +276,20 @@ fun LabSamsungStyleMediaPlayer(
                 ),
             )
 
-            IconButton(
-                onClick = { muted = !muted },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = 28.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50)),
-            ) {
-                Icon(
-                    imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
-                    contentDescription = if (muted) "Ativar som" else "Silenciar",
-                    tint = Color.White,
-                )
+            if (kind == LabMediaPlaybackKind.Audio) {
+                IconButton(
+                    onClick = { muted = !muted },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = bottomChromeInset)
+                        .background(Color.Black.copy(alpha = 0.62f), CircleShape),
+                ) {
+                    Icon(
+                        imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                        contentDescription = if (muted) "Ativar som" else "Silenciar",
+                        tint = Color.White,
+                    )
+                }
             }
         }
     }
@@ -288,6 +347,9 @@ private fun LabPlaybackControlPill(
     onTogglePlay: () -> Unit,
     positionMs: Long,
     durationMs: Long,
+    muted: Boolean,
+    onToggleMute: () -> Unit,
+    showMuteInPill: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -311,8 +373,16 @@ private fun LabPlaybackControlPill(
             Text(
                 text = "${formatPlaybackClock(positionMs)} / ${formatPlaybackClock(durationMs)}",
                 color = Color.White,
-                modifier = Modifier.padding(end = 8.dp),
             )
+            if (showMuteInPill) {
+                IconButton(onClick = onToggleMute) {
+                    Icon(
+                        imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                        contentDescription = if (muted) "Ativar som" else "Silenciar",
+                        tint = if (muted) Color.White.copy(alpha = 0.65f) else Color.White,
+                    )
+                }
+            }
         }
     }
 }

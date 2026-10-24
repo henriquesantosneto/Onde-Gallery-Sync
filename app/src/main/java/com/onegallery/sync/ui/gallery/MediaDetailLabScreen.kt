@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.OneGalleryApplication
@@ -119,6 +120,9 @@ fun MediaDetailLabScreen(
 
     BackHandler(onBack = onBack)
 
+    val filmstripVisible = filmstripItems.size > 1
+    val playerBottomChromeInset = if (filmstripVisible) 100.dp else 36.dp
+
     Scaffold(
         contentWindowInsets = ZeroScaffoldContentInsets,
         containerColor = Color.Black,
@@ -170,13 +174,14 @@ fun MediaDetailLabScreen(
                     liveItem = liveItem,
                     isActivePage = pageActive,
                     shouldPlayVideo = activeVideoPath == path,
+                    bottomChromeInset = playerBottomChromeInset,
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     onOpenStandardDetail = { onOpenStandardDetail(path) },
                 )
             }
 
-            if (filmstripItems.size > 1) {
+            if (filmstripVisible) {
                 MediaDetailFilmstrip(
                     items = filmstripItems,
                     currentCanonicalPath = currentPath,
@@ -203,6 +208,7 @@ private fun LabMediaDetailPage(
     liveItem: GalleryDisplayItem?,
     isActivePage: Boolean,
     shouldPlayVideo: Boolean,
+    bottomChromeInset: Dp,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     onOpenStandardDetail: () -> Unit,
@@ -257,6 +263,7 @@ private fun LabMediaDetailPage(
                                 kind = LabMediaPlaybackKind.Audio,
                                 displayName = display.displayName,
                                 artworkItem = display,
+                                bottomChromeInset = bottomChromeInset,
                             )
                         }
                     }
@@ -274,6 +281,7 @@ private fun LabMediaDetailPage(
                                 isActive = shouldPlayVideo,
                                 kind = LabMediaPlaybackKind.Video,
                                 displayName = display.displayName,
+                                bottomChromeInset = bottomChromeInset,
                             )
                         }
                     }
