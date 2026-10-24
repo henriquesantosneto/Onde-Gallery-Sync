@@ -120,7 +120,7 @@ class GalleryCatalogSession {
             if (thumb != null) {
                 if (item.cachedPlaceholderThumb?.absolutePath != thumb.absolutePath) {
                     changed = true
-                    item.copy(cachedPlaceholderThumb = thumb, showInBrowseGrid = true)
+                    item.copy(cachedPlaceholderThumb = thumb)
                 } else {
                     item
                 }

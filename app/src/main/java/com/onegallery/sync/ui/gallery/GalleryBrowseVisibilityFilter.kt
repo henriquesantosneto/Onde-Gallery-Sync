@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 
 fun filterVisibleForGalleryBrowse(
@@ -16,7 +17,13 @@ fun filterVisibleForGalleryBrowse(
     if (items.size >= 1_500) {
         val out = ArrayList<GalleryDisplayItem>(items.size)
         for (item in items) {
-            if (item.showInBrowseGrid) out.add(item)
+            if (!item.showInBrowseGrid) continue
+            if (item.kind == MediaKind.VIDEO &&
+                !item.hasBrowsableThumbnail(mediaCacheRepository)
+            ) {
+                continue
+            }
+            out.add(item)
         }
         return out
     }

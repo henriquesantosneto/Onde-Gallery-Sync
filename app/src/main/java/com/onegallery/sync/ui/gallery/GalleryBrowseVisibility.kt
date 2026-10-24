@@ -54,5 +54,10 @@ fun GalleryDisplayItem.videoCountsAsLocalBrowseThumb(): Boolean {
     ) {
         return false
     }
-    return localUri != null
+    if (localUri == null) return false
+    if (!oneDriveItemId.isNullOrBlank() && cloudState != CloudSyncState.LOCAL_ONLY) {
+        val hasLocalCopy = cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null
+        if (!hasLocalCopy) return false
+    }
+    return true
 }
