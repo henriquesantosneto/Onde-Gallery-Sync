@@ -184,7 +184,7 @@ class GalleryViewModel(
     private val deferredAlbumLists = MutableStateFlow(restoreDeferredAlbumListsFromSession())
     private var albumListsBuildJob: Job? = null
 
-    private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
+    private val gridWindowLimit = MutableStateFlow(galleryPreferences.galleryGridWindowLimit)
 
     private val _galleryScrollToTopRequests = MutableStateFlow(0)
     val galleryScrollToTopRequests: StateFlow<Int> = _galleryScrollToTopRequests
@@ -326,7 +326,10 @@ class GalleryViewModel(
 
     fun loadMoreGridItems() {
         gridWindowLimit.update { current ->
-            current + GalleryGridPagination.pageSize
+            val next = (current + GalleryGridPagination.pageSize)
+                .coerceAtMost(GalleryGridPagination.maxPersistedWindow)
+            galleryPreferences.galleryGridWindowLimit = next
+            next
         }
     }
 
@@ -542,16 +545,12 @@ class GalleryViewModel(
 
     init {
         viewModelScope.launch {
-            combine(
-                effectiveLibrarySnapshot.map { it.fingerprint },
-                browseFilter,
-                sortOrder,
-            ) { fingerprint, filter, order ->
-                Triple(fingerprint, filter, order)
-            }
+            combine(browseFilter, sortOrder) { filter, order -> filter to order }
                 .distinctUntilChanged()
                 .collect {
-                    gridWindowLimit.value = GalleryGridPagination.initialLimit
+                    val reset = GalleryGridPagination.initialLimit
+                    gridWindowLimit.value = reset
+                    galleryPreferences.galleryGridWindowLimit = reset
                 }
         }
         viewModelScope.launch {
@@ -1076,7 +1075,7 @@ class GalleryViewModel(
             userAlbums = snap.userAlbums,
             albumListSort = galleryPreferences.albumListSort,
             indexHydrated = true,
-            gridWindowLimit = GalleryGridPagination.initialLimit,
+            gridWindowLimit = galleryPreferences.galleryGridWindowLimit,
         )
     }
 

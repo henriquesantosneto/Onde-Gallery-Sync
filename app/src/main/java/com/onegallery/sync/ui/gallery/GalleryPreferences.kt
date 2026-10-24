@@ -67,6 +67,18 @@ class GalleryPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_ZERO_DECODE_SCROLL, true)
         set(value) = prefs.edit().putBoolean(KEY_ZERO_DECODE_SCROLL, value).apply()
 
+    /**
+     * Até quantos itens a grade mantém montados (sobrevive ao sair/voltar do app).
+     * Resetado ao mudar ordenação ou filtro de pasta/local.
+     */
+    var galleryGridWindowLimit: Int
+        get() = prefs.getInt(KEY_GRID_WINDOW_LIMIT, GalleryGridPagination.initialLimit)
+            .coerceIn(GalleryGridPagination.initialLimit, GalleryGridPagination.maxPersistedWindow)
+        set(value) = prefs.edit().putInt(
+            KEY_GRID_WINDOW_LIMIT,
+            value.coerceIn(GalleryGridPagination.initialLimit, GalleryGridPagination.maxPersistedWindow),
+        ).apply()
+
     companion object {
         private const val KEY_SORT = "sort_order"
         private const val KEY_ALBUM_SORT = "album_sort"
@@ -76,5 +88,6 @@ class GalleryPreferences(context: Context) {
         private const val KEY_BROWSE_ONLY_WITH_THUMB = "browse_only_items_with_thumbnail"
         private const val KEY_LOG_PERF = "log_performance_traces"
         private const val KEY_ZERO_DECODE_SCROLL = "zero_decode_while_scrolling"
+        private const val KEY_GRID_WINDOW_LIMIT = "gallery_grid_window_limit"
     }
 }

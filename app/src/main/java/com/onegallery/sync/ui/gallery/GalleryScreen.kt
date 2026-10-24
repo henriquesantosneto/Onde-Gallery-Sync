@@ -343,7 +343,9 @@ fun GalleryScreen(
                 }
                 LaunchedEffect(gridItems) {
                     viewModel.prefetchGridThumbnails(
-                        paths = gridItems.take(96).map { it.canonicalPath },
+                        paths = gridItems
+                            .take(state.gridWindowLimit.coerceAtMost(360))
+                            .map { it.canonicalPath },
                         priority = GridThumbnailPrefetchPriority.WARMUP,
                     )
                 }
