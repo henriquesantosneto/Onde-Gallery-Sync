@@ -16,18 +16,6 @@ object GalleryThumbnailResolver {
     ): Any? {
         val isVideo = item.kind == MediaKind.VIDEO
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
-        if (style == GalleryThumbnailStyle.Grid) {
-            cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
-            item.cachedPlaceholderThumb?.let { thumb ->
-                if (mediaCacheRepository.isDisplayableGalleryThumbFile(thumb) &&
-                    (!isVideo || VideoThumbnailHelper.isGalleryVideoThumbnailFile(thumb))
-                ) {
-                    return thumb
-                }
-            }
-            cloudVideoCoilKey(item, forFilmstrip = false)?.let { return it }
-            return null
-        }
         if (!filmstripVideo) {
             item.localUri?.let { uri -> return uri }
         }
@@ -98,15 +86,12 @@ object GalleryThumbnailResolver {
         mediaCacheRepository: MediaCacheRepository,
         sizePx: Int,
         style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
-        /** Rolagem: só disco; não dispara ensureThumbnail / decode pesado. */
-        diskCacheOnly: Boolean = false,
     ): Any? {
         val isVideo = item.kind == MediaKind.VIDEO
         val preferCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
         cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
-        if (diskCacheOnly) return null
         if (filmstripVideo && item.localUri != null) {
             GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
         }

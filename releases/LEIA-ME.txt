@@ -1,12 +1,11 @@
-OneGallery Sync — APK 0.8.369 (versionCode 417)
+OneGallery Sync — APK 0.8.370 (versionCode 418)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.369-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.370-debug/OneGallerySync-debug.apk
 
 Hash Azure (Assinatura debug deste build): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
 
-Correção desta build:
-  - Rolagem não esconde mais miniaturas nem remonta a lista a cada prefetch
-  - JPEG em disco aparece imediatamente; busca pesada só ao parar
+Esta build remove zero-decode, janela grande e persistência de página (volta 72+160).
+Mantém: GPU na grade/filmstrip, RGB565, miniaturas 512px no prefetch, índice SQLite.

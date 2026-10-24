@@ -29,7 +29,6 @@ import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.util.GalleryPerfLogger
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -158,8 +157,8 @@ class GalleryViewModel(
     @Volatile
     private var pendingPlacesMapFocus: PlacesMapFocus? = null
 
-    private var gridThumbnailPrefetchWorker: Job? = null
-    private val gridThumbnailPrefetchPriorities = ConcurrentHashMap<String, Int>()
+    private var gridThumbnailPrefetchJob: Job? = null
+    private val gridThumbnailPrefetchQueued = ConcurrentHashMap.newKeySet<String>()
 
     private val catalogSession = GalleryCatalogSession()
     private val displayBuildCache = GalleryDisplayBuildCache(mediaCacheRepository)
@@ -184,7 +183,7 @@ class GalleryViewModel(
     private val deferredAlbumLists = MutableStateFlow(restoreDeferredAlbumListsFromSession())
     private var albumListsBuildJob: Job? = null
 
-    private val gridWindowLimit = MutableStateFlow(galleryPreferences.galleryGridWindowLimit)
+    private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
 
     private val _galleryScrollToTopRequests = MutableStateFlow(0)
     val galleryScrollToTopRequests: StateFlow<Int> = _galleryScrollToTopRequests
@@ -326,10 +325,7 @@ class GalleryViewModel(
 
     fun loadMoreGridItems() {
         gridWindowLimit.update { current ->
-            val next = (current + GalleryGridPagination.pageSize)
-                .coerceAtMost(GalleryGridPagination.maxPersistedWindow)
-            galleryPreferences.galleryGridWindowLimit = next
-            next
+            current + GalleryGridPagination.pageSize
         }
     }
 
@@ -463,9 +459,6 @@ class GalleryViewModel(
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
         syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
     ) { snapshot, _, syncRunning ->
-        if (GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
-            snapshot
-        } else {
         val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
         val refreshed = when {
             snapshot.catalogItems.size > 1_500 && !onlyThumb -> snapshot
@@ -486,7 +479,6 @@ class GalleryViewModel(
             )
             if (visible === refreshed.visibleItems) refreshed
             else refreshed.copy(visibleItems = visible)
-        }
         }
     }.distinctUntilChanged { previous, next ->
         previous.catalogItems === next.catalogItems &&
@@ -549,12 +541,16 @@ class GalleryViewModel(
 
     init {
         viewModelScope.launch {
-            combine(browseFilter, sortOrder) { filter, order -> filter to order }
+            combine(
+                effectiveLibrarySnapshot.map { it.fingerprint },
+                browseFilter,
+                sortOrder,
+            ) { fingerprint, filter, order ->
+                Triple(fingerprint, filter, order)
+            }
                 .distinctUntilChanged()
                 .collect {
-                    val reset = GalleryGridPagination.initialLimit
-                    gridWindowLimit.value = reset
-                    galleryPreferences.galleryGridWindowLimit = reset
+                    gridWindowLimit.value = GalleryGridPagination.initialLimit
                 }
         }
         viewModelScope.launch {
@@ -1079,7 +1075,7 @@ class GalleryViewModel(
             userAlbums = snap.userAlbums,
             albumListSort = galleryPreferences.albumListSort,
             indexHydrated = true,
-            gridWindowLimit = galleryPreferences.galleryGridWindowLimit,
+            gridWindowLimit = GalleryGridPagination.initialLimit,
         )
     }
 
@@ -1346,58 +1342,30 @@ class GalleryViewModel(
     }
 
     /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
-    fun prefetchGridThumbnails(
-        paths: List<String>,
-        priority: Int = GridThumbnailPrefetchPriority.AHEAD,
-    ) {
-        var enqueued = false
-        paths.asSequence()
+    fun prefetchGridThumbnails(canonicalPaths: List<String>) {
+        val paths = canonicalPaths
+            .asSequence()
             .filter { it.isNotBlank() }
             .filter { path -> mediaCacheRepository.displayableThumbnailIfCached(path) == null }
-            .forEach { path ->
-                gridThumbnailPrefetchPriorities.merge(path, priority) { existing, incoming ->
-                    minOf(existing, incoming)
-                }
-                enqueued = true
-            }
-        if (enqueued) {
-            ensureGridThumbnailPrefetchWorker()
-        }
-    }
-
-    private fun ensureGridThumbnailPrefetchWorker() {
-        if (gridThumbnailPrefetchWorker?.isActive == true) return
-        gridThumbnailPrefetchWorker = viewModelScope.launch(Dispatchers.IO) {
-            GalleryGridScrollGate.gridVisiblePrefetchPending = true
+            .filter { path -> gridThumbnailPrefetchQueued.add(path) }
+            .take(GRID_THUMB_PREFETCH_BATCH)
+            .toList()
+        if (paths.isEmpty()) return
+        gridThumbnailPrefetchJob?.cancel()
+        gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                while (gridThumbnailPrefetchPriorities.isNotEmpty()) {
-                    val batch = gridThumbnailPrefetchPriorities.entries
-                        .sortedWith(compareBy({ it.value }, { it.key }))
-                        .take(GRID_THUMB_PREFETCH_BATCH)
-                        .map { it.key }
-                    batch.forEach { gridThumbnailPrefetchPriorities.remove(it) }
-                    prefetchThumbnailPathsParallel(batch)
-                    if (GalleryGridScrollGate.isUserScrollingGrid) {
-                        delay(32)
-                    }
-                }
+                prefetchThumbnailPathsParallel(paths)
             } finally {
-                GalleryGridScrollGate.gridVisiblePrefetchPending = false
+                paths.forEach { gridThumbnailPrefetchQueued.remove(it) }
             }
         }
     }
 
     private suspend fun prefetchThumbnailPathsParallel(paths: List<String>) {
         if (paths.isEmpty()) return
-        val startedNs = System.nanoTime()
         var cachedAny = false
-        val parallel = if (GalleryGridScrollGate.isUserScrollingGrid) {
-            GRID_THUMB_PREFETCH_PARALLEL_SCROLL
-        } else {
-            GRID_THUMB_PREFETCH_PARALLEL
-        }
         supervisorScope {
-            val semaphore = Semaphore(parallel)
+            val semaphore = Semaphore(GRID_THUMB_PREFETCH_PARALLEL)
             paths.map { path ->
                 async {
                     semaphore.withPermit {
@@ -1412,18 +1380,16 @@ class GalleryViewModel(
             }.awaitAll()
         }
         GalleryPerfLogger.log(
-            "grid-thumb-prefetch count=${paths.size} " +
-                "ms=${(System.nanoTime() - startedNs) / 1_000_000} cached=$cachedAny",
+            "grid-thumb-prefetch count=${paths.size} cached=$cachedAny",
         )
-        if (cachedAny && !GalleryGridScrollGate.isUserScrollingGrid) {
+        if (cachedAny) {
             syncCoordinator.notifyGalleryDisplayRefresh()
         }
     }
 
     private companion object {
         const val GRID_THUMB_PREFETCH_PARALLEL = 8
-        const val GRID_THUMB_PREFETCH_PARALLEL_SCROLL = 12
-        const val GRID_THUMB_PREFETCH_BATCH = 96
+        const val GRID_THUMB_PREFETCH_BATCH = 72
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
     }
 

@@ -13,8 +13,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -22,7 +20,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
-import coil.imageLoader
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaKind
@@ -68,15 +65,12 @@ fun GalleryThumbnailImage(
             GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item),
         )
     }
-    val isGrid = style == GalleryThumbnailStyle.Grid
-    val zeroDecodeOnScroll = LocalZeroDecodeGridScroll.current
-    val gpuThumbStyle = isGrid || style == GalleryThumbnailStyle.Filmstrip
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
-        mutableStateOf(gpuThumbStyle)
+        mutableStateOf(style == GalleryThumbnailStyle.Grid)
     }
 
     LaunchedEffect(displayData) {
-        allowHardwareBitmap = gpuThumbStyle
+        allowHardwareBitmap = style == GalleryThumbnailStyle.Grid
     }
 
     LaunchedEffect(
@@ -102,9 +96,6 @@ fun GalleryThumbnailImage(
                 item,
             )
         }
-        val diskOnly = isGrid &&
-            zeroDecodeOnScroll &&
-            GalleryGridScrollGate.isUserScrollingGrid
         try {
             withContext(Dispatchers.IO) {
                 GalleryThumbnailResolver.resolveForGrid(
@@ -114,7 +105,6 @@ fun GalleryThumbnailImage(
                     mediaCacheRepository = mediaCacheRepository,
                     sizePx = sizePx,
                     style = style,
-                    diskCacheOnly = diskOnly,
                 )
             }?.let { resolved ->
                 displayData = resolved
@@ -124,54 +114,23 @@ fun GalleryThumbnailImage(
         }
     }
 
-    LaunchedEffect(item.canonicalPath, zeroDecodeOnScroll) {
-        if (!isGrid || !zeroDecodeOnScroll) return@LaunchedEffect
-        snapshotFlow { GalleryGridScrollGate.isUserScrollingGrid }
-            .distinctUntilChanged()
-            .collect { scrolling ->
-                if (scrolling) return@collect
-                if (displayData is java.io.File &&
-                    !GalleryThumbnailResolver.isStaleDisplayData(item, displayData, mediaCacheRepository)
-                ) {
-                    return@collect
-                }
-                withContext(Dispatchers.IO) {
-                    GalleryThumbnailResolver.resolveForGrid(
-                        context = context,
-                        item = item,
-                        thumbnailCache = thumbCache,
-                        mediaCacheRepository = mediaCacheRepository,
-                        sizePx = sizePx,
-                        style = style,
-                        diskCacheOnly = false,
-                    )
-                }?.let { resolved ->
-                    displayData = resolved
-                }
-            }
-    }
-
-    val paintModel = displayData ?: mediaCacheRepository.displayableThumbnailIfCached(
-        item.canonicalPath,
-        item.oneDriveItemId,
-    )
-
     val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
         item.kind == MediaKind.VIDEO &&
-        (paintModel == null || paintModel is android.net.Uri)
-    if (paintModel != null && !filmstripVideoPending) {
-        val memoryCacheKey = galleryThumbnailMemoryCacheKey(
-            item.canonicalPath,
-            sizePx,
-            style,
-            allowHardwareBitmap,
-        )
-        val request = remember(paintModel, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
+        (displayData == null || displayData is android.net.Uri)
+    if (displayData != null && !filmstripVideoPending) {
+        val request = remember(displayData, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
             ImageRequest.Builder(context)
-                .data(paintModel)
+                .data(displayData)
                 .size(sizePx)
                 .applyGalleryThumbnailLoading(style, allowHardwareBitmap)
-                .memoryCacheKey(memoryCacheKey)
+                .memoryCacheKey(
+                    galleryThumbnailMemoryCacheKey(
+                        item.canonicalPath,
+                        sizePx,
+                        style,
+                        allowHardwareBitmap,
+                    ),
+                )
                 .diskCacheKey("${item.canonicalPath}:$sizePx")
                 .build()
         }
@@ -182,9 +141,8 @@ fun GalleryThumbnailImage(
             contentScale = contentScale,
             onState = { state ->
                 if (state is AsyncImagePainter.State.Error &&
-                    gpuThumbStyle &&
-                    allowHardwareBitmap &&
-                    !GalleryGridScrollGate.isUserScrollingGrid
+                    style == GalleryThumbnailStyle.Grid &&
+                    allowHardwareBitmap
                 ) {
                     allowHardwareBitmap = false
                 }
@@ -203,12 +161,11 @@ fun GalleryThumbnailImage(
             },
         )
     } else {
-        val scrolling = isGrid && GalleryGridScrollGate.isUserScrollingGrid
         val cloudOnly = item.cloudState == CloudSyncState.CLOUD_ONLY ||
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         MediaThumbnailPlaceholder(
             modifier = modifier,
-            showCloudIcon = !resolvingThumb && !scrolling &&
+            showCloudIcon = !resolvingThumb &&
                 (
                     cloudOnly ||
                         (
@@ -216,7 +173,7 @@ fun GalleryThumbnailImage(
                                 item.cloudState != CloudSyncState.PENDING_DOWNLOAD
                             )
                     ),
-            showLoading = resolvingThumb && !scrolling,
+            showLoading = resolvingThumb,
         )
     }
 }

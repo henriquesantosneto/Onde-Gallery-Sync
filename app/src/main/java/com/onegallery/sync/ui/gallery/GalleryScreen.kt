@@ -335,51 +335,29 @@ fun GalleryScreen(
                     enabled = dateTimeline,
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
-                var gridScrolling by remember { mutableStateOf(false) }
-                LaunchedEffect(gridState, syncCoordinator) {
-                    snapshotFlow { gridState.isScrollInProgress }
-                        .distinctUntilChanged()
-                        .collect { scrolling ->
-                            gridScrolling = scrolling
-                            if (!scrolling) {
-                                syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
-                            }
-                        }
-                }
                 LaunchedEffect(gridItems) {
                     viewModel.prefetchGridThumbnails(
-                        paths = gridItems
-                            .take(state.gridWindowLimit.coerceAtMost(360))
-                            .map { it.canonicalPath },
-                        priority = GridThumbnailPrefetchPriority.WARMUP,
+                        gridItems.take(48).map { it.canonicalPath },
                     )
                 }
                 LaunchedEffect(gridState, gridEntries) {
                     snapshotFlow {
-                        galleryGridVisiblePaths(gridState.layoutInfo, gridEntries)
-                    }
-                        .distinctUntilChanged()
-                        .collect { paths ->
-                            viewModel.prefetchGridThumbnails(
-                                paths = paths,
-                                priority = GridThumbnailPrefetchPriority.VISIBLE,
-                            )
+                        val layout = gridState.layoutInfo
+                        val visible = layout.visibleItemsInfo
+                        if (visible.isEmpty()) return@snapshotFlow emptyList<String>()
+                        val first = visible.first().index
+                        val last = visible.last().index
+                        val end = (last + 36).coerceAtMost(gridEntries.lastIndex)
+                        (first..end).mapNotNull { index ->
+                            when (val entry = gridEntries.getOrNull(index)) {
+                                is GalleryGridEntry.Photo -> entry.item.canonicalPath
+                                else -> null
+                            }
                         }
-                }
-                LaunchedEffect(gridState, gridEntries) {
-                    snapshotFlow {
-                        galleryGridPrefetchPaths(
-                            layoutInfo = gridState.layoutInfo,
-                            entries = gridEntries,
-                            screensAhead = 2,
-                        )
                     }
                         .distinctUntilChanged()
                         .collect { paths ->
-                            viewModel.prefetchGridThumbnails(
-                                paths = paths,
-                                priority = GridThumbnailPrefetchPriority.AHEAD,
-                            )
+                            viewModel.prefetchGridThumbnails(paths)
                         }
                 }
                 LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
@@ -398,10 +376,6 @@ fun GalleryScreen(
                             }
                         }
                 }
-                ProvideGalleryGridScrollState(
-                    isScrolling = gridScrolling,
-                    zeroDecodeWhileScrolling = galleryPreferences.zeroDecodeWhileScrolling,
-                ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -466,7 +440,6 @@ fun GalleryScreen(
                             modifier = Modifier.align(Alignment.CenterEnd),
                         )
                     }
-                }
                 }
             }
         }
