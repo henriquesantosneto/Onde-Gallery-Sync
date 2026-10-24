@@ -53,6 +53,9 @@ object GalleryThumbnailScrollPaint {
         if (file != null && mediaCacheRepository.isDisplayableGalleryThumbFile(file)) {
             return file
         }
+        if (displayData is OneDriveCloudThumbnailKey) {
+            return displayData
+        }
         return null
     }
 }

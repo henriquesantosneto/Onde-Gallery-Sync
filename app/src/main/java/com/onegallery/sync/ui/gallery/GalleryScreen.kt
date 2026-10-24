@@ -340,9 +340,14 @@ fun GalleryScreen(
                     snapshotFlow { gridState.isScrollInProgress }
                         .distinctUntilChanged()
                         .collect { scrolling ->
-                            gridScrolling = scrolling
-                            if (!scrolling) {
-                                syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
+                            if (scrolling) {
+                                gridScrolling = true
+                            } else {
+                                kotlinx.coroutines.delay(64)
+                                if (!gridState.isScrollInProgress) {
+                                    gridScrolling = false
+                                    syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
+                                }
                             }
                         }
                 }

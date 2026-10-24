@@ -78,9 +78,13 @@ fun GalleryThumbnailImage(
         mutableStateOf(gpuThumbStyle)
     }
     var filmstripVideoRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
+    var lastStableGridPaint by remember(item.canonicalPath, sizePx) {
+        mutableStateOf<Any?>(null)
+    }
 
-    LaunchedEffect(displayData) {
+    LaunchedEffect(item.canonicalPath, sizePx, style) {
         allowHardwareBitmap = gpuThumbStyle
+        lastStableGridPaint = null
     }
 
     LaunchedEffect(
@@ -133,7 +137,9 @@ fun GalleryThumbnailImage(
                     diskCacheOnly = diskOnly,
                 )
             }?.let { resolved ->
-                displayData = resolved
+                if (resolved != displayData) {
+                    displayData = resolved
+                }
             }
         } finally {
             resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
@@ -176,13 +182,17 @@ fun GalleryThumbnailImage(
                 .distinctUntilChanged()
                 .collect { scrolling ->
                     if (scrolling) return@collect
-                    if (displayData is java.io.File &&
+                    val currentFile = displayData as? java.io.File
+                    if (currentFile != null &&
                         !GalleryThumbnailResolver.isStaleDisplayData(
                             item,
-                            displayData,
+                            currentFile,
                             mediaCacheRepository,
                         )
                     ) {
+                        return@collect
+                    }
+                    if (displayData != null && displayData !is Uri) {
                         return@collect
                     }
                     withContext(Dispatchers.IO) {
@@ -196,13 +206,15 @@ fun GalleryThumbnailImage(
                             diskCacheOnly = false,
                         )
                     }?.let { resolved ->
-                        displayData = resolved
+                        if (resolved != displayData) {
+                            displayData = resolved
+                        }
                     }
                 }
         }
     }
 
-    val paintModel = if (isGrid) {
+    val rawPaintModel = if (isGrid) {
         GalleryThumbnailScrollPaint.paintModelForGridCell(
             displayData = displayData,
             item = item,
@@ -219,6 +231,16 @@ fun GalleryThumbnailImage(
         } else {
             raw
         }
+    }
+    val paintModel = when {
+        rawPaintModel != null -> {
+            if (isGrid) {
+                lastStableGridPaint = rawPaintModel
+            }
+            rawPaintModel
+        }
+        isGrid && scrollLocked && lastStableGridPaint != null -> lastStableGridPaint
+        else -> null
     }
 
     val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
