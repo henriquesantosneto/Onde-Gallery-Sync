@@ -782,12 +782,12 @@ fun SettingsScreen(
             item {
                 SettingsSwitchRow(
                     title = "Zero decode na rolagem",
-                    summary = "Enquanto rola, só mostra miniatura já pronta (estilo galeria rápida).",
+                    summary = "Enquanto rola, não busca miniatura nova na rede/CPU pesada.",
                     info = SettingsInfoDialog(
                         title = "Zero decode na rolagem",
-                        body = "Ligado: durante o scroll a grade não decodifica fotos novas — só " +
-                            "cola JPEG/cache. Ao parar, preenche o que faltou. O sync em massa de " +
-                            "miniaturas pausa enquanto você rola.",
+                        body = "Ligado: durante o scroll a grade continua mostrando JPEG já em cache " +
+                            "e adia buscas pesadas até você parar. O sync em massa de miniaturas " +
+                            "pausa enquanto você rola.",
                     ),
                     checked = zeroDecodeWhileScrolling,
                     onInfoClick = { settingsInfo = it },

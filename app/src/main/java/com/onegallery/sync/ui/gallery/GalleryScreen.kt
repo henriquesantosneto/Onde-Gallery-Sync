@@ -336,10 +336,15 @@ fun GalleryScreen(
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
                 var gridScrolling by remember { mutableStateOf(false) }
-                LaunchedEffect(gridState) {
+                LaunchedEffect(gridState, syncCoordinator) {
                     snapshotFlow { gridState.isScrollInProgress }
                         .distinctUntilChanged()
-                        .collect { gridScrolling = it }
+                        .collect { scrolling ->
+                            gridScrolling = scrolling
+                            if (!scrolling) {
+                                syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
+                            }
+                        }
                 }
                 LaunchedEffect(gridItems) {
                     viewModel.prefetchGridThumbnails(

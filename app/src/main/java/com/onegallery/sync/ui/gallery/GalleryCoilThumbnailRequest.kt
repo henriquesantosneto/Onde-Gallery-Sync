@@ -37,10 +37,8 @@ internal fun galleryThumbnailMemoryCacheKey(
     baseKey: String,
     sizePx: Int,
     style: GalleryThumbnailStyle,
-    allowHardwareBitmap: Boolean,
+    @Suppress("UNUSED_PARAMETER") allowHardwareBitmap: Boolean,
 ): String {
-    val gpuEligible = style == GalleryThumbnailStyle.Grid ||
-        style == GalleryThumbnailStyle.Filmstrip
-    val hw = gpuEligible && allowHardwareBitmap
-    return "$baseKey:$sizePx:${style.name}:hw=$hw"
+    // Chave estável — evita recarregar ao alternar hardware/software na mesma célula.
+    return "$baseKey:$sizePx:${style.name}"
 }

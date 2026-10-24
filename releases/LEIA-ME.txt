@@ -1,13 +1,12 @@
-OneGallery Sync — APK 0.8.368 (versionCode 416)
+OneGallery Sync — APK 0.8.369 (versionCode 417)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.368-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.369-debug/OneGallerySync-debug.apk
 
 Hash Azure (Assinatura debug deste build): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
 
-Novidades desta build:
-  - Grade carrega ~280 fotos por padrão (+240 por página), janela persistida
-  - Sync não zera mais a janela da grade (só ao mudar filtro/ordem)
-  - Coil memory cache 30% RAM (menos re-decode ao rolar)
+Correção desta build:
+  - Rolagem não esconde mais miniaturas nem remonta a lista a cada prefetch
+  - JPEG em disco aparece imediatamente; busca pesada só ao parar

@@ -725,7 +725,21 @@ class SyncCoordinator(
     private val _albumCoverRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     val albumCoverRevisions: StateFlow<Map<String, Long>> = _albumCoverRevisions.asStateFlow()
 
+    @Volatile
+    private var pendingGalleryDisplayRefresh: Boolean = false
+
     fun notifyGalleryDisplayRefresh() {
+        if (com.onegallery.sync.ui.gallery.GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
+            pendingGalleryDisplayRefresh = true
+            return
+        }
+        pendingGalleryDisplayRefresh = false
+        _galleryDisplayRefreshEpoch.value = System.nanoTime()
+    }
+
+    fun flushPendingGalleryDisplayRefreshIfAny() {
+        if (!pendingGalleryDisplayRefresh) return
+        pendingGalleryDisplayRefresh = false
         _galleryDisplayRefreshEpoch.value = System.nanoTime()
     }
 
