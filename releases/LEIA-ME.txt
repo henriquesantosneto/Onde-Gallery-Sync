@@ -1,8 +1,14 @@
-OneGallery Sync — APK 0.8.371 (versionCode 419)
+OneGallery Sync — APK 0.8.372 (versionCode 420)
 =============================================
 
 Download:
 
-  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.371-debug/OneGallerySync-debug.apk
+  https://github.com/henriquesantosneto/Onde-Gallery-Sync/releases/download/v0.8.372-debug/OneGallerySync-debug.apk
 
-Zero decode na rolagem (ligado por padrão) sem alterar paginação 72+160.
+Hash Azure (Assinatura debug deste build): pH93hJ0fsCAwFF5NxVPK0Snx6Ws=
+
+Se a instalação falhar ("pacote inválido" / "app não instalado"):
+  1. Desinstale qualquer OneGallery Sync antigo (Ajustes → Apps).
+  2. Baixe só pelo link GitHub Releases acima (não use HTML do repositório).
+  3. Permita instalar apps desconhecidos para Chrome ou "Meus arquivos".
+  4. Se você compilou o APK no seu PC antes, a assinatura era outra — desinstale primeiro.
