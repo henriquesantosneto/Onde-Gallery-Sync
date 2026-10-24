@@ -2,8 +2,6 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,9 +34,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -178,24 +174,7 @@ fun VideoPlayerView(
                     .matchParentSize()
                     .zIndex(1f)
                     .pointerInput(uri, onVideoAreaTap) {
-                        val touchSlop = viewConfiguration.touchSlop
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
-                            var sumMove = Offset.Zero
-                            var sawMultiTouch = false
-                            do {
-                                val event = awaitPointerEvent()
-                                val pressed = event.changes.filter { it.pressed }
-                                if (pressed.size >= 2) {
-                                    sawMultiTouch = true
-                                } else if (pressed.size == 1) {
-                                    sumMove += pressed.first().positionChange()
-                                }
-                            } while (event.changes.any { it.pressed })
-                            if (!sawMultiTouch && sumMove.getDistance() < touchSlop) {
-                                onVideoAreaTap.invoke()
-                            }
-                        }
+                        detectImmersiveToggleTapMainPass { onVideoAreaTap.invoke() }
                     },
             )
         }
