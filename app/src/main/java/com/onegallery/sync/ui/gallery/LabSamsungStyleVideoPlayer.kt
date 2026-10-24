@@ -4,15 +4,18 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,7 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -41,15 +46,43 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
+enum class LabMediaPlaybackKind {
+    Video,
+    Audio,
+}
+
 /** Player experimental (estilo Samsung) — não substitui [VideoPlayerView]. */
 @Composable
 fun LabSamsungStyleVideoPlayer(
     uri: Uri,
     modifier: Modifier = Modifier,
     isActive: Boolean = true,
+    kind: LabMediaPlaybackKind = LabMediaPlaybackKind.Video,
+    displayName: String? = null,
+    artworkItem: GalleryDisplayItem? = null,
+) {
+    LabSamsungStyleMediaPlayer(
+        uri = uri,
+        modifier = modifier,
+        isActive = isActive,
+        kind = kind,
+        displayName = displayName,
+        artworkItem = artworkItem,
+    )
+}
+
+@Composable
+fun LabSamsungStyleMediaPlayer(
+    uri: Uri,
+    modifier: Modifier = Modifier,
+    isActive: Boolean = true,
+    kind: LabMediaPlaybackKind = LabMediaPlaybackKind.Video,
+    displayName: String? = null,
+    artworkItem: GalleryDisplayItem? = null,
 ) {
     val context = LocalContext.current
-    var muted by remember(uri) { mutableStateOf(true) }
+    val startMuted = kind == LabMediaPlaybackKind.Video
+    var muted by remember(uri) { mutableStateOf(startMuted) }
     var userPlaying by remember(uri) { mutableStateOf(true) }
     var positionMs by remember(uri) { mutableLongStateOf(0L) }
     var durationMs by remember(uri) { mutableLongStateOf(0L) }
@@ -60,7 +93,7 @@ fun LabSamsungStyleVideoPlayer(
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             repeatMode = Player.REPEAT_MODE_OFF
-            volume = 0f
+            volume = if (startMuted) 0f else 1f
             playWhenReady = false
             prepare()
         }
@@ -125,52 +158,43 @@ fun LabSamsungStyleVideoPlayer(
         else -> 0f
     }
 
+    val controlsBottomPadding = if (kind == LabMediaPlaybackKind.Audio) 108.dp else 108.dp
+
     Box(modifier = modifier.background(Color.Black)) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    this.player = player
-                    useController = false
-                    isClickable = false
-                    isFocusable = false
-                    setOnTouchListener { _, _ -> false }
-                }
-            },
-            update = { view ->
-                if (view.player != player) view.player = player
-            },
-        )
+        if (kind == LabMediaPlaybackKind.Video) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        this.player = player
+                        useController = false
+                        isClickable = false
+                        isFocusable = false
+                        setOnTouchListener { _, _ -> false }
+                    }
+                },
+                update = { view ->
+                    if (view.player != player) view.player = player
+                },
+            )
+        } else {
+            LabAudioArtworkPanel(
+                displayName = displayName,
+                artworkItem = artworkItem,
+            )
+        }
 
         if (isActive) {
-            Row(
+            LabPlaybackControlPill(
+                userPlaying = userPlaying,
+                onTogglePlay = { userPlaying = !userPlaying },
+                positionMs = positionMs,
+                durationMs = durationMs,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 16.dp, end = 16.dp, bottom = 108.dp)
+                    .padding(start = 16.dp, end = 16.dp, bottom = controlsBottomPadding)
                     .fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(28.dp))
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { userPlaying = !userPlaying }) {
-                        Icon(
-                            imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
-                            tint = Color.White,
-                        )
-                    }
-                    Text(
-                        text = "${formatPlaybackClock(positionMs)} / ${formatPlaybackClock(durationMs)}",
-                        color = Color.White,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
-                }
-            }
+            )
 
             Slider(
                 value = displayFraction,
@@ -208,6 +232,87 @@ fun LabSamsungStyleVideoPlayer(
                     tint = Color.White,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun LabAudioArtworkPanel(
+    displayName: String?,
+    artworkItem: GalleryDisplayItem?,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, vertical = 72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(220.dp)
+                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (artworkItem != null && artworkItem.detailPreviewModel() != null) {
+                MediaThumbnailImage(
+                    item = artworkItem,
+                    contentDescription = displayName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Icon(
+                    Icons.Outlined.MusicNote,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier.size(72.dp),
+                )
+            }
+        }
+        if (!displayName.isNullOrBlank()) {
+            Text(
+                text = displayName,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LabPlaybackControlPill(
+    userPlaying: Boolean,
+    onTogglePlay: () -> Unit,
+    positionMs: Long,
+    durationMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(28.dp))
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onTogglePlay) {
+                Icon(
+                    imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
+                    tint = Color.White,
+                )
+            }
+            Text(
+                text = "${formatPlaybackClock(positionMs)} / ${formatPlaybackClock(durationMs)}",
+                color = Color.White,
+                modifier = Modifier.padding(end = 8.dp),
+            )
         }
     }
 }

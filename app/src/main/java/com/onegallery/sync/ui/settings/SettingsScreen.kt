@@ -750,12 +750,12 @@ fun SettingsScreen(
             item {
                 SettingsSwitchRow(
                     title = "Player de mídia experimental",
-                    summary = "Rota separada (estilo Samsung). Desligado = visualizador atual.",
+                    summary = "Fotos, vídeos e áudio em rota de teste (estilo Samsung).",
                     info = SettingsInfoDialog(
                         title = "Player experimental",
                         body = "Quando ligado, tocar em uma mídia abre o visualizador de laboratório " +
-                            "(rota media-lab), sem alterar o código do detalhe padrão. " +
-                            "Desligue para voltar ao fluxo normal.",
+                            "(rota media-lab): fotos com zoom, vídeos com pílula de tempo e áudio com " +
+                            "controles de som. O detalhe padrão não é alterado. Desligue para voltar ao fluxo normal.",
                     ),
                     checked = experimentalMediaLab,
                     onInfoClick = { settingsInfo = it },

@@ -16,7 +16,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -240,23 +239,56 @@ private fun LabMediaDetailPage(
         when {
             loading && item == null -> CircularProgressIndicator(color = Color.White)
             item == null -> Text("Item não encontrado.", color = Color.White)
-            item?.kind != MediaKind.VIDEO -> {
-                LabNonVideoPlaceholder(onOpenStandardDetail = onOpenStandardDetail)
-            }
             else -> {
                 val display = item!!
-                val playback = display.playbackUri()
-                if (playback == null) {
-                    LabNonVideoPlaceholder(
-                        message = "Vídeo sem URI de reprodução. Use o visualizador padrão.",
-                        onOpenStandardDetail = onOpenStandardDetail,
-                    )
-                } else {
-                    LabSamsungStyleVideoPlayer(
-                        uri = playback,
-                        modifier = Modifier.fillMaxSize(),
-                        isActive = shouldPlayVideo,
-                    )
+                when {
+                    GalleryMapper.isAudioFileName(display.displayName) -> {
+                        val playback = display.playbackUri()
+                        if (playback == null) {
+                            LabUnsupportedMediaMessage(
+                                message = "Áudio sem arquivo local. Abra no visualizador padrão ou sincronize.",
+                                onOpenStandardDetail = onOpenStandardDetail,
+                            )
+                        } else {
+                            LabSamsungStyleMediaPlayer(
+                                uri = playback,
+                                modifier = Modifier.fillMaxSize(),
+                                isActive = shouldPlayVideo,
+                                kind = LabMediaPlaybackKind.Audio,
+                                displayName = display.displayName,
+                                artworkItem = display,
+                            )
+                        }
+                    }
+                    display.kind == MediaKind.VIDEO -> {
+                        val playback = display.playbackUri()
+                        if (playback == null) {
+                            LabUnsupportedMediaMessage(
+                                message = "Vídeo sem URI de reprodução. Use o visualizador padrão.",
+                                onOpenStandardDetail = onOpenStandardDetail,
+                            )
+                        } else {
+                            LabSamsungStyleMediaPlayer(
+                                uri = playback,
+                                modifier = Modifier.fillMaxSize(),
+                                isActive = shouldPlayVideo,
+                                kind = LabMediaPlaybackKind.Video,
+                                displayName = display.displayName,
+                            )
+                        }
+                    }
+                    display.detailPreviewModel() != null -> {
+                        LabSamsungStylePhotoViewer(
+                            item = display,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    else -> {
+                        LabUnsupportedMediaMessage(
+                            message = "Prévia indisponível neste lab. Detalhes completos no visualizador padrão.",
+                            onOpenStandardDetail = onOpenStandardDetail,
+                        )
+                    }
                 }
             }
         }
@@ -264,8 +296,8 @@ private fun LabMediaDetailPage(
 }
 
 @Composable
-private fun LabNonVideoPlaceholder(
-    message: String = "O player lab foca em vídeos. Fotos e detalhes completos ficam no visualizador padrão.",
+private fun LabUnsupportedMediaMessage(
+    message: String,
     onOpenStandardDetail: () -> Unit,
 ) {
     Box(
@@ -280,7 +312,7 @@ private fun LabNonVideoPlaceholder(
                 color = Color.White.copy(alpha = 0.9f),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            OutlinedButton(
+            androidx.compose.material3.OutlinedButton(
                 onClick = onOpenStandardDetail,
                 modifier = Modifier.padding(top = 16.dp),
             ) {
