@@ -564,6 +564,34 @@ class GalleryViewModel(
         }
         viewModelScope.launch {
             combine(
+                syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
+                effectiveLibrarySnapshot,
+                albumListSort,
+            ) { epoch, snapshot, sort ->
+                Triple(epoch, snapshot, sort)
+            }
+                .distinctUntilChanged { previous, next ->
+                    previous.first == next.first &&
+                        previous.third == next.third &&
+                        previous.second.visibleItems.size == next.second.visibleItems.size
+                }
+                .collect { (_, snapshot, sort) ->
+                    if (!galleryPreferences.browseOnlyItemsWithThumbnail) return@collect
+                    if (snapshot.visibleItems.isEmpty()) return@collect
+                    val fingerprint = snapshot.fingerprint ?: return@collect
+                    scheduleAlbumListsFromLocalCatalog(
+                        catalogItems = snapshot.catalogItems,
+                        visibleItems = snapshot.visibleItems,
+                        fingerprint = fingerprint,
+                        userAlbums = snapshot.userAlbums,
+                        albumSort = sort,
+                        localRevision = catalogSession.lastBundle?.localRevision
+                            ?: localMediaRepository.localGalleryRevision.value,
+                    )
+                }
+        }
+        viewModelScope.launch {
+            combine(
                 effectiveLibrarySnapshot,
                 albumListSort,
                 syncCoordinator.galleryMetadata,
@@ -958,12 +986,15 @@ class GalleryViewModel(
             }
             val coverRevisionStamp =
                 syncCoordinator.albumCoverRevisions.value.values.fold(0L) { acc, stamp -> acc xor stamp }
+            val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
             val skeletonAlbums = GalleryAlbumIndexBuilder.buildFolderAlbums(
                 metadata = metadata,
                 userAlbums = userAlbums,
                 sort = albumSort,
                 albumCoverLocalIndex = albumCoverLocalIndex,
                 mediaCacheRepository = mediaCacheRepository,
+                localMediaRepository = localMediaRepository,
+                onlyItemsWithThumbnail = onlyThumb,
                 resolveCoverModels = false,
             )
             val skeletonPlaces = GalleryAlbumIndexBuilder.buildPlaceAlbums(
@@ -971,6 +1002,8 @@ class GalleryViewModel(
                 sort = albumSort,
                 albumCoverLocalIndex = albumCoverLocalIndex,
                 mediaCacheRepository = mediaCacheRepository,
+                localMediaRepository = localMediaRepository,
+                onlyItemsWithThumbnail = onlyThumb,
                 resolveCoverModels = false,
             )
             if (deferCovers) {
@@ -983,6 +1016,8 @@ class GalleryViewModel(
                 sort = albumSort,
                 albumCoverLocalIndex = albumCoverLocalIndex,
                 mediaCacheRepository = mediaCacheRepository,
+                localMediaRepository = localMediaRepository,
+                onlyItemsWithThumbnail = onlyThumb,
                 resolveCoverModels = true,
             )
             val placesWithCovers = GalleryAlbumIndexBuilder.buildPlaceAlbums(
@@ -990,6 +1025,8 @@ class GalleryViewModel(
                 sort = albumSort,
                 albumCoverLocalIndex = albumCoverLocalIndex,
                 mediaCacheRepository = mediaCacheRepository,
+                localMediaRepository = localMediaRepository,
+                onlyItemsWithThumbnail = onlyThumb,
                 resolveCoverModels = true,
             )
             publishLists(withCovers, placesWithCovers, coverRevisionStamp)
@@ -1009,9 +1046,20 @@ class GalleryViewModel(
         if (albumLists.albums.isNotEmpty() && albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true) {
             return albumLists.albums to albumLists.placeAlbums
         }
-        if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS) {
+        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS || onlyThumb) {
+            val folderItems = if (onlyThumb) {
+                filterVisibleForGalleryBrowse(catalogItems, mediaCacheRepository, true)
+            } else {
+                catalogItems
+            }
+            val placeItems = if (onlyThumb) {
+                filterVisibleForGalleryBrowse(placeCatalogItems, mediaCacheRepository, true)
+            } else {
+                placeCatalogItems
+            }
             return catalogSession.albumsFor(
-                catalogItems = catalogItems,
+                catalogItems = folderItems,
                 userAlbums = userAlbums,
                 albumSort = albumSort,
                 deferCoverModels = deferAlbumCoverModels,
@@ -1019,7 +1067,7 @@ class GalleryViewModel(
                 mediaCacheRepository = mediaCacheRepository,
                 coverRevisionStamp = coverRevisionStamp,
             ) to catalogSession.placeAlbumsFor(
-                catalogItems = placeCatalogItems,
+                catalogItems = placeItems,
                 albumSort = albumSort,
                 deferCoverModels = deferAlbumCoverModels,
                 albumCoverLocalIndex = albumCoverLocalIndex,
@@ -1707,10 +1755,11 @@ internal fun buildAlbums(
 ): List<MediaAlbum> {
     val grouped = mirrored.groupBy { it.albumName }
     val titles = (userAlbums.map { it.title } + grouped.keys).distinct()
-    val albums = titles.map { title ->
+    val albums = titles.mapNotNull { title ->
         val items = grouped[title].orEmpty()
-        val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
         val userMeta = userAlbums.find { it.title == title }
+        if (items.isEmpty() && userMeta == null) return@mapNotNull null
+        val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
         val photoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
         val videoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
         MediaAlbum(
@@ -1752,7 +1801,8 @@ internal fun buildPlaceAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    return groupDisplayItemsForPlaceAlbums(items).map { (encodedKey, group) ->
+    return groupDisplayItemsForPlaceAlbums(items).mapNotNull { (encodedKey, group) ->
+        if (group.isEmpty()) return@mapNotNull null
         val coverItem = if (resolveCoverModels) {
             resolveAlbumCoverItem(group, mediaCacheRepository)
         } else {
