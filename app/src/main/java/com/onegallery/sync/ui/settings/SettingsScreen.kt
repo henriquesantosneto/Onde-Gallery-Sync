@@ -102,7 +102,7 @@ fun SettingsScreen(
     val authState by authManager.state.collectAsStateWithLifecycle()
     val syncState by syncCoordinator.state.collectAsStateWithLifecycle()
     val syncBusy = syncState.isSyncBusy
-    val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle(initialValue = null)
+    val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle()
     val usageStats = indexStats?.let { IndexUsageStats.from(it) }
     var wifiOnly by remember { mutableStateOf(syncPreferences.wifiOnly) }
     var backgroundAlways by remember { mutableStateOf(syncPreferences.backgroundSyncAlwaysEnabled) }

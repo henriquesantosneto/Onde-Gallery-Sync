@@ -2,6 +2,7 @@ package com.onegallery.sync.sync
 
 import android.content.Context
 import com.onegallery.sync.data.cloud.CloudProvider
+import com.onegallery.sync.data.local.db.SyncIndexStatsRow
 
 class SyncPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("onegallery_sync", Context.MODE_PRIVATE)
@@ -227,6 +228,61 @@ class SyncPreferences(context: Context) {
     /** Evita rajadas de sync automático (WorkManager, rede, MediaStore). */
     fun shouldDeferBackgroundSyncByTime(): Boolean = millisUntilBackgroundSyncAllowed() > 0L
 
+    /** Último snapshot das estatísticas do índice (Ajustes / Sync). */
+    fun cachedIndexStats(): SyncIndexStatsRow? {
+        if (!prefs.getBoolean(KEY_INDEX_STATS_CACHED, false)) return null
+        return SyncIndexStatsRow(
+            total = prefs.getInt(KEY_INDEX_STATS_TOTAL, 0),
+            withLocal = prefs.getInt(KEY_INDEX_STATS_WITH_LOCAL, 0),
+            synced = prefs.getInt(KEY_INDEX_STATS_SYNCED, 0),
+            pendingUpload = prefs.getInt(KEY_INDEX_STATS_PENDING_UPLOAD, 0),
+            pendingDownload = prefs.getInt(KEY_INDEX_STATS_PENDING_DOWNLOAD, 0),
+            cloudOnly = prefs.getInt(KEY_INDEX_STATS_CLOUD_ONLY, 0),
+            localOnly = prefs.getInt(KEY_INDEX_STATS_LOCAL_ONLY, 0),
+            errors = prefs.getInt(KEY_INDEX_STATS_ERRORS, 0),
+            conflicts = prefs.getInt(KEY_INDEX_STATS_CONFLICTS, 0),
+            attention = prefs.getInt(KEY_INDEX_STATS_ATTENTION, 0),
+            images = prefs.getInt(KEY_INDEX_STATS_IMAGES, 0),
+            videos = prefs.getInt(KEY_INDEX_STATS_VIDEOS, 0),
+            audio = prefs.getInt(KEY_INDEX_STATS_AUDIO, 0),
+            documents = prefs.getInt(KEY_INDEX_STATS_DOCUMENTS, 0),
+            otherTypes = prefs.getInt(KEY_INDEX_STATS_OTHER_TYPES, 0),
+            totalBytes = prefs.getLong(KEY_INDEX_STATS_TOTAL_BYTES, 0L),
+            imageBytes = prefs.getLong(KEY_INDEX_STATS_IMAGE_BYTES, 0L),
+            videoBytes = prefs.getLong(KEY_INDEX_STATS_VIDEO_BYTES, 0L),
+            audioBytes = prefs.getLong(KEY_INDEX_STATS_AUDIO_BYTES, 0L),
+            documentBytes = prefs.getLong(KEY_INDEX_STATS_DOCUMENT_BYTES, 0L),
+            otherTypeBytes = prefs.getLong(KEY_INDEX_STATS_OTHER_TYPE_BYTES, 0L),
+        )
+    }
+
+    fun saveCachedIndexStats(row: SyncIndexStatsRow) {
+        prefs.edit()
+            .putBoolean(KEY_INDEX_STATS_CACHED, true)
+            .putInt(KEY_INDEX_STATS_TOTAL, row.total)
+            .putInt(KEY_INDEX_STATS_WITH_LOCAL, row.withLocal)
+            .putInt(KEY_INDEX_STATS_SYNCED, row.synced)
+            .putInt(KEY_INDEX_STATS_PENDING_UPLOAD, row.pendingUpload)
+            .putInt(KEY_INDEX_STATS_PENDING_DOWNLOAD, row.pendingDownload)
+            .putInt(KEY_INDEX_STATS_CLOUD_ONLY, row.cloudOnly)
+            .putInt(KEY_INDEX_STATS_LOCAL_ONLY, row.localOnly)
+            .putInt(KEY_INDEX_STATS_ERRORS, row.errors)
+            .putInt(KEY_INDEX_STATS_CONFLICTS, row.conflicts)
+            .putInt(KEY_INDEX_STATS_ATTENTION, row.attention)
+            .putInt(KEY_INDEX_STATS_IMAGES, row.images)
+            .putInt(KEY_INDEX_STATS_VIDEOS, row.videos)
+            .putInt(KEY_INDEX_STATS_AUDIO, row.audio)
+            .putInt(KEY_INDEX_STATS_DOCUMENTS, row.documents)
+            .putInt(KEY_INDEX_STATS_OTHER_TYPES, row.otherTypes)
+            .putLong(KEY_INDEX_STATS_TOTAL_BYTES, row.totalBytes)
+            .putLong(KEY_INDEX_STATS_IMAGE_BYTES, row.imageBytes)
+            .putLong(KEY_INDEX_STATS_VIDEO_BYTES, row.videoBytes)
+            .putLong(KEY_INDEX_STATS_AUDIO_BYTES, row.audioBytes)
+            .putLong(KEY_INDEX_STATS_DOCUMENT_BYTES, row.documentBytes)
+            .putLong(KEY_INDEX_STATS_OTHER_TYPE_BYTES, row.otherTypeBytes)
+            .apply()
+    }
+
     companion object {
         private const val KEY_WIFI_ONLY = "wifi_only"
         private const val KEY_BACKGROUND_SYNC_ALWAYS = "background_sync_always"
@@ -267,5 +323,27 @@ class SyncPreferences(context: Context) {
         private const val KEY_THUMB_FAIL_COUNTS = "thumb_fail_counts"
         private const val KEY_THUMB_PREFETCH_CURSOR = "thumb_prefetch_cursor"
         private const val KEY_FORCE_REMOTE_FULL_LISTING = "force_remote_full_listing_once"
+        private const val KEY_INDEX_STATS_CACHED = "index_stats_cached"
+        private const val KEY_INDEX_STATS_TOTAL = "index_stats_total"
+        private const val KEY_INDEX_STATS_WITH_LOCAL = "index_stats_with_local"
+        private const val KEY_INDEX_STATS_SYNCED = "index_stats_synced"
+        private const val KEY_INDEX_STATS_PENDING_UPLOAD = "index_stats_pending_upload"
+        private const val KEY_INDEX_STATS_PENDING_DOWNLOAD = "index_stats_pending_download"
+        private const val KEY_INDEX_STATS_CLOUD_ONLY = "index_stats_cloud_only"
+        private const val KEY_INDEX_STATS_LOCAL_ONLY = "index_stats_local_only"
+        private const val KEY_INDEX_STATS_ERRORS = "index_stats_errors"
+        private const val KEY_INDEX_STATS_CONFLICTS = "index_stats_conflicts"
+        private const val KEY_INDEX_STATS_ATTENTION = "index_stats_attention"
+        private const val KEY_INDEX_STATS_IMAGES = "index_stats_images"
+        private const val KEY_INDEX_STATS_VIDEOS = "index_stats_videos"
+        private const val KEY_INDEX_STATS_AUDIO = "index_stats_audio"
+        private const val KEY_INDEX_STATS_DOCUMENTS = "index_stats_documents"
+        private const val KEY_INDEX_STATS_OTHER_TYPES = "index_stats_other_types"
+        private const val KEY_INDEX_STATS_TOTAL_BYTES = "index_stats_total_bytes"
+        private const val KEY_INDEX_STATS_IMAGE_BYTES = "index_stats_image_bytes"
+        private const val KEY_INDEX_STATS_VIDEO_BYTES = "index_stats_video_bytes"
+        private const val KEY_INDEX_STATS_AUDIO_BYTES = "index_stats_audio_bytes"
+        private const val KEY_INDEX_STATS_DOCUMENT_BYTES = "index_stats_document_bytes"
+        private const val KEY_INDEX_STATS_OTHER_TYPE_BYTES = "index_stats_other_type_bytes"
     }
 }

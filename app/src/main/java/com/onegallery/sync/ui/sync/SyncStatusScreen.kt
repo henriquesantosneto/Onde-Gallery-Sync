@@ -79,9 +79,7 @@ fun SyncStatusScreen(
     val coordinatorState by syncCoordinator.state.collectAsStateWithLifecycle(
         minActiveState = Lifecycle.State.CREATED,
     )
-    val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle(
-        initialValue = null,
-    )
+    val indexStats by syncCoordinator.syncIndexStats.collectAsStateWithLifecycle()
     val problemItems by syncCoordinator.syncAttentionItems.collectAsStateWithLifecycle(
         initialValue = emptyList(),
     )

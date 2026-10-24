@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.merge
@@ -266,6 +267,12 @@ class SyncCoordinator(
             }
             scheduleAlbumCoverRevisionForPath(canonicalPath)
             scheduleThumbnailStatsRefresh(debounceMs = 4_000L)
+        }
+        backgroundScope?.launch(Dispatchers.IO) {
+            syncMetadataDao.observeIndexStats(indexStatsSqlQuery).collect { row ->
+                _syncIndexStats.value = row
+                syncPreferences.saveCachedIndexStats(row)
+            }
         }
     }
 
@@ -713,9 +720,12 @@ class SyncCoordinator(
         galleryMetadataSource.take(1),
         galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
     )
-    val syncIndexStats: Flow<SyncIndexStatsRow> = syncMetadataDao.observeIndexStats(
-        androidx.sqlite.db.SimpleSQLiteQuery(GalleryMapper.buildSyncIndexStatsSql()),
+    private val indexStatsSqlQuery =
+        androidx.sqlite.db.SimpleSQLiteQuery(GalleryMapper.buildSyncIndexStatsSql())
+    private val _syncIndexStats = MutableStateFlow<SyncIndexStatsRow?>(
+        syncPreferences.cachedIndexStats(),
     )
+    val syncIndexStats: StateFlow<SyncIndexStatsRow?> = _syncIndexStats.asStateFlow()
     val syncAttentionItems: Flow<List<SyncMetadataEntity>> = syncMetadataDao.observeAttentionItems()
     val userAlbums: Flow<List<UserAlbumEntity>> = userAlbumDao.observeAll()
 
