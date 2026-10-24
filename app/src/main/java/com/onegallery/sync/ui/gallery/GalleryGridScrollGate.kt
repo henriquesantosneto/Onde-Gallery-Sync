@@ -1,9 +1,13 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
-import java.io.File
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** Sinaliza rolagem da grade para adiar decode pesado e refresh do catálogo. */
 object GalleryGridScrollGate {
@@ -13,49 +17,41 @@ object GalleryGridScrollGate {
     fun shouldDeferCatalogThumbnailRefresh(): Boolean = isUserScrollingGrid
 
     fun shouldDeferBulkThumbnailPrefetch(): Boolean = isUserScrollingGrid
-}
 
-val LocalGalleryGridScrolling = staticCompositionLocalOf { false }
+    suspend fun awaitIdleIfZeroDecodeEnabled(enabled: Boolean) {
+        if (!enabled) return
+        while (isUserScrollingGrid) {
+            delay(16)
+        }
+    }
+}
 
 val LocalZeroDecodeGridScroll = staticCompositionLocalOf { true }
 
+/**
+ * Atualiza [GalleryGridScrollGate] sem recomposição da grade (evita piscar miniaturas).
+ */
 @Composable
 fun ProvideGalleryGridScrollState(
-    isScrolling: Boolean,
+    gridState: LazyGridState,
     zeroDecodeWhileScrolling: Boolean,
+    onScrollEnd: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    GalleryGridScrollGate.isUserScrollingGrid = isScrolling
-    CompositionLocalProvider(
-        LocalGalleryGridScrolling provides isScrolling,
-        LocalZeroDecodeGridScroll provides zeroDecodeWhileScrolling,
-        content = content,
-    )
-}
-
-object GalleryThumbnailScrollPaint {
-    /** Na rolagem com zero-decode: não decodificar URI/arquivo grande; só JPEG em cache. */
-    fun paintModelForGridCell(
-        displayData: Any?,
-        item: GalleryDisplayItem,
-        scrollLocked: Boolean,
-        mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
-    ): Any? {
-        val disk = mediaCacheRepository.displayableThumbnailIfCached(
-            item.canonicalPath,
-            item.oneDriveItemId,
-        )
-        if (!scrollLocked) {
-            return displayData ?: disk
-        }
-        disk?.let { return it }
-        val file = displayData as? File
-        if (file != null && mediaCacheRepository.isDisplayableGalleryThumbFile(file)) {
-            return file
-        }
-        if (displayData is OneDriveCloudThumbnailKey) {
-            return displayData
-        }
-        return null
+    LaunchedEffect(gridState) {
+        snapshotFlow { gridState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling ->
+                GalleryGridScrollGate.isUserScrollingGrid = scrolling
+                if (!scrolling) {
+                    delay(64)
+                    if (!gridState.isScrollInProgress) {
+                        onScrollEnd()
+                    }
+                }
+            }
+    }
+    CompositionLocalProvider(LocalZeroDecodeGridScroll provides zeroDecodeWhileScrolling) {
+        content()
     }
 }

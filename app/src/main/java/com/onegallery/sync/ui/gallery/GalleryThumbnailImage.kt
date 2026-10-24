@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -14,7 +15,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import android.net.Uri
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,19 +72,29 @@ fun GalleryThumbnailImage(
     }
     val isGrid = style == GalleryThumbnailStyle.Grid
     val zeroDecodeOnScroll = LocalZeroDecodeGridScroll.current
-    val scrollLocked = isGrid && LocalGalleryGridScrolling.current && zeroDecodeOnScroll
     val gpuThumbStyle = isGrid || style == GalleryThumbnailStyle.Filmstrip
     var allowHardwareBitmap by remember(item.canonicalPath, sizePx, style) {
         mutableStateOf(gpuThumbStyle)
     }
     var filmstripVideoRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
-    var lastStableGridPaint by remember(item.canonicalPath, sizePx) {
-        mutableStateOf<Any?>(null)
-    }
 
-    LaunchedEffect(item.canonicalPath, sizePx, style) {
-        allowHardwareBitmap = gpuThumbStyle
-        lastStableGridPaint = null
+    suspend fun resolveDisplayData() {
+        GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(isGrid && zeroDecodeOnScroll)
+        withContext(Dispatchers.IO) {
+            GalleryThumbnailResolver.resolveForGrid(
+                context = context,
+                item = item,
+                thumbnailCache = thumbCache,
+                mediaCacheRepository = mediaCacheRepository,
+                sizePx = sizePx,
+                style = style,
+                diskCacheOnly = false,
+            )
+        }?.let { resolved ->
+            if (resolved != displayData) {
+                displayData = resolved
+            }
+        }
     }
 
     LaunchedEffect(
@@ -96,6 +106,7 @@ fun GalleryThumbnailImage(
         sizePx,
         style,
         refreshNonce,
+        zeroDecodeOnScroll,
     ) {
         val filmstripVideo = style == GalleryThumbnailStyle.Filmstrip && item.kind == MediaKind.VIDEO
         if (filmstripVideo && displayData is Uri) {
@@ -122,25 +133,8 @@ fun GalleryThumbnailImage(
                 item,
             )
         }
-        val diskOnly = isGrid &&
-            zeroDecodeOnScroll &&
-            GalleryGridScrollGate.isUserScrollingGrid
         try {
-            withContext(Dispatchers.IO) {
-                GalleryThumbnailResolver.resolveForGrid(
-                    context = context,
-                    item = item,
-                    thumbnailCache = thumbCache,
-                    mediaCacheRepository = mediaCacheRepository,
-                    sizePx = sizePx,
-                    style = style,
-                    diskCacheOnly = diskOnly,
-                )
-            }?.let { resolved ->
-                if (resolved != displayData) {
-                    displayData = resolved
-                }
-            }
+            resolveDisplayData()
         } finally {
             resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
         }
@@ -177,7 +171,7 @@ fun GalleryThumbnailImage(
     }
 
     if (isGrid && zeroDecodeOnScroll) {
-        LaunchedEffect(item.canonicalPath) {
+        LaunchedEffect(item.canonicalPath, zeroDecodeOnScroll) {
             snapshotFlow { GalleryGridScrollGate.isUserScrollingGrid }
                 .distinctUntilChanged()
                 .collect { scrolling ->
@@ -195,31 +189,20 @@ fun GalleryThumbnailImage(
                     if (displayData != null && displayData !is Uri) {
                         return@collect
                     }
-                    withContext(Dispatchers.IO) {
-                        GalleryThumbnailResolver.resolveForGrid(
-                            context = context,
-                            item = item,
-                            thumbnailCache = thumbCache,
-                            mediaCacheRepository = mediaCacheRepository,
-                            sizePx = sizePx,
-                            style = style,
-                            diskCacheOnly = false,
-                        )
-                    }?.let { resolved ->
-                        if (resolved != displayData) {
-                            displayData = resolved
-                        }
-                    }
+                    resolveDisplayData()
+                    resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(
+                        displayData,
+                        thumbCache,
+                        item,
+                    )
                 }
         }
     }
 
-    val rawPaintModel = if (isGrid) {
-        GalleryThumbnailScrollPaint.paintModelForGridCell(
-            displayData = displayData,
-            item = item,
-            scrollLocked = scrollLocked,
-            mediaCacheRepository = mediaCacheRepository,
+    val paintModel = if (isGrid) {
+        displayData ?: mediaCacheRepository.displayableThumbnailIfCached(
+            item.canonicalPath,
+            item.oneDriveItemId,
         )
     } else {
         val raw = displayData
@@ -231,16 +214,6 @@ fun GalleryThumbnailImage(
         } else {
             raw
         }
-    }
-    val paintModel = when {
-        rawPaintModel != null -> {
-            if (isGrid) {
-                lastStableGridPaint = rawPaintModel
-            }
-            rawPaintModel
-        }
-        isGrid && scrollLocked && lastStableGridPaint != null -> lastStableGridPaint
-        else -> null
     }
 
     val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
@@ -300,7 +273,7 @@ fun GalleryThumbnailImage(
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         MediaThumbnailPlaceholder(
             modifier = modifier,
-            showCloudIcon = !resolvingThumb && !scrollLocked &&
+            showCloudIcon = !resolvingThumb &&
                 (
                     cloudOnly ||
                         (
@@ -308,7 +281,7 @@ fun GalleryThumbnailImage(
                                 item.cloudState != CloudSyncState.PENDING_DOWNLOAD
                             )
                     ),
-            showLoading = resolvingThumb && !scrollLocked,
+            showLoading = resolvingThumb,
         )
     }
 }

@@ -335,22 +335,6 @@ fun GalleryScreen(
                     enabled = dateTimeline,
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
-                var gridScrolling by remember { mutableStateOf(false) }
-                LaunchedEffect(gridState, syncCoordinator) {
-                    snapshotFlow { gridState.isScrollInProgress }
-                        .distinctUntilChanged()
-                        .collect { scrolling ->
-                            if (scrolling) {
-                                gridScrolling = true
-                            } else {
-                                kotlinx.coroutines.delay(64)
-                                if (!gridState.isScrollInProgress) {
-                                    gridScrolling = false
-                                    syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
-                                }
-                            }
-                        }
-                }
                 LaunchedEffect(gridItems) {
                     viewModel.prefetchGridThumbnails(
                         gridItems.take(48).map { it.canonicalPath },
@@ -393,8 +377,11 @@ fun GalleryScreen(
                         }
                 }
                 ProvideGalleryGridScrollState(
-                    isScrolling = gridScrolling,
+                    gridState = gridState,
                     zeroDecodeWhileScrolling = galleryPreferences.zeroDecodeWhileScrolling,
+                    onScrollEnd = {
+                        syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
+                    },
                 ) {
                 Box(
                     modifier = Modifier
