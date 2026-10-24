@@ -145,8 +145,8 @@ class GalleryViewModel(
 
     private val albumCoverLocalIndex = AlbumCoverLocalIndex()
     private var lastAlbumCoverRevisions: Map<String, Long> = emptyMap()
-    private val folderAlbumLatestSort = mutableMapOf<String, Long>()
-    private val placeAlbumLatestSort = mutableMapOf<String, Long>()
+    private val folderAlbumCoverSignature = mutableMapOf<String, Long>()
+    private val placeAlbumCoverSignature = mutableMapOf<String, Long>()
     @Volatile
     private var initialLibrarySnapshotApplied = false
     @Volatile
@@ -1363,11 +1363,15 @@ class GalleryViewModel(
     private fun detectAlbumCoverSignatureChanges(catalogItems: List<GalleryDisplayItem>): Set<String> {
         if (catalogItems.isEmpty()) return emptySet()
         val changed = mutableSetOf<String>()
+        val visibleByPath = latestLibraryItems.associateBy { it.canonicalPath }
         catalogItems.groupBy { it.albumName }.forEach { (name, items) ->
             val key = "album:$name"
-            val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
-            val previous = folderAlbumLatestSort.put(key, latest)
-            if (previous != null && previous != latest) {
+            val browsable = items
+                .map { visibleByPath[it.canonicalPath] ?: it }
+                .filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+            val signature = albumCoverSelectionSignature(browsable, mediaCacheRepository)
+            val previous = folderAlbumCoverSignature.put(key, signature)
+            if (previous != null && previous != signature) {
                 changed.add(key)
             }
         }
@@ -1380,9 +1384,10 @@ class GalleryViewModel(
             ),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
-            val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
-            val previous = placeAlbumLatestSort.put(key, latest)
-            if (previous != null && previous != latest) {
+            val refreshed = group.map { visibleByPath[it.canonicalPath] ?: it }
+            val signature = albumCoverSelectionSignature(refreshed, mediaCacheRepository)
+            val previous = placeAlbumCoverSignature.put(key, signature)
+            if (previous != null && previous != signature) {
                 changed.add(key)
             }
         }
@@ -1531,6 +1536,7 @@ class GalleryViewModel(
     private fun itemsForAlbumCover(album: MediaAlbum): List<GalleryDisplayItem> {
         val all = latestCatalogItems
         if (all.isEmpty()) return emptyList()
+        val visibleByPath = latestLibraryItems.associateBy { it.canonicalPath }
         val raw = when {
             album.bucketId.startsWith("place:") -> {
                 val encoded = album.bucketId.removePrefix("place:")
@@ -1542,7 +1548,9 @@ class GalleryViewModel(
             }
             else -> all.filter { it.albumName == album.filterKey }
         }
-        return raw.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+        return raw
+            .map { visibleByPath[it.canonicalPath] ?: it }
+            .filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
     }
 
     fun refresh() {

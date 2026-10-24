@@ -1,8 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
-import android.net.Uri
 import com.onegallery.sync.data.local.MediaCacheRepository
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -12,8 +10,7 @@ import java.util.concurrent.ConcurrentHashMap
 class AlbumCoverLocalIndex {
 
     private data class CachedCover(
-        val canonicalPath: String,
-        val sortTimestamp: Long,
+        val selectionSignature: Long,
         val coverModel: Any,
     )
 
@@ -35,11 +32,7 @@ class AlbumCoverLocalIndex {
         if (items.isEmpty()) return null
         val live = computeLiveCover(items, mediaCacheRepository) ?: return null
         val cached = byKey[cacheKey]
-        if (cached != null &&
-            cached.canonicalPath == live.canonicalPath &&
-            cached.sortTimestamp == live.sortTimestamp &&
-            coverModelStillUsable(cached.coverModel, live.canonicalPath, mediaCacheRepository)
-        ) {
+        if (cached != null && cached.selectionSignature == live.selectionSignature) {
             return cached.coverModel
         }
         byKey[cacheKey] = live
@@ -53,21 +46,8 @@ class AlbumCoverLocalIndex {
         val item = resolveAlbumCoverItem(items, mediaCacheRepository) ?: return null
         val model = resolveGalleryCoverModel(item, mediaCacheRepository) ?: return null
         return CachedCover(
-            canonicalPath = item.canonicalPath,
-            sortTimestamp = item.sortTimestamp,
+            selectionSignature = albumCoverSelectionSignature(items, mediaCacheRepository),
             coverModel = model,
         )
-    }
-
-    private fun coverModelStillUsable(
-        model: Any,
-        canonicalPath: String,
-        mediaCacheRepository: MediaCacheRepository,
-    ): Boolean {
-        return when (model) {
-            is File -> model.isFile && model.length() > 0L
-            is Uri -> true
-            else -> mediaCacheRepository.thumbnailIfCached(canonicalPath)?.isFile == true
-        }
     }
 }

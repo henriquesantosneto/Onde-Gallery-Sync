@@ -136,3 +136,22 @@ fun resolveLiveAlbumCover(
     val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: fallbackModel
     return LiveAlbumCover(displayModel = model, sourceItem = item)
 }
+
+/** Muda quando a capa escolhida ou a miniatura em disco dela muda (fotos locais novas). */
+fun albumCoverSelectionSignature(
+    items: List<GalleryDisplayItem>,
+    mediaCacheRepository: MediaCacheRepository,
+): Long {
+    val cover = resolveAlbumCoverItem(items, mediaCacheRepository) ?: return 0L
+    val thumbMtime = mediaCacheRepository.thumbnailIfCached(
+        cover.canonicalPath,
+        cover.oneDriveItemId,
+    )?.lastModified()
+        ?: cover.cachedPlaceholderThumb?.takeIf { it.isFile }?.lastModified()
+        ?: 0L
+    var hash = cover.canonicalPath.hashCode().toLong()
+    hash = hash * 31L + cover.sortTimestamp
+    hash = hash * 31L + thumbMtime
+    hash = hash * 31L + cover.localMediaId.hashCode()
+    return hash
+}
