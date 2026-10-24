@@ -47,11 +47,20 @@ class GalleryPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_EXPERIMENTAL_MEDIA_LAB, false)
         set(value) = prefs.edit().putBoolean(KEY_EXPERIMENTAL_MEDIA_LAB, value).apply()
 
+    /**
+     * Grade / carrossel: oculta nuvem e vídeos sem JPEG no cache (menos decode na hora).
+     * Fotos com URI local continuam visíveis.
+     */
+    var browseOnlyItemsWithThumbnail: Boolean
+        get() = prefs.getBoolean(KEY_BROWSE_ONLY_WITH_THUMB, true)
+        set(value) = prefs.edit().putBoolean(KEY_BROWSE_ONLY_WITH_THUMB, value).apply()
+
     companion object {
         private const val KEY_SORT = "sort_order"
         private const val KEY_ALBUM_SORT = "album_sort"
         private const val KEY_ALBUM_GRID_ZOOM = "album_grid_zoom"
         private const val KEY_GALLERY_GRID_ZOOM = "gallery_grid_zoom"
         private const val KEY_EXPERIMENTAL_MEDIA_LAB = "experimental_media_detail_lab"
+        private const val KEY_BROWSE_ONLY_WITH_THUMB = "browse_only_items_with_thumbnail"
     }
 }

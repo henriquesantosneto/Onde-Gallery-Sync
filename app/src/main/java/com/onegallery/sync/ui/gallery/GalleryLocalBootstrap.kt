@@ -14,11 +14,16 @@ object GalleryLocalBootstrap {
         mediaCacheRepository: MediaCacheRepository,
         userAlbums: List<UserAlbumEntity>,
         localRevision: Long,
+        onlyItemsWithThumbnail: Boolean = false,
     ): GalleryCatalogSession.SnapshotBundle? {
         val localItems = localMediaRepository.loadLocalGallerySnapshot()
         if (localItems.isEmpty()) return null
         val display = localItems.map { GalleryMapper.toDisplayItemFromLocal(it, mediaCacheRepository) }
-        val visible = display.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
+        val visible = filterVisibleForGalleryBrowse(
+            display,
+            mediaCacheRepository,
+            onlyItemsWithThumbnail,
+        )
         if (visible.isEmpty()) return null
         val catalog = display
         val fingerprint = GalleryCatalogFingerprint.fromDisplayPaths(catalog.map { it.canonicalPath })

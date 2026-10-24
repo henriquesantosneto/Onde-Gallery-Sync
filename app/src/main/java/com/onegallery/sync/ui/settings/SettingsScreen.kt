@@ -91,6 +91,7 @@ fun SettingsScreen(
     onOpenCloudFolderPicker: () -> Unit,
     onMicrosoftSignIn: () -> Unit,
     onOpenSyncStatus: () -> Unit,
+    onGalleryBrowseFilterChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OneGalleryApplication
@@ -121,6 +122,9 @@ fun SettingsScreen(
     }
     var experimentalMediaLab by remember {
         mutableStateOf(galleryPreferences.experimentalMediaDetailLab)
+    }
+    var browseOnlyWithThumb by remember {
+        mutableStateOf(galleryPreferences.browseOnlyItemsWithThumbnail)
     }
     var autoFreeLocalWhenIdle by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenIdle)
@@ -740,6 +744,29 @@ fun SettingsScreen(
                                 Text(grantLabel)
                             }
                         }
+                    },
+                )
+            }
+
+            item {
+                SettingsSectionTitle(title = "Galeria", icon = Icons.Outlined.PhotoLibrary)
+            }
+            item {
+                SettingsSwitchRow(
+                    title = "Só itens com miniatura na grade",
+                    summary = "Oculta nuvem/vídeo sem JPEG até o sync gerar (grade mais leve).",
+                    info = SettingsInfoDialog(
+                        title = "Miniatura na grade",
+                        body = "Ligado: a grade e o carrossel mostram fotos locais e itens que já " +
+                            "têm miniatura no app. Vídeos e itens só na nuvem entram quando o " +
+                            "sincronismo terminar o JPEG. Desligado: placeholders e mais trabalho na hora.",
+                    ),
+                    checked = browseOnlyWithThumb,
+                    onInfoClick = { settingsInfo = it },
+                    onCheckedChange = { enabled ->
+                        browseOnlyWithThumb = enabled
+                        galleryPreferences.browseOnlyItemsWithThumbnail = enabled
+                        onGalleryBrowseFilterChanged()
                     },
                 )
             }

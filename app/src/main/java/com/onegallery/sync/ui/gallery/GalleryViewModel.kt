@@ -382,6 +382,7 @@ class GalleryViewModel(
                         mediaCacheRepository = mediaCacheRepository,
                         userAlbums = userAlbums,
                         localRevision = localRevision,
+                        onlyItemsWithThumbnail = galleryPreferences.browseOnlyItemsWithThumbnail,
                     )
                     if (localBootstrap != null) {
                         catalogSession.publish(localBootstrap, activeSort = sortOrder.value)
@@ -456,10 +457,26 @@ class GalleryViewModel(
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
         syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
     ) { snapshot, _, syncRunning ->
-        when {
-            snapshot.catalogItems.size > 1_500 -> snapshot
-            !syncRunning -> snapshot
-            else -> catalogSession.refreshThumbnailFlags(mediaCacheRepository)?.toLibrarySnapshot() ?: snapshot
+        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+        val refreshed = when {
+            snapshot.catalogItems.size > 1_500 && !onlyThumb -> snapshot
+            !syncRunning && !onlyThumb -> snapshot
+            else ->
+                catalogSession.refreshThumbnailFlags(
+                    mediaCacheRepository,
+                    onlyThumb,
+                )?.toLibrarySnapshot() ?: snapshot
+        }
+        if (!onlyThumb) {
+            refreshed
+        } else {
+            val visible = filterVisibleForGalleryBrowse(
+                refreshed.catalogItems,
+                mediaCacheRepository,
+                true,
+            )
+            if (visible === refreshed.visibleItems) refreshed
+            else refreshed.copy(visibleItems = visible)
         }
     }.distinctUntilChanged { previous, next ->
         previous.catalogItems === next.catalogItems &&
@@ -604,7 +621,11 @@ class GalleryViewModel(
         } else {
             dedupeGalleryDisplayItems(indexed + overlay)
         }
-        val visible = filterVisibleForGalleryBrowse(catalog, mediaCacheRepository)
+        val visible = filterVisibleForGalleryBrowse(
+            catalog,
+            mediaCacheRepository,
+            galleryPreferences.browseOnlyItemsWithThumbnail,
+        )
         val bundle = GalleryCatalogSession.SnapshotBundle(
             catalogItems = catalog,
             visibleItems = visible,
@@ -850,6 +871,7 @@ class GalleryViewModel(
                     mediaCacheRepository = mediaCacheRepository,
                     userAlbums = userAlbums,
                     localRevision = localMediaRepository.localGalleryRevision.value,
+                    onlyItemsWithThumbnail = galleryPreferences.browseOnlyItemsWithThumbnail,
                 ) ?: return@launch
                 scheduleAlbumListsFromLocalCatalog(
                     catalogItems = localBundle.catalogItems,
@@ -1226,6 +1248,18 @@ class GalleryViewModel(
     fun setAlbumListSort(sort: AlbumListSort) {
         albumListSort.value = sort
         galleryPreferences.albumListSort = sort
+    }
+
+    /** Reaplica filtro “só com miniatura” após mudança em Ajustes. */
+    fun refreshBrowseVisibilityFromPreferences() {
+        val bundle = catalogSession.lastBundle ?: return
+        val visible = filterVisibleForGalleryBrowse(
+            bundle.catalogItems,
+            mediaCacheRepository,
+            galleryPreferences.browseOnlyItemsWithThumbnail,
+        )
+        catalogSession.publish(bundle.copy(visibleItems = visible))
+        syncCoordinator.notifyGalleryDisplayRefresh()
     }
 
     /** Reaplica cache/local no índice da galeria (ex.: após baixar original no detalhe). */

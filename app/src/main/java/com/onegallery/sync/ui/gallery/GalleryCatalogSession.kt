@@ -97,7 +97,10 @@ class GalleryCatalogSession {
 
     fun geoItems(): List<GalleryDisplayItem> = cachedGeoItems
 
-    fun refreshThumbnailFlags(mediaCacheRepository: MediaCacheRepository): SnapshotBundle? {
+    fun refreshThumbnailFlags(
+        mediaCacheRepository: MediaCacheRepository,
+        onlyItemsWithThumbnail: Boolean = false,
+    ): SnapshotBundle? {
         val current = lastBundle ?: return null
         var changed = false
         val updated = current.catalogItems.map { item ->
@@ -117,7 +120,11 @@ class GalleryCatalogSession {
             }
         }
         if (!changed) return current
-        val visible = updated.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
+        val visible = filterVisibleForGalleryBrowse(
+            updated,
+            mediaCacheRepository,
+            onlyItemsWithThumbnail,
+        )
         val next = current.copy(catalogItems = updated, visibleItems = visible)
         publish(next)
         return next

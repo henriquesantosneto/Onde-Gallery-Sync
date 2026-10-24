@@ -532,6 +532,9 @@ fun OneGalleryApp(
                             launchSingleTop = true
                         }
                     },
+                    onGalleryBrowseFilterChanged = {
+                        galleryViewModel.refreshBrowseVisibilityFromPreferences()
+                    },
                 )
             }
             composable(SYNC_STATUS_ROUTE) {
