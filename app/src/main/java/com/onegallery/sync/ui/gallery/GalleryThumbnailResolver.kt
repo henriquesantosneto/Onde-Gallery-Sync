@@ -32,9 +32,7 @@ object GalleryThumbnailResolver {
                 }
             }
             cloudVideoCoilKey(item, forFilmstrip = isVideo)?.let { return it }
-            if (!isVideo) {
-                item.localUri?.let { uri -> return uri }
-            }
+            item.localUri?.let { uri -> return uri }
             return null
         }
         if (!filmstripVideo) {
@@ -119,17 +117,19 @@ object GalleryThumbnailResolver {
             GalleryThumbnailModels.resolveFilmstripVideoModel(context, item, sizePx)?.let { return it }
         }
         if (isVideo && thumbnailCache != null) {
+            val gridVideo = !filmstripVideo
             if (item.localUri != null) {
                 thumbnailCache.ensureThumbnailCached(
                     item.canonicalPath,
                     preferCloudFirst = false,
                     localSourcesOnly = true,
-                    cloudVideoAggressive = filmstripVideo,
+                    cloudVideoAggressive = true,
+                    lightweightPrefetch = false,
                 ).getOrNull()
                     ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
                     ?.let { return it }
             }
-            if (filmstripVideo || preferCloud) {
+            if (gridVideo || filmstripVideo || preferCloud) {
                 thumbnailCache.ensureThumbnailCached(
                     item.canonicalPath,
                     preferCloudFirst = item.localUri != null && preferCloud,

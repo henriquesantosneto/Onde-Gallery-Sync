@@ -1356,10 +1356,14 @@ class GalleryViewModel(
             .take(GRID_THUMB_PREFETCH_BATCH)
             .toList()
         if (paths.isEmpty()) return
-        val lightweight = GalleryGridScrollGate.isUserScrollingGrid
+        val scrolling = GalleryGridScrollGate.isUserScrollingGrid
         gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                prefetchThumbnailPathsParallel(paths, lightweightPrefetch = lightweight)
+                prefetchThumbnailPathsParallel(
+                    paths,
+                    lightweightPrefetch = scrolling,
+                    videoAggressive = true,
+                )
             } finally {
                 paths.forEach { gridThumbnailPrefetchQueued.remove(it) }
             }
@@ -1369,6 +1373,7 @@ class GalleryViewModel(
     private suspend fun prefetchThumbnailPathsParallel(
         paths: List<String>,
         lightweightPrefetch: Boolean = false,
+        videoAggressive: Boolean = false,
     ) {
         if (paths.isEmpty()) return
         var cachedAny = false
@@ -1380,6 +1385,7 @@ class GalleryViewModel(
                         galleryThumbnailCache.ensureThumbnailCached(
                             path,
                             lightweightPrefetch = lightweightPrefetch,
+                            cloudVideoAggressive = videoAggressive,
                         ).getOrNull()
                         val hit = mediaCacheRepository.displayableThumbnailIfCached(path) != null
                         if (hit) cachedAny = true

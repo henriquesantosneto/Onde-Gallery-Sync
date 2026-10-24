@@ -77,6 +77,7 @@ fun GalleryThumbnailImage(
         mutableStateOf(gpuThumbStyle)
     }
     var filmstripVideoRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
+    var gridVideoRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
     var lastStableGridPaint by remember(item.canonicalPath, sizePx) {
         mutableStateOf<Any?>(null)
     }
@@ -120,6 +121,7 @@ fun GalleryThumbnailImage(
         style,
         refreshNonce,
         zeroDecodeOnScroll,
+        gridVideoRetry,
     ) {
         val filmstripVideo = style == GalleryThumbnailStyle.Filmstrip && item.kind == MediaKind.VIDEO
         if (filmstripVideo && displayData is Uri) {
@@ -147,7 +149,7 @@ fun GalleryThumbnailImage(
             )
         }
         try {
-            resolveDisplayData()
+            resolveDisplayData(forceFullDecode = gridVideoRetry > 0)
         } finally {
             resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(displayData, thumbCache, item)
         }
@@ -243,17 +245,21 @@ fun GalleryThumbnailImage(
         paintModel == null &&
         resolvingThumb
     if (paintModel != null && !filmstripVideoPending) {
-        val request = remember(paintModel, sizePx, style, item.canonicalPath, allowHardwareBitmap) {
+        val videoUriModel = isGrid &&
+            item.kind == MediaKind.VIDEO &&
+            paintModel is Uri
+        val requestHardware = allowHardwareBitmap && !videoUriModel
+        val request = remember(paintModel, sizePx, style, item.canonicalPath, requestHardware) {
             ImageRequest.Builder(context)
                 .data(paintModel)
                 .size(sizePx)
-                .applyGalleryThumbnailLoading(style, allowHardwareBitmap)
+                .applyGalleryThumbnailLoading(style, requestHardware)
                 .memoryCacheKey(
                     galleryThumbnailMemoryCacheKey(
                         item.canonicalPath,
                         sizePx,
                         style,
-                        allowHardwareBitmap,
+                        requestHardware,
                     ),
                 )
                 .diskCacheKey("${item.canonicalPath}:$sizePx")
@@ -271,6 +277,13 @@ fun GalleryThumbnailImage(
                     !GalleryGridScrollGate.isUserScrollingGrid
                 ) {
                     allowHardwareBitmap = false
+                }
+                if (isGrid &&
+                    item.kind == MediaKind.VIDEO &&
+                    state is AsyncImagePainter.State.Error &&
+                    !GalleryGridScrollGate.isUserScrollingGrid
+                ) {
+                    gridVideoRetry++
                 }
                 if (style == GalleryThumbnailStyle.Filmstrip &&
                     item.kind == MediaKind.VIDEO &&
