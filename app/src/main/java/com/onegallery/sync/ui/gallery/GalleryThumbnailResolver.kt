@@ -27,9 +27,8 @@ object GalleryThumbnailResolver {
                 return thumb
             }
         }
-        cloudVideoCoilKey(item)?.let { return it }
+        cloudVideoCoilKey(item, forFilmstrip = filmstripVideo)?.let { return it }
         if (filmstripVideo) {
-            item.localUri?.let { return it }
             return null
         }
         if (isVideo) return null
@@ -73,6 +72,7 @@ object GalleryThumbnailResolver {
         item: GalleryDisplayItem,
     ): Boolean {
         if (displayData is OneDriveCloudThumbnailKey) return false
+        if (item.kind == MediaKind.VIDEO && displayData is android.net.Uri) return true
         if (displayData != null) return false
         if (thumbnailCache == null) return false
         return item.oneDriveItemId != null ||
@@ -92,23 +92,27 @@ object GalleryThumbnailResolver {
             item.cloudState == CloudSyncState.PENDING_DOWNLOAD
         val filmstripVideo = isVideo && style == GalleryThumbnailStyle.Filmstrip
         cachedDisplayableThumb(item, mediaCacheRepository)?.let { return it }
+        if (filmstripVideo && item.localUri != null) {
+            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
+        }
         if (isVideo && thumbnailCache != null) {
-            if (filmstripVideo || preferCloud) {
-                thumbnailCache.ensureThumbnailCached(
-                    item.canonicalPath,
-                    preferCloudFirst = true,
-                    cloudSourcesOnly = !item.oneDriveItemId.isNullOrBlank(),
-                    cloudVideoAggressive = true,
-                    lightweightPrefetch = !filmstripVideo,
-                ).getOrNull()
-                    ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
-                    ?.let { return it }
-            }
             if (item.localUri != null) {
                 thumbnailCache.ensureThumbnailCached(
                     item.canonicalPath,
                     preferCloudFirst = false,
                     localSourcesOnly = true,
+                    cloudVideoAggressive = filmstripVideo,
+                ).getOrNull()
+                    ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
+                    ?.let { return it }
+            }
+            if (filmstripVideo || preferCloud) {
+                thumbnailCache.ensureThumbnailCached(
+                    item.canonicalPath,
+                    preferCloudFirst = item.localUri != null && preferCloud,
+                    cloudSourcesOnly = !item.oneDriveItemId.isNullOrBlank() && item.localUri == null,
+                    cloudVideoAggressive = true,
+                    lightweightPrefetch = false,
                 ).getOrNull()
                     ?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }
                     ?.let { return it }
@@ -120,9 +124,9 @@ object GalleryThumbnailResolver {
                 return item.localUri
             }
         }
-        if (filmstripVideo && item.localUri != null) {
-            GalleryThumbnailModels.resolveGridModel(context, item, sizePx)?.let { return it }
-            return item.localUri
+        if (filmstripVideo) {
+            cloudVideoCoilKey(item, forFilmstrip = true)?.let { return it }
+            return null
         }
         thumbnailCache?.ensureThumbnailCached(
             item.canonicalPath,
@@ -145,10 +149,14 @@ object GalleryThumbnailResolver {
         }
     }
 
-    fun cloudVideoCoilKey(item: GalleryDisplayItem): OneDriveCloudThumbnailKey? {
+    fun cloudVideoCoilKey(
+        item: GalleryDisplayItem,
+        forFilmstrip: Boolean = false,
+    ): OneDriveCloudThumbnailKey? {
         if (item.kind != MediaKind.VIDEO) return null
         val itemId = item.oneDriveItemId?.takeIf { it.isNotBlank() } ?: return null
-        if (item.localUri != null &&
+        if (!forFilmstrip &&
+            item.localUri != null &&
             item.cloudState != CloudSyncState.CLOUD_ONLY &&
             item.cloudState != CloudSyncState.PENDING_DOWNLOAD
         ) {

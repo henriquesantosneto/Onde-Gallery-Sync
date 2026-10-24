@@ -23,8 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.SyncCoordinator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Miniaturas do álbum / local / lista atual (estilo faixa Samsung). */
 @Composable
@@ -39,6 +44,26 @@ fun MediaDetailFilmstrip(
 
     val listState = rememberLazyListState()
     val thumbPx = remember { 144 }
+    val context = LocalContext.current
+    val thumbCache = remember(context) {
+        (context.applicationContext as OneGalleryApplication).galleryThumbnailCache
+    }
+
+    LaunchedEffect(items) {
+        withContext(Dispatchers.IO) {
+            items.asSequence()
+                .filter { it.kind == MediaKind.VIDEO }
+                .take(32)
+                .forEach { item ->
+                    thumbCache.ensureThumbnailCached(
+                        item.canonicalPath,
+                        preferCloudFirst = item.oneDriveItemId != null,
+                        cloudVideoAggressive = true,
+                        lightweightPrefetch = false,
+                    )
+                }
+        }
+    }
 
     LaunchedEffect(currentCanonicalPath, items) {
         val index = items.indexOfFirst { it.canonicalPath == currentCanonicalPath }

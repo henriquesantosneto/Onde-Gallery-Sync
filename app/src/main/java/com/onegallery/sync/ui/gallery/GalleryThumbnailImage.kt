@@ -22,6 +22,7 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.ui.theme.OneDriveBlue
@@ -95,16 +96,19 @@ fun GalleryThumbnailImage(
         }
     }
 
-    if (displayData != null) {
+    val filmstripVideoPending = style == GalleryThumbnailStyle.Filmstrip &&
+        item.kind == MediaKind.VIDEO &&
+        (displayData == null || displayData is android.net.Uri)
+    if (displayData != null && !filmstripVideoPending) {
         val request = remember(displayData, sizePx, style, item.canonicalPath) {
-            ImageRequest.Builder(context)
+            val builder = ImageRequest.Builder(context)
                 .data(displayData)
                 .size(sizePx)
                 .crossfade(style == GalleryThumbnailStyle.Detail)
                 .allowHardware(false)
                 .memoryCacheKey("${item.canonicalPath}:$sizePx:${style.name}")
                 .diskCacheKey("${item.canonicalPath}:$sizePx")
-                .build()
+            builder.build()
         }
         AsyncImage(
             model = request,
@@ -112,6 +116,12 @@ fun GalleryThumbnailImage(
             modifier = modifier,
             contentScale = contentScale,
             onState = { state ->
+                if (style == GalleryThumbnailStyle.Filmstrip &&
+                    item.kind == MediaKind.VIDEO &&
+                    state is AsyncImagePainter.State.Error
+                ) {
+                    resolvingThumb = true
+                }
                 if (onContentAspectRatio != null && state is AsyncImagePainter.State.Success) {
                     val size = state.painter.intrinsicSize
                     if (size.width.isFinite() && size.height.isFinite() && size.height > 0f) {

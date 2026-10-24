@@ -3,16 +3,21 @@ package com.onegallery.sync.ui.gallery
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +53,7 @@ fun VideoPlayerView(
 ) {
     val context = LocalContext.current
     var muted by remember(uri) { mutableStateOf(true) }
+    var userPlaying by remember(uri) { mutableStateOf(true) }
     val mutedState = rememberUpdatedState(muted)
     val focusRequester = remember(uri) { FocusRequester() }
     val player = remember(uri) {
@@ -55,10 +61,20 @@ fun VideoPlayerView(
             setMediaItem(MediaItem.fromUri(uri))
             repeatMode = Player.REPEAT_MODE_OFF
             volume = 0f
-            playWhenReady = false
+            this.playWhenReady = false
             prepare()
         }
     }
+
+    LaunchedEffect(isActive) {
+        if (isActive) {
+            userPlaying = true
+        } else {
+            userPlaying = false
+        }
+    }
+
+    val shouldPlay = isActive && playWhenReady && userPlaying
 
     fun unmuteIfNeeded() {
         if (mutedState.value) {
@@ -70,8 +86,8 @@ fun VideoPlayerView(
         player.volume = if (muted) 0f else 1f
         onDispose { }
     }
-    DisposableEffect(isActive, playWhenReady) {
-        if (isActive && playWhenReady) {
+    DisposableEffect(shouldPlay) {
+        if (shouldPlay) {
             player.playWhenReady = true
             player.play()
         } else {
@@ -125,22 +141,43 @@ fun VideoPlayerView(
                 }
             },
         )
-        if (isActive) {
+        if (isActive && !usePlaybackControls) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { userPlaying = !userPlaying },
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                ) {
+                    Icon(
+                        imageVector = if (userPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (userPlaying) "Pausar" else "Reproduzir",
+                        tint = Color.White,
+                    )
+                }
+                IconButton(
+                    onClick = { muted = !muted },
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                ) {
+                    Icon(
+                        imageVector = if (muted) Icons.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                        contentDescription = if (muted) "Ativar som" else "Silenciar",
+                        tint = Color.White,
+                    )
+                }
+            }
+        } else if (isActive && usePlaybackControls) {
             IconButton(
                 onClick = { muted = !muted },
                 modifier = Modifier
-                    .align(
-                        if (usePlaybackControls) {
-                            Alignment.TopEnd
-                        } else {
-                            Alignment.BottomEnd
-                        },
-                    )
-                    .padding(
-                        end = 12.dp,
-                        top = if (usePlaybackControls) 12.dp else 0.dp,
-                        bottom = if (usePlaybackControls) 0.dp else 96.dp,
-                    )
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
                     .background(Color.Black.copy(alpha = 0.55f), CircleShape),
             ) {
                 Icon(
