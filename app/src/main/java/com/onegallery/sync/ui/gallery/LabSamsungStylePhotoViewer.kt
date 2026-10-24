@@ -18,15 +18,24 @@ import coil.request.ImageRequest
 fun LabSamsungStylePhotoViewer(
     item: GalleryDisplayItem,
     modifier: Modifier = Modifier,
+    onToggleImmersive: (() -> Unit)? = null,
 ) {
     val transform = remember(item.canonicalPath) { ZoomTransformHolder() }
+    val immersiveModifier = if (onToggleImmersive != null) {
+        Modifier.detailImmersiveTap(transform, onToggleImmersive)
+    } else {
+        Modifier
+    }
     val fullModel = remember(item.canonicalPath, item.localUri, item.cachedOriginal) {
         item.detailFullImageModel()
     }
     val useThumbnailPipeline = remember(fullModel) {
         item.detailImageUsesThumbnailPipeline(fullModel)
     }
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier.then(immersiveModifier),
+        contentAlignment = Alignment.Center,
+    ) {
         when {
             fullModel == null -> Text("Prévia indisponível.", color = Color.White.copy(alpha = 0.85f))
             !useThumbnailPipeline -> {

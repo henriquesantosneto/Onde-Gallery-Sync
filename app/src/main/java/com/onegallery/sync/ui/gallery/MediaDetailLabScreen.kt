@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +47,7 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.SyncCoordinator
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,6 +74,12 @@ fun MediaDetailLabScreen(
         (context.applicationContext as OneGalleryApplication).galleryPreferences
     }
     val pagerScope = rememberCoroutineScope()
+    var immersive by remember { mutableStateOf(false) }
+
+    ImmersiveSystemBarsEffect(
+        immersive = immersive,
+        edgeToEdgeWithVisibleBars = !immersive,
+    )
 
     if (liveItems.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -162,6 +170,7 @@ fun MediaDetailLabScreen(
         detailsDragFraction = 0f
         detailsDragging = false
         detailsContentLevel = MediaDetailContentLevel.Simple
+        immersive = false
     }
 
     fun snapDetailsPanel(velocityYPxPerSec: Float = 0f) {
@@ -201,6 +210,7 @@ fun MediaDetailLabScreen(
             showDeleteConfirm -> showDeleteConfirm = false
             showMoveDialog -> showMoveDialog = false
             state.selectionMode -> viewModel.clearSelection()
+            immersive -> immersive = false
             detailsPanelOpen -> {
                 detailsSettleFraction = 0f
                 detailsDragFraction = 0f
@@ -210,8 +220,12 @@ fun MediaDetailLabScreen(
         }
     }
 
-    val filmstripVisible = filmstripItems.size > 1 && !detailsPanelOpen
-    val playerBottomChromeInset = if (filmstripVisible) 100.dp else 36.dp
+    val filmstripVisible = filmstripItems.size > 1 && !detailsPanelOpen && !immersive
+    val playerBottomChromeInset = when {
+        immersive -> 32.dp
+        filmstripVisible -> 100.dp
+        else -> 36.dp
+    }
 
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(LocalDensity.current) {
@@ -279,6 +293,8 @@ fun MediaDetailLabScreen(
                         bottomChromeInset = playerBottomChromeInset,
                         syncCoordinator = syncCoordinator,
                         mediaCacheRepository = mediaCacheRepository,
+                        viewModel = viewModel,
+                        onToggleImmersive = { immersive = !immersive },
                         onOpenStandardDetail = { onOpenStandardDetail(path) },
                     )
                 }
@@ -301,6 +317,7 @@ fun MediaDetailLabScreen(
                     )
                 }
 
+                if (!immersive) {
                 MediaDetailTransparentTopBar(
                     modifier = Modifier.align(Alignment.TopCenter),
                     title = barTitle,
@@ -417,6 +434,23 @@ fun MediaDetailLabScreen(
                         }
                     },
                 )
+                }
+
+                if (immersive) {
+                    IconButton(
+                        onClick = { immersive = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.45f)),
+                    ) {
+                        Icon(
+                            Icons.Outlined.FullscreenExit,
+                            contentDescription = "Mostrar barras",
+                            tint = Color.White,
+                        )
+                    }
+                }
             }
 
             if (showDetailsSheet) {
@@ -581,26 +615,119 @@ private fun LabMediaDetailPage(
     bottomChromeInset: Dp,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
+    viewModel: GalleryViewModel,
+    onToggleImmersive: () -> Unit,
     onOpenStandardDetail: () -> Unit,
 ) {
+    val viewContext = LocalContext.current
+    val app = viewContext.applicationContext as OneGalleryApplication
+    val localMediaRepository = app.localMediaRepository
+    val thumbnailCache = app.galleryThumbnailCache
     var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
     var loading by remember(canonicalPath) { mutableStateOf(liveItem == null) }
+    var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
+    var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
+    var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
 
-    LaunchedEffect(canonicalPath, isActivePage, liveItem?.cachedOriginal?.absolutePath) {
-        if (!isActivePage && liveItem != null && item == null) {
-            item = liveItem
-            loading = false
-            return@LaunchedEffect
-        }
-        if (!isActivePage) return@LaunchedEffect
-        loading = item == null
-        val loaded = withContext(Dispatchers.Default) {
+    suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
+        withContext(Dispatchers.Default) {
             syncCoordinator.getMetadata(canonicalPath)?.let { entity ->
-                GalleryMapper.toDisplayItem(entity, mediaCacheRepository)
+                val mapped = GalleryMapper.toDisplayItem(
+                    entity,
+                    mediaCacheRepository,
+                    localMediaRepository,
+                )
+                if (includeOriginalFile != null) {
+                    mapped.copy(cachedOriginal = includeOriginalFile)
+                } else {
+                    mapped
+                }
             }
         }
-        if (loaded != null) item = loaded
-        loading = false
+
+    fun notifyGridIfNewlyCached(display: GalleryDisplayItem?) {
+        if (gridNotifiedForCache || display == null) return
+        if (!display.hasViewableLocalOriginal(viewContext)) return
+        val liveHadCache = liveItem?.hasViewableLocalOriginal(viewContext) == true
+        if (liveHadCache) return
+        gridNotifiedForCache = true
+        viewModel.notifyLocalDisplayChanged()
+    }
+
+    suspend fun loadFullOriginalForViewing() {
+        if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
+        loadingFull = true
+        error = null
+        try {
+            val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
+            if (result.isSuccess) {
+                item = loadDisplayItem(includeOriginalFile = result.getOrNull())
+                notifyGridIfNewlyCached(item)
+            } else {
+                error = result.exceptionOrNull()?.message
+            }
+        } finally {
+            loadingFull = false
+        }
+    }
+
+    LaunchedEffect(
+        canonicalPath,
+        isActivePage,
+        liveItem?.cachedPlaceholderThumb,
+        liveItem?.cloudState,
+        liveItem?.localReleasedForSpace,
+        liveItem?.cachedOriginal?.absolutePath,
+    ) {
+        if (!isActivePage) {
+            if (liveItem != null && item == null) {
+                item = liveItem
+                loading = false
+            }
+            return@LaunchedEffect
+        }
+        try {
+            error = null
+            val refreshed = loadDisplayItem() ?: liveItem
+            if (refreshed != null) {
+                item = refreshed
+            }
+            loading = false
+            withContext(Dispatchers.IO) {
+                thumbnailCache.ensureThumbnailCached(canonicalPath)
+            }
+            item = loadDisplayItem() ?: item
+            notifyGridIfNewlyCached(item)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            error = failure.message ?: failure.javaClass.simpleName
+            loading = false
+            loadingFull = false
+        }
+    }
+
+    LaunchedEffect(canonicalPath, isActivePage, item, liveItem) {
+        if (!isActivePage) return@LaunchedEffect
+        try {
+            val needsRecall = withContext(Dispatchers.Default) {
+                syncCoordinator.needsOriginalRecall(canonicalPath)
+            }
+            if (needsRecall) {
+                loadFullOriginalForViewing()
+            } else {
+                val refreshed = loadDisplayItem()
+                if (refreshed != null) {
+                    item = refreshed
+                    notifyGridIfNewlyCached(refreshed)
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            error = failure.message ?: failure.javaClass.simpleName
+            loadingFull = false
+        }
     }
 
     LaunchedEffect(canonicalPath, isActivePage) {
@@ -620,9 +747,11 @@ private fun LabMediaDetailPage(
                 when {
                     GalleryMapper.isAudioFileName(display.displayName) -> {
                         val playback = display.playbackUri()
-                        if (playback == null) {
+                        if (playback == null && loadingFull) {
+                            CircularProgressIndicator(color = Color.White)
+                        } else if (playback == null) {
                             LabUnsupportedMediaMessage(
-                                message = "Áudio sem arquivo local. Abra no visualizador padrão ou sincronize.",
+                                message = error ?: "Áudio sem arquivo local. Abra no visualizador padrão ou sincronize.",
                                 onOpenStandardDetail = onOpenStandardDetail,
                             )
                         } else {
@@ -639,9 +768,11 @@ private fun LabMediaDetailPage(
                     }
                     display.kind == MediaKind.VIDEO -> {
                         val playback = display.playbackUri()
-                        if (playback == null) {
+                        if (playback == null && loadingFull) {
+                            CircularProgressIndicator(color = Color.White)
+                        } else if (playback == null) {
                             LabUnsupportedMediaMessage(
-                                message = "Vídeo sem URI de reprodução. Use o visualizador padrão.",
+                                message = error ?: "Vídeo sem URI de reprodução. Use o visualizador padrão.",
                                 onOpenStandardDetail = onOpenStandardDetail,
                             )
                         } else {
@@ -652,23 +783,37 @@ private fun LabMediaDetailPage(
                                 kind = LabMediaPlaybackKind.Video,
                                 displayName = display.displayName,
                                 bottomChromeInset = bottomChromeInset,
+                                onVideoAreaTap = onToggleImmersive,
                             )
                         }
                     }
-                    display.detailPreviewModel() != null -> {
-                        LabSamsungStylePhotoViewer(
-                            item = display,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    display.detailPreviewModel() != null || loadingFull -> {
+                        if (loadingFull && display.detailPreviewModel() == null) {
+                            CircularProgressIndicator(color = Color.White)
+                        } else {
+                            LabSamsungStylePhotoViewer(
+                                item = display,
+                                modifier = Modifier.fillMaxSize(),
+                                onToggleImmersive = onToggleImmersive,
+                            )
+                        }
                     }
                     else -> {
                         LabUnsupportedMediaMessage(
-                            message = "Prévia indisponível neste lab. Detalhes completos no visualizador padrão.",
+                            message = error ?: "Prévia indisponível neste lab. Detalhes completos no visualizador padrão.",
                             onOpenStandardDetail = onOpenStandardDetail,
                         )
                     }
                 }
             }
+        }
+        if (loadingFull && item != null) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 72.dp),
+                color = Color.White.copy(alpha = 0.85f),
+            )
         }
     }
 }
