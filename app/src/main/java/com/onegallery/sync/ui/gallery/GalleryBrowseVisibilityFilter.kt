@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.LocalMediaRepository
 import com.onegallery.sync.data.local.MediaCacheRepository
+import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 
 fun filterVisibleForGalleryBrowse(
@@ -10,10 +11,16 @@ fun filterVisibleForGalleryBrowse(
     onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
     if (items.isEmpty()) return items
-    if (onlyItemsWithThumbnail || items.size >= 1_500) {
-        return items.filter { it.showInBrowseGrid }
+    return items.filter { item ->
+        when {
+            item.kind == MediaKind.VIDEO ->
+                item.hasBrowsableThumbnail(mediaCacheRepository)
+            onlyItemsWithThumbnail || items.size >= 1_500 ->
+                item.showInBrowseGrid
+            else ->
+                item.isVisibleInGalleryBrowse(mediaCacheRepository)
+        }
     }
-    return items.filter { it.isVisibleInGalleryBrowse(mediaCacheRepository) }
 }
 
 fun mapMetadataToBrowsableDisplayItems(

@@ -104,7 +104,7 @@ class GalleryCatalogSession {
     ): SnapshotBundle? {
         val current = lastBundle ?: return null
         var changed = false
-        val updated = current.catalogItems.map { item ->
+        val catalog = current.catalogItems.map { item ->
             val thumb = if (item.kind == MediaKind.VIDEO) {
                 mediaCacheRepository.galleryThumbnailResolved(
                     item.canonicalPath,
@@ -117,19 +117,16 @@ class GalleryCatalogSession {
                     item.oneDriveItemId,
                 )
             }
-            if (thumb != null) {
-                if (item.cachedPlaceholderThumb?.absolutePath != thumb.absolutePath) {
-                    changed = true
-                    val next = item.copy(cachedPlaceholderThumb = thumb)
-                    next.copy(showInBrowseGrid = recomputeShowInBrowseGrid(next))
-                } else {
-                    item
-                }
+            val next = item.copy(cachedPlaceholderThumb = thumb)
+            val nextShow = recomputeShowInBrowseGrid(next)
+            val merged = next.copy(showInBrowseGrid = nextShow)
+            if (merged != item) {
+                changed = true
+                merged
             } else {
                 item
             }
         }
-        val catalog = if (changed) updated else current.catalogItems
         val visible = filterVisibleForGalleryBrowse(
             catalog,
             mediaCacheRepository,

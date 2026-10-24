@@ -474,21 +474,14 @@ class GalleryViewModel(
         librarySnapshotCore,
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
         syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
-    ) { snapshot, _, syncRunning ->
+    ) { snapshot, _, _ ->
         if (GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
             snapshot
         } else {
-        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
-        val refreshed = when {
-            snapshot.catalogItems.size > 1_500 && !onlyThumb -> snapshot
-            !syncRunning && !onlyThumb -> snapshot
-            else ->
-                catalogSession.refreshThumbnailFlags(
-                    mediaCacheRepository,
-                    onlyThumb,
-                )?.toLibrarySnapshot() ?: snapshot
-        }
-        refreshed
+            catalogSession.refreshThumbnailFlags(
+                mediaCacheRepository,
+                galleryPreferences.browseOnlyItemsWithThumbnail,
+            )?.toLibrarySnapshot() ?: snapshot
         }
     }.distinctUntilChanged { previous, next ->
         previous.catalogItems === next.catalogItems &&

@@ -9,9 +9,15 @@ fun recomputeShowInBrowseGrid(item: GalleryDisplayItem): Boolean {
     if (GalleryMapper.isAudioFileName(item.displayName)) return false
     if (item.kind == MediaKind.VIDEO) {
         val stub = item.cachedPlaceholderThumb
-        if (stub != null && VideoThumbnailHelper.isGalleryVideoThumbnailFile(stub)) {
-            return true
+        val hasVideoThumb = stub != null && VideoThumbnailHelper.isGalleryVideoThumbnailFile(stub)
+        if (item.oneDriveItemId != null ||
+            item.cloudState == CloudSyncState.CLOUD_ONLY ||
+            item.cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            if (item.videoCountsAsLocalBrowseThumb()) return true
+            return hasVideoThumb
         }
+        if (hasVideoThumb) return true
         return item.videoCountsAsLocalBrowseThumb()
     }
     val stub = item.cachedPlaceholderThumb

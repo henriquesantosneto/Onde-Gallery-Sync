@@ -168,7 +168,7 @@ fun GridVideoThumbnail(
                 contentScale = contentScale,
             )
         }
-        cloudKey != null -> {
+        cloudKey != null && forFilmstrip -> {
             val request = remember(cloudKey, sizePx, coilRetry) {
                 ImageRequest.Builder(context)
                     .data(cloudKey)
