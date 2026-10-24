@@ -755,9 +755,8 @@ private fun VideoPlayerWithZoom(
         resetKey = canonicalPath,
         transform = zoomTransform,
         modifier = Modifier.fillMaxSize(),
-        interceptSingleTap = true,
+        interceptSingleTap = false,
         onZoomActiveChanged = onZoomActiveChanged,
-        onSingleTap = onToggleImmersive,
     ) {
         VideoPlayerView(
             uri = playback,
@@ -843,8 +842,6 @@ private fun MediaDetailPage(
 
     suspend fun loadFullOriginalForViewing() {
         if (suppressAutoRecall) return
-        val preview = item ?: liveItem
-        if (preview?.hasViewableLocalOriginal(viewContext) == true) return
         if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
         loadingFull = true
         error = null
@@ -890,14 +887,9 @@ private fun MediaDetailPage(
             error = null
             val refreshed = loadDisplayItem() ?: liveItem
             if (refreshed != null) {
-                val keepLocal = item?.hasViewableLocalOriginal(viewContext) == true
-                val refreshedViewable = refreshed.hasViewableLocalOriginal(viewContext)
-                item = when {
-                    refreshedViewable || !keepLocal -> refreshed
-                    else -> item
-                }
-                if (refreshedViewable) {
-                    onDisplayItemChanged(item ?: refreshed)
+                item = refreshed
+                if (refreshed.hasViewableLocalOriginal(viewContext)) {
+                    onDisplayItemChanged(refreshed)
                 }
             }
             if (item != null) loading = false
@@ -936,24 +928,17 @@ private fun MediaDetailPage(
             return@LaunchedEffect
         }
         try {
-            val previewItem = item ?: liveItem
-            if (previewItem?.hasViewableLocalOriginal(viewContext) == true) {
-                return@LaunchedEffect
-            }
             val needsRecall = withContext(Dispatchers.Default) {
                 syncCoordinator.needsOriginalRecall(canonicalPath)
             }
             if (needsRecall) {
                 loadFullOriginalForViewing()
             } else {
-                val previewItem = item ?: liveItem
-                if (previewItem?.hasViewableLocalOriginal(viewContext) != true) {
-                    val refreshed = loadDisplayItem()
-                    if (refreshed != null) {
-                        item = refreshed
-                        onDisplayItemChanged(refreshed)
-                        notifyGridIfNewlyCached(refreshed)
-                    }
+                val refreshed = loadDisplayItem()
+                if (refreshed != null) {
+                    item = refreshed
+                    onDisplayItemChanged(refreshed)
+                    notifyGridIfNewlyCached(refreshed)
                 }
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -1007,14 +992,17 @@ private fun MediaDetailPage(
                             }
                         }
                         display.kind == MediaKind.VIDEO -> {
-                            MediaDetailMediaShell(modifier = mediaModifier) {
+                            MediaDetailMediaShell(
+                                modifier = mediaModifier,
+                                zoomTransform = zoomTransform,
+                                onToggleImmersive = onToggleImmersive,
+                            ) {
                                 ZoomableMediaContainer(
                                     resetKey = canonicalPath,
                                     transform = zoomTransform,
                                     modifier = Modifier.fillMaxSize(),
-                                    interceptSingleTap = true,
+                                    interceptSingleTap = false,
                                     onZoomActiveChanged = onZoomActiveChanged,
-                                    onSingleTap = onToggleImmersive,
                                 ) {
                                     MediaThumbnailImage(
                                         item = display,
@@ -1027,12 +1015,15 @@ private fun MediaDetailPage(
                             }
                         }
                         else -> {
-                            MediaDetailMediaShell(modifier = mediaModifier) {
+                            MediaDetailMediaShell(
+                                modifier = mediaModifier,
+                                zoomTransform = zoomTransform,
+                                onToggleImmersive = onToggleImmersive,
+                            ) {
                                 DetailZoomablePhoto(
                                     display = display,
                                     transform = zoomTransform,
                                     onZoomActiveChanged = onZoomActiveChanged,
-                                    onToggleImmersive = onToggleImmersive,
                                     onContentAspectRatio = { contentAspectRatio = it },
                                 )
                             }
@@ -1047,9 +1038,16 @@ private fun MediaDetailPage(
 @Composable
 private fun MediaDetailMediaShell(
     modifier: Modifier = Modifier,
+    zoomTransform: ZoomTransformHolder? = null,
+    onToggleImmersive: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Box(modifier = modifier) {
+    val immersiveModifier = if (zoomTransform != null && onToggleImmersive != null) {
+        Modifier.detailImmersiveTap(zoomTransform, onToggleImmersive)
+    } else {
+        Modifier
+    }
+    Box(modifier = modifier.then(immersiveModifier)) {
         content()
     }
 }
@@ -1059,7 +1057,6 @@ private fun DetailZoomablePhoto(
     display: GalleryDisplayItem,
     transform: ZoomTransformHolder,
     onZoomActiveChanged: (Boolean) -> Unit,
-    onToggleImmersive: () -> Unit,
     onContentAspectRatio: (Float) -> Unit,
 ) {
     val context = LocalContext.current
@@ -1080,8 +1077,8 @@ private fun DetailZoomablePhoto(
             transform = transform,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit,
+            interceptSingleTap = false,
             onZoomActiveChanged = onZoomActiveChanged,
-            onSingleTap = onToggleImmersive,
             onContentAspectRatio = onContentAspectRatio,
         )
     } else {
@@ -1089,9 +1086,8 @@ private fun DetailZoomablePhoto(
             resetKey = display.canonicalPath,
             transform = transform,
             modifier = Modifier.fillMaxSize(),
-            interceptSingleTap = true,
+            interceptSingleTap = false,
             onZoomActiveChanged = onZoomActiveChanged,
-            onSingleTap = onToggleImmersive,
         ) {
             GalleryThumbnailImage(
                 item = display,

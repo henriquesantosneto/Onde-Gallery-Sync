@@ -128,11 +128,8 @@ object GalleryMapper {
         localMediaRepository: LocalMediaRepository?,
     ): android.net.Uri? {
         if (entity.localReleasedForSpace) return null
-        if (kind == MediaKind.VIDEO &&
-            (
-                entity.cloudState == CloudSyncState.CLOUD_ONLY ||
-                    entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
-                )
+        if (entity.cloudState == CloudSyncState.CLOUD_ONLY ||
+            entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
         ) {
             return null
         }

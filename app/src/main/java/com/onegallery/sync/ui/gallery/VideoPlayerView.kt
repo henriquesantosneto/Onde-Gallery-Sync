@@ -122,8 +122,13 @@ fun VideoPlayerView(
             focusRequester.requestFocus()
         }
         onDispose {
-            player.stop()
-            player.release()
+            runCatching {
+                player.playWhenReady = false
+                player.pause()
+                player.stop()
+                player.clearMediaItems()
+                player.release()
+            }
         }
     }
     Box(
