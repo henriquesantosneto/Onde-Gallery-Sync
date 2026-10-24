@@ -40,14 +40,6 @@ class GalleryPreferences(context: Context) {
         ).apply()
 
     /**
-     * Abre mídia na rota experimental [MediaDetailLabScreen] em vez de [MediaDetailScreen].
-     * Desligado por padrão — não altera o fluxo atual até você ativar em Ajustes.
-     */
-    var experimentalMediaDetailLab: Boolean
-        get() = prefs.getBoolean(KEY_EXPERIMENTAL_MEDIA_LAB, false)
-        set(value) = prefs.edit().putBoolean(KEY_EXPERIMENTAL_MEDIA_LAB, value).apply()
-
-    /**
      * Grade / carrossel: oculta nuvem e vídeos sem JPEG no cache (menos decode na hora).
      * Fotos com URI local continuam visíveis.
      */
@@ -69,7 +61,6 @@ class GalleryPreferences(context: Context) {
         private const val KEY_ALBUM_SORT = "album_sort"
         private const val KEY_ALBUM_GRID_ZOOM = "album_grid_zoom"
         private const val KEY_GALLERY_GRID_ZOOM = "gallery_grid_zoom"
-        private const val KEY_EXPERIMENTAL_MEDIA_LAB = "experimental_media_detail_lab"
         private const val KEY_BROWSE_ONLY_WITH_THUMB = "browse_only_items_with_thumbnail"
         private const val KEY_LOG_PERF = "log_performance_traces"
         private const val KEY_ZERO_DECODE_SCROLL = "zero_decode_while_scrolling"

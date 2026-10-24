@@ -120,9 +120,6 @@ fun SettingsScreen(
     var autoFreeLocalAfterSync by remember {
         mutableStateOf(syncPreferences.autoFreeLocalSpaceWhenSynced)
     }
-    var experimentalMediaLab by remember {
-        mutableStateOf(galleryPreferences.experimentalMediaDetailLab)
-    }
     var logPerformanceTraces by remember {
         mutableStateOf(galleryPreferences.logPerformanceTraces)
     }
@@ -837,26 +834,6 @@ fun SettingsScreen(
                     },
                 )
             }
-            item {
-                SettingsSwitchRow(
-                    title = "Player de mídia experimental",
-                    summary = "Fotos, vídeos e áudio em rota de teste (estilo Samsung).",
-                    info = SettingsInfoDialog(
-                        title = "Player experimental",
-                        body = "Quando ligado, tocar em uma mídia abre o visualizador de laboratório " +
-                            "(rota media-lab): fotos com zoom, vídeos com pílula de tempo, áudio com " +
-                            "controles de som e painel de detalhes (ícone ℹ ou arrastar para cima). " +
-                            "O detalhe padrão não é alterado.",
-                    ),
-                    checked = experimentalMediaLab,
-                    onInfoClick = { settingsInfo = it },
-                    onCheckedChange = { enabled ->
-                        experimentalMediaLab = enabled
-                        galleryPreferences.experimentalMediaDetailLab = enabled
-                    },
-                )
-            }
-
             item {
                 Box(
                     modifier = Modifier

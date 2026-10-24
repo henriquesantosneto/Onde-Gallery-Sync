@@ -60,13 +60,17 @@ fun GalleryThumbnailImage(
     /** Faixa do detalhe: incrementar após prefetch para recarregar JPEG de vídeo. */
     refreshNonce: Int = 0,
 ) {
-    if (style == GalleryThumbnailStyle.Grid && item.kind == MediaKind.VIDEO) {
+    if (
+        (style == GalleryThumbnailStyle.Grid || style == GalleryThumbnailStyle.Filmstrip) &&
+        item.kind == MediaKind.VIDEO
+    ) {
         GridVideoThumbnail(
             item = item,
             contentDescription = contentDescription,
             sizePx = sizePx,
             modifier = modifier,
             contentScale = contentScale,
+            style = style,
         )
         return
     }

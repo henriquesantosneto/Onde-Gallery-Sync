@@ -1,12 +1,12 @@
 package com.onegallery.sync.ui.gallery
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -20,34 +20,26 @@ import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.OneGalleryApplication
@@ -55,14 +47,13 @@ import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.SyncCoordinator
-import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/** Fotos, vídeos e áudio em tela cheia (player estilo Samsung). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MediaDetailScreen(
     initialCanonicalPath: String,
@@ -73,71 +64,32 @@ fun MediaDetailScreen(
     onOpenPlacesMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    fun leaveDetail() {
-        viewModel.notifyLocalDisplayChanged()
-        onBack()
-    }
     val liveItems = state.libraryItems
-    var showMoveDialog by remember { mutableStateOf(false) }
-    var detailsSettleFraction by remember { mutableFloatStateOf(0f) }
-    var detailsDragFraction by remember { mutableFloatStateOf(0f) }
-    var detailsDragging by remember { mutableStateOf(false) }
-    /** true = oculta barras e carrossel (toque na foto alterna). */
-    var immersive by remember { mutableStateOf(false) }
-    var pagerScrollEnabled by remember { mutableStateOf(true) }
-    var zoomActive by remember { mutableStateOf(false) }
-    var activeZoomTransform by remember { mutableStateOf<ZoomTransformHolder?>(null) }
-    var showOverflowMenu by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var showAllFilesForDelete by remember { mutableStateOf(false) }
-    var showAllFilesForRelease by remember { mutableStateOf(false) }
-    var pendingDeletePaths by remember { mutableStateOf<List<String>>(emptyList()) }
-    var pendingDeleteOnRemoved by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var pendingReleasePaths by remember { mutableStateOf<List<String>>(emptyList()) }
-    var pendingReleaseOnDone by remember { mutableStateOf<(() -> Unit)?>(null) }
     val context = LocalContext.current
-    var activePageError by remember { mutableStateOf<String?>(null) }
-    var activePageRecalling by remember { mutableStateOf(false) }
-    /** Evita recall automático na mesma sessão após “Liberar espaço” (reabrir a foto para baixar). */
-    val suppressAutoRecallPaths = remember { mutableSetOf<String>() }
-    var suppressAutoRecallRevision by remember { mutableIntStateOf(0) }
-    fun markSuppressAutoRecall(paths: Collection<String>) {
-        if (paths.isEmpty()) return
-        suppressAutoRecallPaths.addAll(paths)
-        suppressAutoRecallRevision++
+    val galleryPreferences = remember(context) {
+        (context.applicationContext as OneGalleryApplication).galleryPreferences
     }
-
     val pagerScope = rememberCoroutineScope()
+    var immersive by remember { mutableStateOf(false) }
 
     ImmersiveSystemBarsEffect(
         immersive = immersive,
         edgeToEdgeWithVisibleBars = !immersive,
     )
 
-    val itemsByPath = remember(liveItems) {
-        liveItems.associateBy { it.canonicalPath }
-    }
-
     if (liveItems.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Color.White)
         }
-        LaunchedEffect(initialCanonicalPath) {
-            delay(600)
-            if (viewModel.state.value.libraryItems.isEmpty()) {
-                leaveDetail()
-            }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(600)
+            if (viewModel.state.value.libraryItems.isEmpty()) onBack()
         }
         return
     }
 
-    val galleryPreferences = (LocalContext.current.applicationContext as OneGalleryApplication)
-        .galleryPreferences
+    val itemsByPath = remember(liveItems) { liveItems.associateBy { it.canonicalPath } }
     val timelineGrouping = timelineGroupingForGridScale(galleryPreferences.galleryGridZoom)
-
     val contextItems = remember(
         liveItems,
         state.albumFilter,
@@ -159,76 +111,62 @@ fun MediaDetailScreen(
             timelineGrouping = timelineGrouping,
         )
     }
-
-    val frozenPaths = remember { mutableStateListOf<String>() }
-    LaunchedEffect(contextItems, state.selectionMode) {
-        if (state.selectionMode) return@LaunchedEffect
-        val paths = contextItems.map { it.canonicalPath }
-        if (frozenPaths.isEmpty()) {
-            frozenPaths.addAll(paths)
-            return@LaunchedEffect
-        }
-        val known = frozenPaths.toSet()
-        val liveSet = paths.toSet()
-        frozenPaths.removeAll { it !in liveSet }
-        paths.forEach { path ->
-            if (path !in known) {
-                frozenPaths.add(path)
-            }
-        }
-    }
-
-    // Mantém a fila completa durante seleção — evita crash/trava ao cancelar (pager encolhia).
-    val pagerPaths = when {
-        frozenPaths.isNotEmpty() -> frozenPaths.toList()
-        else -> contextItems.map { it.canonicalPath }
-    }
+    val pagerPaths = remember(contextItems) { contextItems.map { it.canonicalPath } }
     val initialPage = pagerPaths.indexOf(initialCanonicalPath).coerceAtLeast(0)
     val pagerState = rememberPagerState(
         initialPage = initialPage.coerceIn(0, (pagerPaths.size - 1).coerceAtLeast(0)),
     ) { pagerPaths.size.coerceAtLeast(1) }
 
-    LaunchedEffect(pagerPaths.size) {
-        val lastIndex = (pagerPaths.size - 1).coerceAtLeast(0)
-        if (pagerState.currentPage > lastIndex) {
-            pagerState.scrollToPage(lastIndex)
-        }
-    }
-
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
-    var detailItemOverrides by remember { mutableStateOf(mapOf<String, GalleryDisplayItem>()) }
     val currentItem = currentPath?.let { path ->
-        preferDisplayItemForCloudBadge(
-            detailItemOverrides[path],
-            itemsByPath[path],
-            context,
-        )
+        preferDisplayItemForCloudBadge(null, itemsByPath[path], context)
     }
     val currentSelected = currentPath != null && currentPath in state.selectedPaths
-    val detailPaths = when {
-        state.selectionMode && state.selectedPaths.isNotEmpty() -> state.selectedPaths.toList()
-        currentPath != null -> listOf(currentPath)
-        else -> emptyList()
+    val barTitle = currentItem?.displayName ?: "Mídia"
+    val barSubtitle = if (pagerPaths.size > 1) {
+        "${pagerState.currentPage + 1} / ${pagerPaths.size}"
+    } else {
+        null
     }
 
-    val multiSelection = state.selectionMode && state.selectedPaths.size > 1
-    val swipeUpForDetails = !multiSelection && currentPath != null
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showMoveDialog by remember { mutableStateOf(false) }
+    var showAllFilesForDelete by remember { mutableStateOf(false) }
+    var showAllFilesForRelease by remember { mutableStateOf(false) }
+    var pendingDeletePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingDeleteOnRemoved by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingReleasePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingReleaseOnDone by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun leaveDetail() {
+        viewModel.notifyLocalDisplayChanged()
+        onBack()
+    }
+
+    val filmstripItems = remember(pagerPaths, itemsByPath, contextItems) {
+        val pool = itemsByPath.ifEmpty { contextItems.associateBy { it.canonicalPath } }
+        pagerPaths.mapNotNull { path -> pool[path] }
+    }
+
+    var activeVideoPath by remember(pagerPaths) {
+        mutableStateOf(pagerPaths.getOrNull(pagerState.currentPage))
+    }
+    LaunchedEffect(pagerState.currentPage, pagerPaths) {
+        activeVideoPath = pagerPaths.getOrNull(pagerState.currentPage)
+    }
+
+    var detailsSettleFraction by remember { mutableFloatStateOf(0f) }
+    var detailsDragFraction by remember { mutableFloatStateOf(0f) }
+    var detailsDragging by remember { mutableStateOf(false) }
+    var detailsContentLevel by remember { mutableStateOf(MediaDetailContentLevel.Simple) }
 
     LaunchedEffect(pagerState.currentPage) {
         detailsSettleFraction = 0f
         detailsDragFraction = 0f
         detailsDragging = false
-        activePageError = null
-        pagerScrollEnabled = true
-        zoomActive = false
-        activeZoomTransform = null
-    }
-
-    fun openDetailsToSimple() {
-        if (detailPaths.isNotEmpty()) {
-            detailsSettleFraction = MediaDetailSheetAnchors.SIMPLE
-            detailsDragFraction = MediaDetailSheetAnchors.SIMPLE
-        }
+        detailsContentLevel = MediaDetailContentLevel.Simple
+        immersive = false
     }
 
     fun snapDetailsPanel(velocityYPxPerSec: Float = 0f) {
@@ -237,199 +175,144 @@ fun MediaDetailScreen(
         detailsDragFraction = snapped
     }
 
+    fun openDetailsToSimple() {
+        if (currentPath == null) return
+        detailsSettleFraction = MediaDetailSheetAnchors.SIMPLE
+        detailsDragFraction = MediaDetailSheetAnchors.SIMPLE
+    }
+
     val detailsDisplayFraction = rememberMediaDetailSheetFraction(
         settleTarget = detailsSettleFraction,
         dragFraction = detailsDragFraction,
         dragging = detailsDragging,
         resetKey = pagerState.currentPage,
     )
-    var detailsContentLevel by remember {
-        mutableStateOf(MediaDetailContentLevel.Simple)
-    }
+
     LaunchedEffect(detailsDragging, detailsDragFraction, detailsSettleFraction) {
         val fraction = if (detailsDragging) detailsDragFraction else detailsSettleFraction
-        detailsContentLevel = contentLevelForPanelFraction(
-            fraction,
-            detailsContentLevel,
-        )
-    }
-    LaunchedEffect(pagerState.currentPage) {
-        detailsContentLevel = MediaDetailContentLevel.Simple
-        activePageRecalling = false
-        immersive = false
+        detailsContentLevel = contentLevelForPanelFraction(fraction, detailsContentLevel)
     }
 
-    var activeVideoPlaybackPath by remember(pagerPaths) {
-        mutableStateOf(pagerPaths.getOrNull(pagerState.currentPage))
-    }
-    LaunchedEffect(pagerState.currentPage, pagerPaths) {
-        activeVideoPlaybackPath = pagerPaths.getOrNull(pagerState.currentPage)
-    }
-    LaunchedEffect(pagerState.isScrollInProgress, pagerState.currentPage, pagerPaths) {
-        if (pagerState.isScrollInProgress) {
-            activeVideoPlaybackPath = pagerPaths.getOrNull(pagerState.currentPage)
-        }
-    }
-
-    val chromeVisible = !immersive
-
-    val filmstripItems = remember(pagerPaths, itemsByPath, contextItems) {
-        val pool = if (liveItems.isNotEmpty()) itemsByPath else contextItems.associateBy { it.canonicalPath }
-        pagerPaths.mapNotNull { path -> pool[path] }
-    }
+    val detailPaths = currentPath?.let { listOf(it) } ?: emptyList()
     val detailsPanelOpen = when {
         detailsDragging -> detailsDragFraction > 0.14f
         else -> detailsSettleFraction > 0.05f
     } && detailPaths.isNotEmpty()
 
-    val showFilmstrip = !state.selectionMode &&
-        !detailsPanelOpen &&
-        !immersive &&
-        filmstripItems.size > 1
-
-    val barTitle = when {
-        state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
-        else -> currentItem?.displayName ?: "Mídia"
+    BackHandler {
+        when {
+            showAllFilesForRelease -> showAllFilesForRelease = false
+            showAllFilesForDelete -> showAllFilesForDelete = false
+            showDeleteConfirm -> showDeleteConfirm = false
+            showMoveDialog -> showMoveDialog = false
+            state.selectionMode -> viewModel.clearSelection()
+            immersive -> immersive = false
+            detailsPanelOpen -> {
+                detailsSettleFraction = 0f
+                detailsDragFraction = 0f
+                detailsDragging = false
+            }
+            else -> leaveDetail()
+        }
     }
-    val barSubtitle = if (!state.selectionMode && pagerPaths.size > 1) {
-        "${pagerState.currentPage + 1} / ${pagerPaths.size}"
+
+    val filmstripVisible = filmstripItems.size > 1 && !detailsPanelOpen && !immersive
+    val playerBottomChromeInset = when {
+        immersive -> 32.dp
+        filmstripVisible -> 100.dp
+        else -> 36.dp
+    }
+
+    val configuration = LocalConfiguration.current
+    val screenHeightPx = with(LocalDensity.current) {
+        configuration.screenHeightDp.dp.toPx()
+    }
+    val showDetailsSheet = detailPaths.isNotEmpty() &&
+        (detailsDragging || detailsSettleFraction > 0.02f)
+    val useSplitPhotoLayout = showDetailsSheet || detailsDisplayFraction > 0.03f
+    val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
+    val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
+    gestureBaseFraction.floatValue = if (detailsDragging) {
+        detailsDragFraction
     } else {
-        null
+        detailsSettleFraction
     }
+    val panelDragBaseFraction = gestureBaseFraction.floatValue
+    val panelPullEnabled = currentPath != null && detailPaths.isNotEmpty()
+    val onPanelDragStart = {
+        detailsDragging = true
+        detailsDragFraction = gestureBaseFraction.floatValue
+    }
+    val onPanelDragFraction: (Float) -> Unit = { fraction ->
+        detailsDragging = true
+        detailsDragFraction = fraction
+    }
+    val onPanelDragEnd: (Float) -> Unit = { velocityY ->
+        snapDetailsPanel(velocityY)
+        detailsDragging = false
+    }
+    val panelDragModifier = Modifier.draggableDetailPanelHeight(
+        enabled = panelPullEnabled,
+        screenHeightPx = screenHeightPx,
+        fractionBaseState = gestureBaseFraction,
+        onDragStart = onPanelDragStart,
+        onDragFraction = onPanelDragFraction,
+        onDragEnd = onPanelDragEnd,
+    )
 
-    Scaffold(
-        contentWindowInsets = ZeroScaffoldContentInsets,
-        containerColor = Color.Black,
-    ) { _ ->
-        val configuration = LocalConfiguration.current
-        val screenHeightPx = with(LocalDensity.current) {
-            configuration.screenHeightDp.dp.toPx()
-        }
-        val showDetailsSheet = detailPaths.isNotEmpty() &&
-            (detailsDragging || detailsSettleFraction > 0.02f)
-        val useSplitPhotoLayout = showDetailsSheet ||
-            detailsDisplayFraction > 0.03f
-        val photoHeightFraction = (1f - detailsDisplayFraction).coerceIn(0.12f, 1f)
-        val gestureBaseFraction = remember { mutableFloatStateOf(0f) }
-        gestureBaseFraction.floatValue = if (detailsDragging) {
-            detailsDragFraction
-        } else {
-            detailsSettleFraction
-        }
-        val panelDragBaseFraction = gestureBaseFraction.floatValue
-        val panelPullEnabled = swipeUpForDetails && !zoomActive && detailPaths.isNotEmpty()
-        val onPanelDragStart = {
-            detailsDragging = true
-            detailsDragFraction = gestureBaseFraction.floatValue
-        }
-        val onPanelDragFraction: (Float) -> Unit = { fraction ->
-            detailsDragging = true
-            detailsDragFraction = fraction
-        }
-        val onPanelDragEnd: (Float) -> Unit = { velocityY ->
-            snapDetailsPanel(velocityY)
-            detailsDragging = false
-        }
-        fun panelDragModifier() = Modifier.draggableDetailPanelHeight(
-            enabled = true,
-            screenHeightPx = screenHeightPx,
-            fractionBaseState = gestureBaseFraction,
-            onDragStart = onPanelDragStart,
-            onDragFraction = onPanelDragFraction,
-            onDragEnd = onPanelDragEnd,
-        )
-        Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (useSplitPhotoLayout) photoHeightFraction else 1f)
                     .align(Alignment.TopCenter)
-                    .then(
-                        activeZoomTransform?.let { transform ->
-                            Modifier.detailPhotoPinchZoom(
-                                transform = transform,
-                                onPinching = { pinching ->
-                                    val zoomed = pinching || transform.scale > 1.02f
-                                    zoomActive = zoomed
-                                    pagerScrollEnabled = !zoomed
-                                },
-                                onTransformChanged = {
-                                    val zoomed = transform.scale > 1.02f
-                                    zoomActive = zoomed
-                                    pagerScrollEnabled = !zoomed
-                                },
-                            )
-                        } ?: Modifier,
-                    )
-                    .then(
-                        if (panelPullEnabled) panelDragModifier() else Modifier,
-                    ),
+                    .then(panelDragModifier),
             ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = pagerScrollEnabled && !detailsDragging,
-                key = { page -> pagerPaths[page] },
-            ) { page ->
-                val path = pagerPaths[page]
-                val live = itemsByPath[path]
-                MediaDetailPage(
-                    canonicalPath = path,
-                    liveItem = live,
-                    isActivePage = page == pagerState.currentPage,
-                    shouldPlayVideo = path == activeVideoPlaybackPath,
-                    suppressAutoRecall = path in suppressAutoRecallPaths,
-                    suppressAutoRecallRevision = suppressAutoRecallRevision,
-                    syncCoordinator = syncCoordinator,
-                    mediaCacheRepository = mediaCacheRepository,
-                    videoControlsBottomPadding = if (showFilmstrip) 96.dp else 24.dp,
-                    onToggleImmersive = { immersive = !immersive },
-                    onZoomActiveChanged = { active ->
-                        zoomActive = active
-                        pagerScrollEnabled = !active
-                    },
-                    onActivePageError = { err ->
-                        if (page == pagerState.currentPage) {
-                            activePageError = err
-                        }
-                    },
-                    onLocalOriginalCached = { viewModel.notifyLocalDisplayChanged() },
-                    onDisplayItemChanged = { updated ->
-                        if (detailItemOverrides[path] != updated) {
-                            detailItemOverrides = detailItemOverrides + (path to updated)
-                        }
-                    },
-                    onRegisterZoomTransform = { activeZoomTransform = it },
-                    onRecallingChanged = { recalling ->
-                        if (page == pagerState.currentPage) {
-                            activePageRecalling = recalling
-                        }
-                    },
+                HorizontalPager(
+                    state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                )
-            }
+                    userScrollEnabled = !detailsDragging,
+                    key = { page -> pagerPaths.getOrElse(page) { "empty-$page" } },
+                ) { page ->
+                    val path = pagerPaths.getOrNull(page) ?: return@HorizontalPager
+                    val liveItem = itemsByPath[path]
+                    val pageActive = pagerState.currentPage == page
+                    LabMediaDetailPage(
+                        canonicalPath = path,
+                        liveItem = liveItem,
+                        isActivePage = pageActive,
+                        shouldPlayVideo = activeVideoPath == path,
+                        bottomChromeInset = playerBottomChromeInset,
+                        syncCoordinator = syncCoordinator,
+                        mediaCacheRepository = mediaCacheRepository,
+                        viewModel = viewModel,
+                        onToggleImmersive = { immersive = !immersive },
+                    )
+                }
 
-            if (showFilmstrip) {
-                MediaDetailFilmstrip(
-                    items = filmstripItems,
-                    currentCanonicalPath = currentPath,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding(),
-                    onSelectPath = { path ->
-                        activeVideoPlaybackPath = path
-                        val index = pagerPaths.indexOf(path)
-                        if (index >= 0) {
-                            pagerScope.launch {
-                                pagerState.animateScrollToPage(index)
+                if (filmstripVisible) {
+                    MediaDetailFilmstrip(
+                        items = filmstripItems,
+                        currentCanonicalPath = currentPath,
+                        onSelectPath = { path ->
+                            val index = pagerPaths.indexOf(path)
+                            if (index >= 0) {
+                                activeVideoPath = path
+                                pagerScope.launch { pagerState.scrollToPage(index) }
                             }
-                        }
-                    },
-                    syncCoordinator = syncCoordinator,
-                )
-            }
+                        },
+                        syncCoordinator = syncCoordinator,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding(),
+                    )
+                }
 
-            if (chromeVisible) {
+                if (!immersive) {
                 MediaDetailTransparentTopBar(
                     modifier = Modifier.align(Alignment.TopCenter),
                     title = barTitle,
@@ -438,7 +321,7 @@ fun MediaDetailScreen(
                         {
                             MediaDetailTopBarCloudStatus(
                                 item = statusItem,
-                                recalling = activePageRecalling,
+                                recalling = false,
                             )
                         }
                     },
@@ -479,7 +362,6 @@ fun MediaDetailScreen(
                                     onDetails = { openDetailsToSimple() },
                                     onFreeSpace = {
                                         val paths = state.selectedPaths.toList()
-                                        markSuppressAutoRecall(paths)
                                         if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                             viewModel.releaseLocalSpaceSelected()
                                         } else {
@@ -510,7 +392,7 @@ fun MediaDetailScreen(
                                 Icon(
                                     if (currentSelected) Icons.Outlined.CheckCircle
                                     else Icons.Outlined.RadioButtonUnchecked,
-                                    contentDescription = "Selecionar foto",
+                                    contentDescription = "Selecionar",
                                 )
                             }
                             IconButton(onClick = { showDeleteConfirm = true }) {
@@ -535,7 +417,6 @@ fun MediaDetailScreen(
                                 showDetails = detailPaths.isNotEmpty(),
                                 onDetails = { openDetailsToSimple() },
                                 onFreeSpace = {
-                                    markSuppressAutoRecall(listOf(currentPath))
                                     if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                         viewModel.releaseSingle(currentPath)
                                     } else {
@@ -548,23 +429,23 @@ fun MediaDetailScreen(
                         }
                     },
                 )
-            }
-
-            if (immersive) {
-                IconButton(
-                    onClick = { immersive = false },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.45f)),
-                ) {
-                    Icon(
-                        Icons.Outlined.FullscreenExit,
-                        contentDescription = "Mostrar barras",
-                        tint = Color.White,
-                    )
                 }
-            }
+
+                if (immersive) {
+                    IconButton(
+                        onClick = { immersive = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.45f)),
+                    ) {
+                        Icon(
+                            Icons.Outlined.FullscreenExit,
+                            contentDescription = "Mostrar barras",
+                            tint = Color.White,
+                        )
+                    }
+                }
             }
 
             if (showDetailsSheet) {
@@ -588,7 +469,6 @@ fun MediaDetailScreen(
                         snapDetailsPanel(velocityY)
                         detailsDragging = false
                     },
-                    deferBackToSelectionHandler = state.selectionMode,
                     onOpenPlacesMap = onOpenPlacesMap,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -598,8 +478,6 @@ fun MediaDetailScreen(
                         ),
                 )
             }
-
-        }
     }
 
     if (showDeleteConfirm) {
@@ -721,99 +599,29 @@ fun MediaDetailScreen(
             },
         )
     }
-
-    // Prioridade sobre NavHost: voltar cancela seleção / fecha detalhes, não a listagem da galeria.
-    BackHandler {
-        when {
-            showAllFilesForRelease -> showAllFilesForRelease = false
-            showAllFilesForDelete -> showAllFilesForDelete = false
-            showDeleteConfirm -> showDeleteConfirm = false
-            showMoveDialog -> showMoveDialog = false
-            state.selectionMode -> viewModel.clearSelection()
-            immersive -> immersive = false
-            detailsPanelOpen -> {
-                detailsSettleFraction = 0f
-                detailsDragFraction = 0f
-                detailsDragging = false
-            }
-            else -> leaveDetail()
-        }
-    }
 }
 
 @Composable
-private fun VideoPlayerWithZoom(
-    playback: android.net.Uri,
-    canonicalPath: String,
-    shouldPlayVideo: Boolean,
-    zoomTransform: ZoomTransformHolder,
-    onZoomActiveChanged: (Boolean) -> Unit,
-    onToggleImmersive: () -> Unit,
-    videoControlsBottomPadding: androidx.compose.ui.unit.Dp,
-) {
-    ZoomableMediaContainer(
-        resetKey = canonicalPath,
-        transform = zoomTransform,
-        modifier = Modifier.fillMaxSize(),
-        interceptSingleTap = false,
-        onZoomActiveChanged = onZoomActiveChanged,
-    ) {
-        VideoPlayerView(
-            uri = playback,
-            modifier = Modifier.fillMaxSize(),
-            playWhenReady = shouldPlayVideo,
-            usePlaybackControls = false,
-            isActive = shouldPlayVideo,
-            onVideoAreaTap = onToggleImmersive,
-            controlsBottomPadding = videoControlsBottomPadding,
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MediaDetailPage(
+private fun LabMediaDetailPage(
     canonicalPath: String,
     liveItem: GalleryDisplayItem?,
     isActivePage: Boolean,
     shouldPlayVideo: Boolean,
-    suppressAutoRecall: Boolean,
-    suppressAutoRecallRevision: Int,
+    bottomChromeInset: Dp,
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
-    videoControlsBottomPadding: androidx.compose.ui.unit.Dp,
+    viewModel: GalleryViewModel,
     onToggleImmersive: () -> Unit,
-    onZoomActiveChanged: (Boolean) -> Unit,
-    onActivePageError: (String?) -> Unit,
-    onLocalOriginalCached: () -> Unit = {},
-    onDisplayItemChanged: (GalleryDisplayItem) -> Unit = {},
-    onRegisterZoomTransform: (ZoomTransformHolder) -> Unit = {},
-    onRecallingChanged: (Boolean) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
-    val zoomTransform = remember(canonicalPath) { ZoomTransformHolder() }
-    if (isActivePage) {
-        SideEffect { onRegisterZoomTransform(zoomTransform) }
-    }
-    var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
-    var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
-    var loading by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem == null) }
-    var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
-    var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
-    var contentAspectRatio by remember(canonicalPath) { mutableStateOf<Float?>(null) }
     val viewContext = LocalContext.current
-    val thumbnailCache = remember(viewContext) {
-        (viewContext.applicationContext as OneGalleryApplication).galleryThumbnailCache
-    }
-    if (isActivePage) {
-        SideEffect { onRecallingChanged(loadingFull) }
-    }
-
-    LaunchedEffect(item, isActivePage) {
-        if (!isActivePage) return@LaunchedEffect
-        val display = item ?: return@LaunchedEffect
-        onDisplayItemChanged(display)
-    }
+    val app = viewContext.applicationContext as OneGalleryApplication
+    val localMediaRepository = app.localMediaRepository
+    val thumbnailCache = app.galleryThumbnailCache
+    var item by remember(canonicalPath, liveItem?.canonicalPath) { mutableStateOf(liveItem) }
+    var loading by remember(canonicalPath) { mutableStateOf(liveItem == null) }
+    var loadingFull by remember(canonicalPath) { mutableStateOf(false) }
+    var error by remember(canonicalPath) { mutableStateOf<String?>(null) }
+    var gridNotifiedForCache by remember(canonicalPath) { mutableStateOf(false) }
 
     suspend fun loadDisplayItem(includeOriginalFile: File? = null): GalleryDisplayItem? =
         withContext(Dispatchers.Default) {
@@ -821,7 +629,7 @@ private fun MediaDetailPage(
                 val mapped = GalleryMapper.toDisplayItem(
                     entity,
                     mediaCacheRepository,
-                    (viewContext.applicationContext as OneGalleryApplication).localMediaRepository,
+                    localMediaRepository,
                 )
                 if (includeOriginalFile != null) {
                     mapped.copy(cachedOriginal = includeOriginalFile)
@@ -837,34 +645,23 @@ private fun MediaDetailPage(
         val liveHadCache = liveItem?.hasViewableLocalOriginal(viewContext) == true
         if (liveHadCache) return
         gridNotifiedForCache = true
-        onLocalOriginalCached()
+        viewModel.notifyLocalDisplayChanged()
     }
 
     suspend fun loadFullOriginalForViewing() {
-        if (suppressAutoRecall) return
         if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
         loadingFull = true
         error = null
         try {
             val result = syncCoordinator.recallOriginalToDevice(canonicalPath)
             if (result.isSuccess) {
-                val file = result.getOrNull()
-                item = loadDisplayItem(includeOriginalFile = file)
-                item?.let { onDisplayItemChanged(it) }
+                item = loadDisplayItem(includeOriginalFile = result.getOrNull())
                 notifyGridIfNewlyCached(item)
             } else {
                 error = result.exceptionOrNull()?.message
             }
         } finally {
             loadingFull = false
-        }
-    }
-
-    LaunchedEffect(canonicalPath, isActivePage) {
-        if (isActivePage) {
-            withContext(Dispatchers.IO) {
-                syncCoordinator.recordLocalMediaAccess(canonicalPath)
-            }
         }
     }
 
@@ -888,23 +685,13 @@ private fun MediaDetailPage(
             val refreshed = loadDisplayItem() ?: liveItem
             if (refreshed != null) {
                 item = refreshed
-                if (refreshed.hasViewableLocalOriginal(viewContext)) {
-                    onDisplayItemChanged(refreshed)
-                }
             }
-            if (item != null) loading = false
+            loading = false
             withContext(Dispatchers.IO) {
                 thumbnailCache.ensureThumbnailCached(canonicalPath)
             }
-            val afterThumb = loadDisplayItem() ?: item
-            if (afterThumb != null) {
-                item = afterThumb
-                if (afterThumb.hasViewableLocalOriginal(viewContext)) {
-                    onDisplayItemChanged(afterThumb)
-                }
-            }
+            item = loadDisplayItem() ?: item
             notifyGridIfNewlyCached(item)
-            loading = false
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
@@ -914,19 +701,8 @@ private fun MediaDetailPage(
         }
     }
 
-    LaunchedEffect(
-        canonicalPath,
-        isActivePage,
-        item,
-        liveItem,
-        suppressAutoRecall,
-        suppressAutoRecallRevision,
-    ) {
+    LaunchedEffect(canonicalPath, isActivePage, item, liveItem) {
         if (!isActivePage) return@LaunchedEffect
-        if (suppressAutoRecall) {
-            loadingFull = false
-            return@LaunchedEffect
-        }
         try {
             val needsRecall = withContext(Dispatchers.Default) {
                 syncCoordinator.needsOriginalRecall(canonicalPath)
@@ -937,7 +713,6 @@ private fun MediaDetailPage(
                 val refreshed = loadDisplayItem()
                 if (refreshed != null) {
                     item = refreshed
-                    onDisplayItemChanged(refreshed)
                     notifyGridIfNewlyCached(refreshed)
                 }
             }
@@ -949,155 +724,103 @@ private fun MediaDetailPage(
         }
     }
 
-    LaunchedEffect(error, isActivePage) {
+    LaunchedEffect(canonicalPath, isActivePage) {
         if (isActivePage) {
-            onActivePageError(error)
+            withContext(Dispatchers.IO) {
+                syncCoordinator.recordLocalMediaAccess(canonicalPath)
+            }
         }
     }
 
-    val display = item
-    LaunchedEffect(isActivePage, canonicalPath) {
-        if (!isActivePage) {
-            zoomTransform.scale = 1f
-            zoomTransform.offset = Offset.Zero
-        }
-    }
-    Box(modifier = modifier) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         when {
-            loading && display == null -> {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            }
-            display == null -> {
-                Text("Item não encontrado.", modifier = Modifier.align(Alignment.Center))
-            }
+            loading && item == null -> CircularProgressIndicator(color = Color.White)
+            item == null -> Text("Item não encontrado.", color = Color.White)
             else -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val mediaModifier = Modifier.fillMaxSize()
-                    val playback = display.playbackUri()
-                    when {
-                        display.kind == MediaKind.VIDEO && playback != null -> {
-                            MediaDetailMediaShell(modifier = mediaModifier) {
-                                VideoPlayerWithZoom(
-                                    playback = playback,
-                                    canonicalPath = canonicalPath,
-                                    shouldPlayVideo = shouldPlayVideo,
-                                    zoomTransform = zoomTransform,
-                                    onZoomActiveChanged = onZoomActiveChanged,
-                                    onToggleImmersive = onToggleImmersive,
-                                    videoControlsBottomPadding = videoControlsBottomPadding,
-                                )
-                            }
+                val display = item!!
+                when {
+                    GalleryMapper.isAudioFileName(display.displayName) -> {
+                        val playback = display.playbackUri()
+                        if (playback == null && loadingFull) {
+                            CircularProgressIndicator(color = Color.White)
+                        } else if (playback == null) {
+                            LabUnsupportedMediaMessage(
+                                message = error ?: "Áudio sem arquivo local. Sincronize ou baixe o original.",
+                            )
+                        } else {
+                            LabSamsungStyleMediaPlayer(
+                                uri = playback,
+                                modifier = Modifier.fillMaxSize(),
+                                isActive = shouldPlayVideo,
+                                kind = LabMediaPlaybackKind.Audio,
+                                displayName = display.displayName,
+                                artworkItem = display,
+                                bottomChromeInset = bottomChromeInset,
+                            )
                         }
-                        display.kind == MediaKind.VIDEO -> {
-                            MediaDetailMediaShell(
-                                modifier = mediaModifier,
-                                zoomTransform = zoomTransform,
+                    }
+                    display.kind == MediaKind.VIDEO -> {
+                        val playback = display.playbackUri()
+                        if (playback == null && loadingFull) {
+                            CircularProgressIndicator(color = Color.White)
+                        } else if (playback == null) {
+                            LabUnsupportedMediaMessage(
+                                message = error ?: "Vídeo indisponível neste aparelho. Aguarde o download.",
+                            )
+                        } else {
+                            LabSamsungStyleMediaPlayer(
+                                uri = playback,
+                                modifier = Modifier.fillMaxSize(),
+                                isActive = shouldPlayVideo,
+                                kind = LabMediaPlaybackKind.Video,
+                                displayName = display.displayName,
+                                bottomChromeInset = bottomChromeInset,
+                                onVideoAreaTap = onToggleImmersive,
+                            )
+                        }
+                    }
+                    display.detailPreviewModel() != null || loadingFull -> {
+                        if (loadingFull && display.detailPreviewModel() == null) {
+                            CircularProgressIndicator(color = Color.White)
+                        } else {
+                            LabSamsungStylePhotoViewer(
+                                item = display,
+                                modifier = Modifier.fillMaxSize(),
                                 onToggleImmersive = onToggleImmersive,
-                            ) {
-                                ZoomableMediaContainer(
-                                    resetKey = canonicalPath,
-                                    transform = zoomTransform,
-                                    modifier = Modifier.fillMaxSize(),
-                                    interceptSingleTap = false,
-                                    onZoomActiveChanged = onZoomActiveChanged,
-                                ) {
-                                    MediaThumbnailImage(
-                                        item = display,
-                                        contentDescription = display.displayName,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Fit,
-                                        onContentAspectRatio = { contentAspectRatio = it },
-                                    )
-                                }
-                            }
+                            )
                         }
-                        else -> {
-                            MediaDetailMediaShell(
-                                modifier = mediaModifier,
-                                zoomTransform = zoomTransform,
-                                onToggleImmersive = onToggleImmersive,
-                            ) {
-                                DetailZoomablePhoto(
-                                    display = display,
-                                    transform = zoomTransform,
-                                    onZoomActiveChanged = onZoomActiveChanged,
-                                    onContentAspectRatio = { contentAspectRatio = it },
-                                )
-                            }
-                        }
+                    }
+                    else -> {
+                        LabUnsupportedMediaMessage(
+                            message = error ?: "Prévia indisponível. Aguarde miniatura ou download.",
+                        )
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun MediaDetailMediaShell(
-    modifier: Modifier = Modifier,
-    zoomTransform: ZoomTransformHolder? = null,
-    onToggleImmersive: (() -> Unit)? = null,
-    content: @Composable () -> Unit,
-) {
-    val immersiveModifier = if (zoomTransform != null && onToggleImmersive != null) {
-        Modifier.detailImmersiveTap(zoomTransform, onToggleImmersive)
-    } else {
-        Modifier
-    }
-    Box(modifier = modifier.then(immersiveModifier)) {
-        content()
-    }
-}
-
-@Composable
-private fun DetailZoomablePhoto(
-    display: GalleryDisplayItem,
-    transform: ZoomTransformHolder,
-    onZoomActiveChanged: (Boolean) -> Unit,
-    onContentAspectRatio: (Float) -> Unit,
-) {
-    val context = LocalContext.current
-    val fullModel = remember(display.canonicalPath, display.localUri, display.cachedOriginal) {
-        display.detailFullImageModel()
-    }
-    val useThumbnailPipeline = remember(fullModel) {
-        display.detailImageUsesThumbnailPipeline(fullModel)
-    }
-    val detailSizePx = remember(context) {
-        val m = context.resources.displayMetrics
-        (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
-    }
-    if (fullModel != null && !useThumbnailPipeline) {
-        ZoomableImageContent(
-            model = fullModel,
-            contentDescription = display.displayName,
-            transform = transform,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Fit,
-            interceptSingleTap = false,
-            onZoomActiveChanged = onZoomActiveChanged,
-            onContentAspectRatio = onContentAspectRatio,
-        )
-    } else {
-        ZoomableMediaContainer(
-            resetKey = display.canonicalPath,
-            transform = transform,
-            modifier = Modifier.fillMaxSize(),
-            interceptSingleTap = false,
-            onZoomActiveChanged = onZoomActiveChanged,
-        ) {
-            GalleryThumbnailImage(
-                item = display,
-                contentDescription = display.displayName,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-                style = GalleryThumbnailStyle.Detail,
-                sizePx = detailSizePx,
-                onContentAspectRatio = onContentAspectRatio,
+        if (loadingFull && item != null) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 72.dp),
+                color = Color.White.copy(alpha = 0.85f),
             )
         }
+    }
+}
+
+@Composable
+private fun LabUnsupportedMediaMessage(message: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = message,
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }

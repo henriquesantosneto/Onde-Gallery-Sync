@@ -36,7 +36,9 @@ fun GridVideoThumbnail(
     sizePx: Int,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
 ) {
+    val forFilmstrip = style == GalleryThumbnailStyle.Filmstrip
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCache = remember(app) { app.mediaCacheRepository }
@@ -62,7 +64,7 @@ fun GridVideoThumbnail(
 
     val cloudKey = remember(item.canonicalPath, item.oneDriveItemId, item.localUri) {
         if (item.localUri != null) null
-        else GalleryThumbnailResolver.cloudVideoCoilKey(item, forFilmstrip = false)
+        else GalleryThumbnailResolver.cloudVideoCoilKey(item, forFilmstrip = forFilmstrip)
     }
 
     val mediaStoreFrame by produceState<Bitmap?>(
@@ -97,7 +99,7 @@ fun GridVideoThumbnail(
         }
     }
 
-    val layerModifier = modifier.galleryGridThumbnailLayer(GalleryThumbnailStyle.Grid)
+    val layerModifier = modifier.galleryGridThumbnailLayer(style)
 
     when {
         item.localUri != null -> {
@@ -108,7 +110,7 @@ fun GridVideoThumbnail(
                         .data(uri)
                         .size(sizePx)
                         .applyGalleryThumbnailLoading(
-                            style = GalleryThumbnailStyle.Grid,
+                            style = style,
                             allowHardwareBitmap = false,
                             videoDecode = true,
                         )
@@ -172,7 +174,7 @@ fun GridVideoThumbnail(
                     .data(cloudKey)
                     .size(sizePx)
                     .applyGalleryThumbnailLoading(
-                        style = GalleryThumbnailStyle.Grid,
+                        style = style,
                         allowHardwareBitmap = false,
                         videoDecode = false,
                     )
