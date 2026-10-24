@@ -244,6 +244,11 @@ object GallerySessionCatalogSpill {
             }
             return true
         }
+        if (cloudState == CloudSyncState.CLOUD_ONLY ||
+            cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            return placeholder != null
+        }
         if (localUri != null) return true
         if (cachedOriginal != null) return true
         if (placeholder != null) return true

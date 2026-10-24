@@ -18,8 +18,12 @@ fun filterVisibleForGalleryBrowse(
         val out = ArrayList<GalleryDisplayItem>(items.size)
         for (item in items) {
             if (!item.showInBrowseGrid) continue
-            if (item.kind == MediaKind.VIDEO &&
-                !item.hasBrowsableThumbnail(mediaCacheRepository)
+            if (!item.hasBrowsableThumbnail(mediaCacheRepository) &&
+                (
+                    item.kind == MediaKind.VIDEO ||
+                        item.cloudState == com.onegallery.sync.sync.CloudSyncState.CLOUD_ONLY ||
+                        item.cloudState == com.onegallery.sync.sync.CloudSyncState.PENDING_DOWNLOAD
+                    )
             ) {
                 continue
             }

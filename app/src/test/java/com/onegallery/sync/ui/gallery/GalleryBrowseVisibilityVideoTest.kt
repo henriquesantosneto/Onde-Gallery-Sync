@@ -52,6 +52,24 @@ class GalleryBrowseVisibilityVideoTest {
     }
 
     @Test
+    fun cloudOnlyImage_neverCountsAsLocalBrowseThumb() {
+        val item = GalleryDisplayItem(
+            canonicalPath = "p.jpg",
+            displayName = "p.jpg",
+            albumName = "A",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "remote",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            sortTimestamp = 1L,
+        )
+        assertFalse(item.imageCountsAsLocalBrowseThumb())
+    }
+
+    @Test
     fun localOnlyVideo_withUri_countsAsLocalBrowseThumb() {
         val item = GalleryDisplayItem(
             canonicalPath = "v.mp4",

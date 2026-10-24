@@ -12,11 +12,16 @@ fun GalleryDisplayItem.isVisibleInGalleryBrowse(
 ): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (hasBrowsableThumbnail(mediaCacheRepository)) return true
-    if (showInBrowseGrid && kind == MediaKind.IMAGE) return true
-    if (localUri != null && kind == MediaKind.IMAGE) return true
-    if (cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null) return true
     if (kind == MediaKind.VIDEO) return false
-    if (localMediaId != null && !localReleasedForSpace) return true
+    if (localReleasedForSpace) return false
+    if (cloudState == CloudSyncState.CLOUD_ONLY ||
+        cloudState == CloudSyncState.PENDING_DOWNLOAD
+    ) {
+        return false
+    }
+    if (localMediaId != null && !localReleasedForSpace && oneDriveItemId.isNullOrBlank()) {
+        return true
+    }
     if (!oneDriveItemId.isNullOrBlank()) return false
     return cloudState != CloudSyncState.LOCAL_ONLY
 }
@@ -36,13 +41,21 @@ fun GalleryDisplayItem.hasBrowsableThumbnail(
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
     if (kind == MediaKind.VIDEO) return videoCountsAsLocalBrowseThumb()
-    if (localUri != null && kind == MediaKind.IMAGE) return true
-    if (kind == MediaKind.IMAGE &&
-        cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null
-    ) {
-        return true
-    }
+    if (kind == MediaKind.IMAGE) return imageCountsAsLocalBrowseThumb()
     return false
+}
+
+/** Foto no aparelho ou cópia em cache; nuvem sem JPEG não entra na grade. */
+fun GalleryDisplayItem.imageCountsAsLocalBrowseThumb(): Boolean {
+    if (kind != MediaKind.IMAGE) return false
+    if (localReleasedForSpace) return false
+    if (cloudState == CloudSyncState.CLOUD_ONLY ||
+        cloudState == CloudSyncState.PENDING_DOWNLOAD
+    ) {
+        return false
+    }
+    if (cachedOriginal?.takeIf { it.isFile && it.length() > 0L } != null) return true
+    return localUri != null
 }
 
 /** Vídeo ainda no aparelho — miniatura imediata via MediaStore (não conta só na nuvem). */

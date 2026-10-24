@@ -88,7 +88,7 @@ object GalleryMapper {
                         videoEntityHasLocalCopy(entity))
             else ->
                 placeholderThumb != null ||
-                    (localUri != null)
+                    (localUri != null && imageEntityAllowsLocalBrowseGrid(entity))
         }
         val sort = entity.capturedAtSeconds?.takeIf { it > 0L }
             ?: entity.remoteModifiedAt?.takeIf { it > 0L }
@@ -161,6 +161,16 @@ object GalleryMapper {
         return cached != null
     }
 
+    private fun imageEntityAllowsLocalBrowseGrid(entity: SyncMetadataEntity): Boolean {
+        if (entity.localReleasedForSpace) return false
+        if (entity.cloudState == CloudSyncState.CLOUD_ONLY ||
+            entity.cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            return false
+        }
+        return true
+    }
+
     private fun computeShowInBrowseGrid(
         kind: MediaKind,
         localUri: Uri?,
@@ -172,11 +182,18 @@ object GalleryMapper {
         hasThumb: Boolean,
     ): Boolean {
         if (kind == MediaKind.VIDEO) return hasThumb
+        if (hasThumb) return true
+        if (cloudState == CloudSyncState.CLOUD_ONLY ||
+            cloudState == CloudSyncState.PENDING_DOWNLOAD
+        ) {
+            return false
+        }
         if (localUri != null) return true
         if (cachedOriginal != null) return true
-        if (localMediaId != null && !localReleasedForSpace) return true
-        if (hasThumb) return true
-        if (!oneDriveItemId.isNullOrBlank()) return hasThumb
+        if (localMediaId != null && !localReleasedForSpace && oneDriveItemId.isNullOrBlank()) {
+            return true
+        }
+        if (!oneDriveItemId.isNullOrBlank()) return false
         return cloudState != CloudSyncState.LOCAL_ONLY
     }
 
