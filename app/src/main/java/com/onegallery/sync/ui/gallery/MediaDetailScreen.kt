@@ -660,7 +660,9 @@ private fun LabMediaDetailPage(
         val current = display ?: return false
         if (current.oneDriveItemId.isNullOrBlank()) return false
         if (GalleryMapper.isAudioFileName(current.displayName)) return false
-        return !current.hasViewableLocalOriginal(viewContext)
+        return withContext(Dispatchers.Main.immediate) {
+            !current.hasViewableLocalOriginal(viewContext)
+        }
     }
 
     suspend fun loadFullOriginalForViewing(display: GalleryDisplayItem?) {
@@ -716,7 +718,13 @@ private fun LabMediaDetailPage(
         }
     }
 
-    LaunchedEffect(canonicalPath, isActivePage, item, liveItem) {
+    var recallLaunched by remember(canonicalPath) { mutableStateOf(false) }
+
+    LaunchedEffect(isActivePage) {
+        if (!isActivePage) recallLaunched = false
+    }
+
+    LaunchedEffect(canonicalPath, isActivePage) {
         if (!isActivePage) return@LaunchedEffect
         try {
             val display = item ?: liveItem
@@ -724,13 +732,9 @@ private fun LabMediaDetailPage(
                 shouldDownloadOriginalForViewing(display)
             }
             if (needsRecall) {
+                if (recallLaunched) return@LaunchedEffect
+                recallLaunched = true
                 loadFullOriginalForViewing(display)
-            } else {
-                val refreshed = loadDisplayItem()
-                if (refreshed != null) {
-                    item = refreshed
-                    notifyGridIfNewlyCached(refreshed)
-                }
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
