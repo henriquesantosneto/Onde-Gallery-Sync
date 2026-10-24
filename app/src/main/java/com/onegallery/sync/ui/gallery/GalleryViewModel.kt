@@ -1355,7 +1355,6 @@ class GalleryViewModel(
             .take(GRID_THUMB_PREFETCH_BATCH)
             .toList()
         if (paths.isEmpty()) return
-        gridThumbnailPrefetchJob?.cancel()
         gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 prefetchThumbnailPathsParallel(paths)
@@ -1392,8 +1391,8 @@ class GalleryViewModel(
     }
 
     private companion object {
-        const val GRID_THUMB_PREFETCH_PARALLEL = 8
-        const val GRID_THUMB_PREFETCH_BATCH = 72
+        const val GRID_THUMB_PREFETCH_PARALLEL = 14
+        const val GRID_THUMB_PREFETCH_BATCH = 96
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
     }
 

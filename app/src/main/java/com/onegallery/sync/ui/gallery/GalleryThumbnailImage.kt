@@ -78,8 +78,11 @@ fun GalleryThumbnailImage(
     }
     var filmstripVideoRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
 
-    suspend fun resolveDisplayData() {
-        GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(isGrid && zeroDecodeOnScroll)
+    suspend fun resolveDisplayData(forceFullDecode: Boolean = false) {
+        val diskOnly = isGrid &&
+            zeroDecodeOnScroll &&
+            !forceFullDecode &&
+            GalleryGridScrollGate.isUserScrollingGrid
         withContext(Dispatchers.IO) {
             GalleryThumbnailResolver.resolveForGrid(
                 context = context,
@@ -88,7 +91,7 @@ fun GalleryThumbnailImage(
                 mediaCacheRepository = mediaCacheRepository,
                 sizePx = sizePx,
                 style = style,
-                diskCacheOnly = false,
+                diskCacheOnly = diskOnly,
             )
         }?.let { resolved ->
             if (resolved != displayData) {
@@ -189,7 +192,7 @@ fun GalleryThumbnailImage(
                     if (displayData != null && displayData !is Uri) {
                         return@collect
                     }
-                    resolveDisplayData()
+                    resolveDisplayData(forceFullDecode = true)
                     resolvingThumb = GalleryThumbnailResolver.shouldShowResolvingSpinner(
                         displayData,
                         thumbCache,
@@ -199,11 +202,50 @@ fun GalleryThumbnailImage(
         }
     }
 
-    val paintModel = if (isGrid) {
-        displayData ?: mediaCacheRepository.displayableThumbnailIfCached(
+    if (isGrid && zeroDecodeOnScroll) {
+        LaunchedEffect(item.canonicalPath, item.oneDriveItemId) {
+            snapshotFlow { GalleryGridScrollGate.isUserScrollingGrid }
+                .distinctUntilChanged()
+                .collect { scrolling ->
+                    if (!scrolling) return@collect
+                    while (GalleryGridScrollGate.isUserScrollingGrid) {
+                        val disk = withContext(Dispatchers.IO) {
+                            mediaCacheRepository.displayableThumbnailIfCached(
+                                item.canonicalPath,
+                                item.oneDriveItemId,
+                            )
+                        }
+                        if (disk != null && displayData != disk) {
+                            displayData = disk
+                            resolvingThumb = false
+                        }
+                        kotlinx.coroutines.delay(72)
+                    }
+                }
+        }
+    }
+
+    val diskThumb = if (isGrid) {
+        mediaCacheRepository.displayableThumbnailIfCached(
             item.canonicalPath,
             item.oneDriveItemId,
         )
+    } else {
+        null
+    }
+
+    val paintModel = if (isGrid) {
+        when {
+            diskThumb != null -> diskThumb
+            GalleryGridScrollGate.isUserScrollingGrid && zeroDecodeOnScroll -> {
+                when (val data = displayData) {
+                    is java.io.File -> data
+                    is OneDriveCloudThumbnailKey -> data
+                    else -> null
+                }
+            }
+            else -> displayData ?: diskThumb
+        }
     } else {
         val raw = displayData
         if (style == GalleryThumbnailStyle.Filmstrip &&

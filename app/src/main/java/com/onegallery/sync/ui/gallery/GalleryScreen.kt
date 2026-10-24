@@ -337,7 +337,7 @@ fun GalleryScreen(
                 )
                 LaunchedEffect(gridItems) {
                     viewModel.prefetchGridThumbnails(
-                        gridItems.take(48).map { it.canonicalPath },
+                        gridItems.take(80).map { it.canonicalPath },
                     )
                 }
                 LaunchedEffect(gridState, gridEntries) {
@@ -347,7 +347,7 @@ fun GalleryScreen(
                         if (visible.isEmpty()) return@snapshotFlow emptyList<String>()
                         val first = visible.first().index
                         val last = visible.last().index
-                        val end = (last + 36).coerceAtMost(gridEntries.lastIndex)
+                        val end = (last + 72).coerceAtMost(gridEntries.lastIndex)
                         (first..end).mapNotNull { index ->
                             when (val entry = gridEntries.getOrNull(index)) {
                                 is GalleryGridEntry.Photo -> entry.item.canonicalPath

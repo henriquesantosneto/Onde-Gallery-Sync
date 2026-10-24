@@ -121,6 +121,11 @@ class OneGalleryApplication : Application() {
                     add(VideoFrameDecoder.Factory())
                     add(OneDriveCloudThumbnailFetcher.Factory(this@OneGalleryApplication))
                 }
+                .memoryCache {
+                    coil.memory.MemoryCache.Builder(this)
+                        .maxSizePercent(0.25)
+                        .build()
+                }
                 .crossfade(false)
                 .build(),
         )
