@@ -1842,10 +1842,20 @@ class SyncCoordinator(
 
     /** Original completo já no aparelho (Galeria ou pasta de cache do app). */
     private fun resolveViewableOriginalFile(row: SyncMetadataEntity): File? {
-        row.cachedFilePath?.let { path ->
-            File(path).takeIf { it.isFile && it.length() > 0L }?.let { return it }
+        fun acceptOriginal(file: File): File? {
+            if (!file.isFile || file.length() <= 0L) return null
+            val remoteBytes = row.remoteSizeBytes
+            if (remoteBytes != null && remoteBytes > 48_000L &&
+                file.length() < (remoteBytes * 0.85).toLong()
+            ) {
+                return null
+            }
+            return file
         }
-        mediaCacheRepository.originalIfCached(row.canonicalPath)?.let { return it }
+        row.cachedFilePath?.let { path ->
+            acceptOriginal(File(path))?.let { return it }
+        }
+        mediaCacheRepository.originalIfCached(row.canonicalPath)?.let { acceptOriginal(it)?.let { return it } }
         return null
     }
 

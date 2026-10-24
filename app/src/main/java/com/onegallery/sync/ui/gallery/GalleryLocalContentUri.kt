@@ -12,10 +12,12 @@ object GalleryLocalContentUri {
         kind: MediaKind,
         localMediaRepository: LocalMediaRepository?,
     ): Uri? {
+        if (localMediaRepository == null) return null
         entity.localContentUri?.takeIf { it.isNotBlank() }?.let { parsed ->
-            return Uri.parse(parsed)
+            val uri = Uri.parse(parsed)
+            if (localMediaRepository.mediaUriExists(uri)) return uri
         }
         val id = entity.localMediaId ?: return null
-        return localMediaRepository?.contentUriForMediaId(id, kind)
+        return localMediaRepository.contentUriForMediaId(id, kind)
     }
 }

@@ -90,6 +90,8 @@ class LocalMediaRepository(private val context: Context) {
         return null
     }
 
+    fun mediaUriExists(uri: Uri): Boolean = uriExists(uri)
+
     private fun uriExists(uri: Uri): Boolean {
         return runCatching {
             context.contentResolver.query(

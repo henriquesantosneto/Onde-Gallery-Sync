@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import android.content.Context
 import java.io.File
 
 @Composable
@@ -46,10 +47,34 @@ fun GalleryDisplayItem.detailPreviewModel(): Any? {
     }
 }
 
+/** Detalhe: não usa URI fantasma; miniatura só enquanto o original não está no aparelho. */
+fun GalleryDisplayItem.detailPreviewModel(context: Context): Any? {
+    cachedOriginal?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
+    if (hasViewableLocalOriginal(context)) {
+        localUri?.let { return it }
+    }
+    if (!oneDriveItemId.isNullOrBlank() && !hasViewableLocalOriginal(context)) {
+        cachedPlaceholderThumb?.takeIf { it.isFile && it.length() > 0L }?.let { return it }
+        return when (val model = thumbnailModel) {
+            is File -> model.takeIf { it.isFile && it.length() > 0L }
+            else -> model
+        }
+    }
+    return detailPreviewModel()
+}
+
 /** Foto em tela cheia: URI/arquivo local preferido; senão o mesmo modelo da grade. */
 fun GalleryDisplayItem.detailFullImageModel(): Any? {
     detailPreviewModel()?.let { return it }
     playbackUri()?.let { return it }
+    return null
+}
+
+fun GalleryDisplayItem.detailFullImageModel(context: Context): Any? {
+    detailPreviewModel(context)?.let { return it }
+    if (hasViewableLocalOriginal(context)) {
+        playbackUri()?.let { return it }
+    }
     return null
 }
 

@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -20,6 +21,7 @@ fun LabSamsungStylePhotoViewer(
     modifier: Modifier = Modifier,
     onToggleImmersive: (() -> Unit)? = null,
     onZoomActiveChanged: (Boolean) -> Unit = {},
+    previewContext: Context? = null,
 ) {
     val transform = remember(item.canonicalPath) { ZoomTransformHolder() }
     val immersiveModifier = if (onToggleImmersive != null) {
@@ -27,8 +29,14 @@ fun LabSamsungStylePhotoViewer(
     } else {
         Modifier
     }
-    val fullModel = remember(item.canonicalPath, item.localUri, item.cachedOriginal) {
-        item.detailFullImageModel()
+    val fullModel = remember(
+        item.canonicalPath,
+        item.localUri,
+        item.cachedOriginal,
+        previewContext,
+    ) {
+        previewContext?.let { item.detailFullImageModel(it) }
+            ?: item.detailFullImageModel()
     }
     val useThumbnailPipeline = remember(fullModel) {
         item.detailImageUsesThumbnailPipeline(fullModel)

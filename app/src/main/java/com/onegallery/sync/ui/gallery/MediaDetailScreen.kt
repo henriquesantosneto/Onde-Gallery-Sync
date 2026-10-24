@@ -655,8 +655,16 @@ private fun LabMediaDetailPage(
         viewModel.notifyLocalDisplayChanged()
     }
 
-    suspend fun loadFullOriginalForViewing() {
-        if (!syncCoordinator.needsOriginalRecall(canonicalPath)) return
+    suspend fun shouldDownloadOriginalForViewing(display: GalleryDisplayItem?): Boolean {
+        if (syncCoordinator.needsOriginalRecall(canonicalPath)) return true
+        val current = display ?: return false
+        if (current.oneDriveItemId.isNullOrBlank()) return false
+        if (GalleryMapper.isAudioFileName(current.displayName)) return false
+        return !current.hasViewableLocalOriginal(viewContext)
+    }
+
+    suspend fun loadFullOriginalForViewing(display: GalleryDisplayItem?) {
+        if (!shouldDownloadOriginalForViewing(display)) return
         loadingFull = true
         error = null
         try {
@@ -711,11 +719,12 @@ private fun LabMediaDetailPage(
     LaunchedEffect(canonicalPath, isActivePage, item, liveItem) {
         if (!isActivePage) return@LaunchedEffect
         try {
+            val display = item ?: liveItem
             val needsRecall = withContext(Dispatchers.Default) {
-                syncCoordinator.needsOriginalRecall(canonicalPath)
+                shouldDownloadOriginalForViewing(display)
             }
             if (needsRecall) {
-                loadFullOriginalForViewing()
+                loadFullOriginalForViewing(display)
             } else {
                 val refreshed = loadDisplayItem()
                 if (refreshed != null) {
@@ -791,8 +800,8 @@ private fun LabMediaDetailPage(
                             )
                         }
                     }
-                    display.detailPreviewModel() != null || loadingFull -> {
-                        if (loadingFull && display.detailPreviewModel() == null) {
+                    display.detailPreviewModel(viewContext) != null || loadingFull -> {
+                        if (loadingFull && display.detailPreviewModel(viewContext) == null) {
                             CircularProgressIndicator(color = Color.White)
                         } else {
                             LabSamsungStylePhotoViewer(
@@ -802,6 +811,7 @@ private fun LabMediaDetailPage(
                                 onZoomActiveChanged = { active ->
                                     if (isActivePage) onDetailZoomActiveChanged(active)
                                 },
+                                previewContext = viewContext,
                             )
                         }
                     }
