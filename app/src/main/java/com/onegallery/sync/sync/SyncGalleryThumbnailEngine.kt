@@ -14,6 +14,8 @@ internal interface SyncGalleryThumbnailEngineHost : ThumbnailSyncPipelineHost {
         rows: List<com.onegallery.sync.data.local.db.SyncMetadataEntity>,
         progressHeadline: String,
         publishUi: Boolean,
+        localSourcesOnly: Boolean = false,
+        cloudSourcesOnly: Boolean = false,
     ): Int
 }
 
@@ -26,12 +28,6 @@ internal class SyncGalleryThumbnailEngine(
     suspend fun runPostSyncGalleryThumbnails() {
         host.ensureNotCancelled()
         host.ensureAllLocalMediaPresentInIndex()
-        host.setSyncProgress(
-            SyncProgressPhase.PREFETCH_THUMBNAILS,
-            "Miniaturas da galeria",
-            "OneDrive + aparelho · JPEG no cache para fotos e vídeos.",
-            alsoUpdateLastMessage = false,
-        )
         yield()
         val missing = syncMetadataDao.getAll()
             .asSequence()
@@ -41,17 +37,49 @@ internal class SyncGalleryThumbnailEngine(
             }
             .sortedWith(missingThumbnailPrefetchComparator)
             .toList()
-        if (missing.isNotEmpty()) {
+        val localRows = missing.filter { thumbnails.hasLocalThumbnailSource(it) }
+        val remoteRows = missing.filter {
+            !thumbnails.hasLocalThumbnailSource(it) && !it.oneDriveItemId.isNullOrBlank()
+        }
+        if (localRows.isNotEmpty()) {
+            host.setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas do aparelho…",
+                "${localRows.size} no dispositivo antes da nuvem.",
+                alsoUpdateLastMessage = false,
+            )
             host.warmLocalItemsForThumbnailPass()
             host.withThumbnailPrefetchUi {
                 host.runMissingThumbnailPrefetchUnified(
-                    rows = missing.take(FIRST_PASS_CAP),
-                    progressHeadline = "Miniaturas da galeria…",
+                    rows = localRows.take(LOCAL_PASS_CAP),
+                    progressHeadline = "Miniaturas do aparelho…",
                     publishUi = true,
+                    localSourcesOnly = true,
                 )
             }
             host.clearActiveSyncItems()
             host.trimThumbnailRunQueueUi()
+            host.notifyGalleryDisplayRefresh()
+        }
+        host.ensureNotCancelled()
+        if (remoteRows.isNotEmpty() && host.isOnline() && host.isOneDriveGraphMode()) {
+            host.setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas do OneDrive…",
+                "${remoteRows.size} só na nuvem · aparelho já foi processado.",
+                alsoUpdateLastMessage = false,
+            )
+            host.withThumbnailPrefetchUi {
+                host.runMissingThumbnailPrefetchUnified(
+                    rows = remoteRows.take(REMOTE_PASS_CAP),
+                    progressHeadline = "Miniaturas do OneDrive…",
+                    publishUi = true,
+                    cloudSourcesOnly = true,
+                )
+            }
+            host.clearActiveSyncItems()
+            host.trimThumbnailRunQueueUi()
+            host.notifyGalleryDisplayRefresh()
         }
         host.ensureNotCancelled()
         val coverPaths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
@@ -94,6 +122,8 @@ internal class SyncGalleryThumbnailEngine(
     }
 
     companion object {
-        const val FIRST_PASS_CAP = 12_000
+        const val LOCAL_PASS_CAP = 12_000
+        const val REMOTE_PASS_CAP = 8_000
+        const val FIRST_PASS_CAP = LOCAL_PASS_CAP
     }
 }

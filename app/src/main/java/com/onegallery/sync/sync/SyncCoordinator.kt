@@ -4680,12 +4680,14 @@ class SyncCoordinator(
             rows: List<SyncMetadataEntity>,
             progressHeadline: String,
             publishUi: Boolean,
+            localSourcesOnly: Boolean,
+            cloudSourcesOnly: Boolean,
         ): Int = runMissingThumbnailPrefetch(
             rows = rows,
             honorSyncCancel = true,
             parallelSlots = ThumbnailPrefetchRunner.adaptiveParallelSlots(PARALLEL_THUMBNAILS),
-            localSourcesOnly = false,
-            cloudSourcesOnly = false,
+            localSourcesOnly = localSourcesOnly,
+            cloudSourcesOnly = cloudSourcesOnly,
             progressHeadline = progressHeadline,
             publishUi = publishUi,
         )
