@@ -39,6 +39,8 @@ import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import com.onegallery.sync.R
 import com.onegallery.sync.worker.BackgroundSyncScheduler
+import com.onegallery.sync.worker.ScheduledThumbnailContinuation
+import com.onegallery.sync.worker.ThumbnailContinuationPolicy
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -457,6 +459,13 @@ class SyncCoordinator(
             syncPreferences.pauseAutoSyncAfterUserCancel()
         }
         BackgroundSyncScheduler.cancelPendingSyncWork(appContext)
+        if (reason == SyncCancelReason.WIFI_POLICY) {
+            BackgroundSyncScheduler.enqueueThumbnailContinuation(
+                context = appContext,
+                prefs = syncPreferences,
+                delaySeconds = ThumbnailContinuationPolicy.NORMAL_DELAY_SECONDS,
+            )
+        }
         stopThumbnailPrefetchForCancel(inProgressMessage)
         _state.update {
             it.copy(
@@ -875,6 +884,7 @@ class SyncCoordinator(
             kickThumbnailPrefetchIfIdle()
         } else {
             resumeBackgroundThumbnailPrefetchIfNeeded()
+            enqueueDurableThumbnailContinuation()
         }
     }
 
@@ -3866,13 +3876,89 @@ class SyncCoordinator(
     fun hasActiveBackgroundThumbnailPrefetchJob(): Boolean =
         backgroundThumbPrefetchJob?.isActive == true
 
-    /** Espera prefetch de miniaturas em 2º plano (ex.: WorkManager mantém notificação até terminar). */
-    suspend fun joinBackgroundThumbnailPrefetchIfRunning() {
-        backgroundThumbPrefetchJob?.join()
+    /** WorkManager pode continuar miniaturas se o processo morrer. */
+    fun shouldPersistThumbnailContinuation(): Boolean =
+        syncPreferences.hasCompletedSetup &&
+            syncPreferences.backgroundSyncAlwaysEnabled &&
+            !syncPreferences.isAutoSyncPaused() &&
+            !isUserCancellation()
+
+    private fun enqueueDurableThumbnailContinuation() {
+        if (!shouldPersistThumbnailContinuation()) return
+        BackgroundSyncScheduler.enqueueThumbnailContinuation(
+            context = appContext,
+            prefs = syncPreferences,
+            delaySeconds = ThumbnailContinuationPolicy.NORMAL_DELAY_SECONDS,
+        )
+    }
+
+    private fun thumbnailQueueDrained() {
+        BackgroundSyncScheduler.cancelThumbnailContinuation(appContext)
+    }
+
+    /**
+     * Uma leva curta, chamada pelo WorkManager. Não lista o OneDrive e não espera o
+     * cooldown do sync completo. [ScheduledThumbnailContinuation.moreRemain] pede outra leva.
+     */
+    suspend fun runScheduledThumbnailContinuation(): ScheduledThumbnailContinuation {
+        if (!shouldPersistThumbnailContinuation()) {
+            return ScheduledThumbnailContinuation(moreRemain = false, stalled = false, busy = false)
+        }
+        if (syncCancelReason.get() == SyncCancelReason.WIFI_POLICY) {
+            resetSyncCancel()
+        }
+        if (com.onegallery.sync.ui.gallery.GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch() ||
+            hasActiveBackgroundThumbnailPrefetchJob() ||
+            _state.value.isRunning
+        ) {
+            return ScheduledThumbnailContinuation(moreRemain = true, stalled = false, busy = true)
+        }
+        if (!longTaskMutex.tryLock()) {
+            return ScheduledThumbnailContinuation(moreRemain = true, stalled = false, busy = true)
+        }
+        try {
+            if (!shouldPersistThumbnailContinuation()) {
+                return ScheduledThumbnailContinuation(moreRemain = false, stalled = false, busy = false)
+            }
+            val before = countIndexedMissingThumbnails()
+            if (before == 0) {
+                return ScheduledThumbnailContinuation(moreRemain = false, stalled = false, busy = false)
+            }
+            try {
+                prefetchMissingThumbnails(
+                    honorUserSyncCancel = false,
+                    maxTotalPerRun = ThumbnailContinuationPolicy.CHUNK_SIZE,
+                    completeAllPending = false,
+                    parallelSlots = PARALLEL_THUMBNAILS,
+                )
+            } catch (cancelled: CancellationException) {
+                if (!shouldPersistThumbnailContinuation()) {
+                    return ScheduledThumbnailContinuation(moreRemain = false, stalled = false, busy = false)
+                }
+                val missing = runCatching { countIndexedMissingThumbnails() }.getOrDefault(before)
+                return ScheduledThumbnailContinuation(
+                    moreRemain = missing > 0,
+                    stalled = false,
+                    busy = false,
+                )
+            }
+            if (!shouldPersistThumbnailContinuation()) {
+                return ScheduledThumbnailContinuation(moreRemain = false, stalled = false, busy = false)
+            }
+            val after = countIndexedMissingThumbnails()
+            return ScheduledThumbnailContinuation(
+                moreRemain = after > 0,
+                stalled = after >= before,
+                busy = false,
+            )
+        } finally {
+            longTaskMutex.unlock()
+        }
     }
 
     /** Continua miniaturas após o sync principal (bibliotecas grandes, ex. dezenas de milhares na nuvem). */
     private fun scheduleBackgroundThumbnailPrefetchIfNeeded() {
+        enqueueDurableThumbnailContinuation()
         if (backgroundThumbPrefetchJob?.isActive == true) return
         val scope = backgroundScope ?: return
         val thumbMessage = appContext.getString(R.string.sync_notification_thumbnails_message)
@@ -3882,6 +3968,7 @@ class SyncCoordinator(
             foregroundGuard.enter(thumbMessage)
         }
         backgroundThumbPrefetchJob = scope.launch {
+            var keepGoingInBackground = true
             try {
             refreshExtraCancellableWork()
             if (!prefetchHoldsForeground) {
@@ -3894,13 +3981,20 @@ class SyncCoordinator(
             var stalledPasses = 0
             try {
             repeat(THUMB_BACKGROUND_CONTINUE_PASSES) {
-                if (syncCancelRequested.get()) return@launch
+                if (syncCancelRequested.get()) {
+                    if (isUserCancellation()) keepGoingInBackground = false
+                    return@launch
+                }
                 if (_state.value.isRunning) return@launch
                 if (com.onegallery.sync.ui.gallery.GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch()) {
                     delay(180)
                     return@repeat
                 }
-                if (countIndexedMissingThumbnails() == 0) return@launch
+                if (countIndexedMissingThumbnails() == 0) {
+                    keepGoingInBackground = false
+                    thumbnailQueueDrained()
+                    return@launch
+                }
                 val idleForeground = appForegroundState.isInForeground() &&
                     !allowForegroundThumbnailPrefetch()
                 if (!longTaskMutex.tryLock()) {
@@ -3915,7 +4009,11 @@ class SyncCoordinator(
                 }
                 try {
                     val before = countIndexedMissingThumbnails()
-                    if (before == 0) return@launch
+                    if (before == 0) {
+                        keepGoingInBackground = false
+                        thumbnailQueueDrained()
+                        return@launch
+                    }
                     prefetchMissingThumbnails(
                         honorUserSyncCancel = false,
                         maxTotalPerRun = if (idleForeground) {
@@ -3931,7 +4029,11 @@ class SyncCoordinator(
                         },
                     )
                     val after = countIndexedMissingThumbnails()
-                    if (after == 0) return@launch
+                    if (after == 0) {
+                        keepGoingInBackground = false
+                        thumbnailQueueDrained()
+                        return@launch
+                    }
                     if (after >= before) {
                         stalledPasses++
                         if (stalledPasses >= 6) return@launch
@@ -3974,6 +4076,9 @@ class SyncCoordinator(
                 }
                 backgroundThumbPrefetchJob = null
                 refreshExtraCancellableWork()
+                if (keepGoingInBackground) {
+                    enqueueDurableThumbnailContinuation()
+                }
             }
         }
         refreshExtraCancellableWork()

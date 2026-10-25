@@ -1,6 +1,7 @@
 package com.onegallery.sync.worker
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -9,6 +10,7 @@ import android.os.Build
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.SyncPreferences
@@ -38,6 +40,7 @@ object BackgroundSyncScheduler {
             WorkManager.getInstance(app).cancelUniqueWork(SyncWorker.UNIQUE_NAME)
             WorkManager.getInstance(app).cancelUniqueWork(IMMEDIATE_UNIQUE)
             WorkManager.getInstance(app).cancelUniqueWork(DEFERRED_UNIQUE)
+            cancelThumbnailContinuation(app)
             app.mediaLibraryChangeWatcher.stop()
             return
         }
@@ -116,9 +119,60 @@ object BackgroundSyncScheduler {
         )
     }
 
+    /**
+     * Próxima leva de miniaturas, sem listar o OneDrive de novo.
+     * [runningSlot] nulo usa KEEP no trabalho primário (não cancela uma leva já enfileirada).
+     * Com slot, agenda o outro nome — o que está em execução não se cancela.
+     */
+    fun enqueueThumbnailContinuation(
+        context: Context,
+        prefs: SyncPreferences,
+        delaySeconds: Long = ThumbnailContinuationPolicy.NORMAL_DELAY_SECONDS,
+        runningSlot: String? = null,
+    ) {
+        if (!ThumbnailContinuationPolicy.shouldScheduleAnother(
+                moreRemain = true,
+                setupComplete = prefs.hasCompletedSetup,
+                backgroundEnabled = prefs.backgroundSyncAlwaysEnabled,
+                paused = prefs.isAutoSyncPaused(),
+                userCancelled = false,
+            )
+        ) {
+            return
+        }
+        val uniqueName = ThumbnailContinuationPolicy.followUpUniqueName(runningSlot)
+        val policy = if (runningSlot == null) {
+            ExistingWorkPolicy.KEEP
+        } else {
+            if (isUniqueWorkLive(context, uniqueName)) return
+            ExistingWorkPolicy.REPLACE
+        }
+        val slot = ThumbnailContinuationPolicy.slotForUniqueName(uniqueName)
+        val builder = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInputData(SyncWorker.thumbnailContinuationInput(slot))
+            .setConstraints(syncConstraints(prefs))
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS)
+        if (delaySeconds > 0L) {
+            builder.setInitialDelay(delaySeconds, TimeUnit.SECONDS)
+        }
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            uniqueName,
+            policy,
+            builder.build(),
+        )
+    }
+
+    fun cancelThumbnailContinuation(context: Context) {
+        val workManager = WorkManager.getInstance(context.applicationContext)
+        workManager.cancelUniqueWork(ThumbnailContinuationPolicy.PRIMARY_UNIQUE)
+        workManager.cancelUniqueWork(ThumbnailContinuationPolicy.FOLLOW_UP_UNIQUE)
+    }
+
     /** Interrompe sync one-shot (inclui worker em andamento). Não cancela o periódico de 15 min. */
     fun cancelPendingSyncWork(context: Context) {
-        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(IMMEDIATE_UNIQUE)
+        val workManager = WorkManager.getInstance(context.applicationContext)
+        workManager.cancelUniqueWork(IMMEDIATE_UNIQUE)
+        cancelThumbnailContinuation(context)
     }
 
     /** Botão “Sincronizar agora” / gesto explícito — WorkManager, não a UI Compose. */
@@ -157,6 +211,17 @@ object BackgroundSyncScheduler {
         )
     }
 
+    private fun isUniqueWorkLive(context: Context, uniqueName: String): Boolean {
+        return runCatching {
+            val infos = WorkManager.getInstance(context.applicationContext)
+                .getWorkInfosForUniqueWork(uniqueName)
+                .get(2, TimeUnit.SECONDS)
+            infos.any { info ->
+                info.state == WorkInfo.State.ENQUEUED || info.state == WorkInfo.State.RUNNING
+            }
+        }.getOrDefault(false)
+    }
+
     fun onDeviceBoot(context: Context) {
         val app = context.applicationContext as? OneGalleryApplication ?: return
         applyAlwaysOnPolicy(app)
@@ -165,6 +230,11 @@ object BackgroundSyncScheduler {
             prefs = app.syncPreferences,
             delaySeconds = 90,
             policy = ExistingWorkPolicy.KEEP,
+        )
+        enqueueThumbnailContinuation(
+            context = app,
+            prefs = app.syncPreferences,
+            delaySeconds = 90,
         )
     }
 }

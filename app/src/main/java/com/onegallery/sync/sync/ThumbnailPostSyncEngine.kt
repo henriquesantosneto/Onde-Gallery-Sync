@@ -190,8 +190,8 @@ internal class ThumbnailPostSyncEngine(
                         completeAllPending && remaining > 0 ->
                             "$totalCached nesta leva · ~$remaining ainda — continuando antes do GPS…"
                         stoppedByCap ->
-                            "$totalCached nesta sync · ~$remaining ainda pendentes " +
-                                "(limite por passagem — sincronize de novo para continuar)."
+                            "$totalCached nesta passagem · ~$remaining ainda pendentes " +
+                                "(a próxima leva continua em segundo plano)."
                         else -> "$totalCached nesta sync · $remaining ainda sem miniatura (falha ou cancelamento)."
                     },
                     alsoUpdateLastMessage = true,
