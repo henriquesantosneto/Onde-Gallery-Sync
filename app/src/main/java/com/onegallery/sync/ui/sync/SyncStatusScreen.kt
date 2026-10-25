@@ -449,10 +449,10 @@ private fun SyncQueueScrollPanel(
                         followQueueTop = index == 0 && offset <= 8
                     }
             }
-            val queueScrollAnchor = remember(activeItems, queueWaiting) {
-                activeItems.joinToString { it.canonicalPath } +
-                    "|" +
-                    queueWaiting.joinToString { it.canonicalPath }
+            val headActive = activeItems.firstOrNull()?.canonicalPath
+            val headWaiting = queueWaiting.firstOrNull()?.canonicalPath
+            val queueScrollAnchor = remember(activeItems.size, queueWaiting.size, headActive, headWaiting) {
+                headActive.orEmpty() + "|" + headWaiting.orEmpty()
             }
             LaunchedEffect(queueScrollAnchor, followQueueTop) {
                 if (!followQueueTop) return@LaunchedEffect

@@ -74,6 +74,7 @@ internal class ThumbnailPrefetchRunner(
             rows.size
         }
         var total = 0
+        val globalCompleted = AtomicInteger(0)
         val chunks = rows.chunked(THUMB_PREFETCH_RUN_CHUNK)
         chunks.forEachIndexed { index, chunk ->
             if (honorSyncCancel && host.isSyncCancelRequested()) return total
@@ -86,16 +87,17 @@ internal class ThumbnailPrefetchRunner(
                 progressHeadline,
                 publishUi,
                 globalTotalAtStart = globalTotalAtStart,
+                globalCompleted = globalCompleted,
                 chunkIndex = index,
                 chunkCount = chunks.size,
             )
             if (publishUi && host.shouldPublishSyncActivityUi() && index < chunks.lastIndex) {
-                val remaining = host.missingThumbnailCountForProgress()
-                val done = (globalTotalAtStart - remaining).coerceIn(0, globalTotalAtStart)
+                val globalDone = globalCompleted.get()
+                val remaining = (globalTotalAtStart - globalDone).coerceAtLeast(0)
                 host.setSyncProgress(
                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                     progressHeadline,
-                    "$done/$globalTotalAtStart · faltam ~$remaining · leva ${index + 1}/${chunks.size} ok · " +
+                    "$globalDone/$globalTotalAtStart · faltam ~$remaining · leva ${index + 1}/${chunks.size} ok · " +
                         "preparando próxima…",
                     alsoUpdateLastMessage = false,
                 )
@@ -128,6 +130,7 @@ internal class ThumbnailPrefetchRunner(
         progressHeadline: String,
         publishUi: Boolean,
         globalTotalAtStart: Int,
+        globalCompleted: AtomicInteger,
         chunkIndex: Int,
         chunkCount: Int,
     ): Int {
@@ -190,11 +193,11 @@ internal class ThumbnailPrefetchRunner(
                             }
                             if (hit) cachedCount.incrementAndGet()
                             val done = completed.incrementAndGet()
+                            val globalDone = globalCompleted.incrementAndGet()
                             if (publishUi && host.shouldPublishSyncActivityUi() &&
                                 (done % 8 == 0 || done == rows.size)
                             ) {
-                                val remaining = host.missingThumbnailCountForProgress()
-                                val globalDone = (globalTotalAtStart - remaining).coerceIn(0, globalTotalAtStart)
+                                val remaining = (globalTotalAtStart - globalDone).coerceAtLeast(0)
                                 host.setSyncProgress(
                                     SyncProgressPhase.PREFETCH_THUMBNAILS,
                                     progressHeadline,

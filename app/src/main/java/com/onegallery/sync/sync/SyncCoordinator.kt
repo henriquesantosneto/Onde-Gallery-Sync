@@ -965,17 +965,24 @@ class SyncCoordinator(
         synchronized(activeSyncItemsLock) {
             val index = activeSyncItemsBacking.indexOfFirst { it.canonicalPath == item.canonicalPath }
             if (index >= 0) {
+                val current = activeSyncItemsBacking[index]
+                val sameOnScreen = current.displayName == item.displayName &&
+                    current.operationLabel == item.operationLabel &&
+                    current.showTransferProgress == item.showTransferProgress &&
+                    (
+                        !item.showTransferProgress ||
+                            (current.bytesCompleted == item.bytesCompleted && current.totalBytes == item.totalBytes)
+                        )
+                if (sameOnScreen) return
+                if (!force && item.showTransferProgress && item.bytesCompleted > 0L) {
+                    val now = System.currentTimeMillis()
+                    val last = lastActiveItemProgressPostMs[item.canonicalPath] ?: 0L
+                    if (now - last < ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS) return
+                    lastActiveItemProgressPostMs[item.canonicalPath] = now
+                }
                 activeSyncItemsBacking[index] = item
             } else {
                 activeSyncItemsBacking.add(item)
-            }
-            if (!force) {
-                val now = System.currentTimeMillis()
-                val last = lastActiveItemProgressPostMs[item.canonicalPath] ?: 0L
-                if (item.bytesCompleted > 0L && now - last < ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS) {
-                    return
-                }
-                lastActiveItemProgressPostMs[item.canonicalPath] = now
             }
             scheduleActiveItemsPublish()
         }
@@ -1047,6 +1054,36 @@ class SyncCoordinator(
         }
     }
 
+    private val queueUiGeneration = AtomicInteger(0)
+    private val queueRemovals = java.util.concurrent.ConcurrentLinkedQueue<Pair<Int, String>>()
+    private val publishQueueRemovals = Runnable {
+        val generation = queueUiGeneration.get()
+        val drop = HashSet<String>()
+        while (true) {
+            val item = queueRemovals.poll() ?: break
+            if (item.first == generation) drop.add(item.second)
+        }
+        if (drop.isEmpty()) return@Runnable
+        _state.update { state ->
+            if (queueUiGeneration.get() != generation) return@update state
+            val next = state.runQueue.filter { it.canonicalPath !in drop }
+            val global = state.runQueueGlobalPending?.let { pending ->
+                (pending - drop.size).coerceAtLeast(0)
+            }
+            if (next.size == state.runQueue.size && global == state.runQueueGlobalPending) {
+                state
+            } else {
+                state.copy(runQueue = next, runQueueGlobalPending = global)
+            }
+        }
+    }
+
+    private fun bumpRunQueueGeneration() {
+        queueUiGeneration.incrementAndGet()
+        queueRemovals.clear()
+        mainHandler.removeCallbacks(publishQueueRemovals)
+    }
+
     private fun setRunQueueFromEntities(
         entities: List<SyncMetadataEntity>,
         thumbnailQueue: Boolean = false,
@@ -1054,6 +1091,7 @@ class SyncCoordinator(
         runQueueGlobalPending: Int? = null,
     ) {
         if (!shouldPublishSyncActivityUi()) return
+        bumpRunQueueGeneration()
         val rows = entities.map { entity ->
             when {
                 thumbnailQueue -> SyncQueueDisplayRow(
@@ -1081,22 +1119,17 @@ class SyncCoordinator(
     }
 
     private fun removeFromRunQueue(canonicalPath: String) {
-        val prev = _state.value.runQueue
-        val next = prev.filter { it.canonicalPath != canonicalPath }
-        if (next.size != prev.size) {
-            val apply = {
-                _state.update { state ->
-                    val global = state.runQueueGlobalPending?.let { pending ->
-                        (pending - 1).coerceAtLeast(0)
-                    }
-                    state.copy(runQueue = next, runQueueGlobalPending = global)
-                }
-            }
-            if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
+        queueRemovals.add(queueUiGeneration.get() to canonicalPath)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            publishQueueRemovals.run()
+        } else {
+            mainHandler.removeCallbacks(publishQueueRemovals)
+            mainHandler.post(publishQueueRemovals)
         }
     }
 
     private fun clearRunQueueOnly() {
+        bumpRunQueueGeneration()
         val apply = {
             _state.update { it.copy(runQueue = emptyList(), runQueueGlobalPending = null) }
         }
@@ -3014,9 +3047,15 @@ class SyncCoordinator(
         batch: List<SyncMetadataEntity> = emptyList(),
     ): Int {
         if (!shouldPublishSyncActivityUi()) return galleryThumbnailIndex.countMissing()
-        val total = galleryThumbnailIndex.countMissing()
-        val cap = GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP
+        if (mode == ThumbnailRunQueueUiMode.BATCH_AT_FRONT) {
+            val total = galleryThumbnailIndex.countMissing()
+            setRunQueueFromEntities(batch.take(GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP), thumbnailQueue = true)
+            publishRunQueueGlobalPending(total)
+            return total
+        }
         val allPending = allPendingThumbnailEntitiesForUi()
+        val total = allPending.size
+        val cap = GalleryThumbnailIndex.THUMB_RUN_QUEUE_UI_CAP
         val pendingPathSet = allPending.map { it.canonicalPath }.toHashSet()
         val entities = when (mode) {
             ThumbnailRunQueueUiMode.FULL -> allPending.take(cap)
@@ -3024,20 +3063,20 @@ class SyncCoordinator(
                 val fromQueue = _state.value.runQueue.mapNotNull { row ->
                     syncMetadataDao.getByCanonicalPath(row.canonicalPath)
                 }.filter { it.canonicalPath in pendingPathSet }
-                if (fromQueue.isNotEmpty()) {
-                    fromQueue
-                } else {
-                    allPending.take(cap)
-                }
+                if (fromQueue.isNotEmpty()) fromQueue else allPending.take(cap)
             }
             ThumbnailRunQueueUiMode.BATCH_AT_FRONT -> batch.take(cap)
         }
         setRunQueueFromEntities(entities, thumbnailQueue = true)
+        publishRunQueueGlobalPending(total)
+        return total
+    }
+
+    private fun publishRunQueueGlobalPending(total: Int) {
         val applyGlobal = {
             _state.update { it.copy(runQueueGlobalPending = total) }
         }
         if (Looper.myLooper() == Looper.getMainLooper()) applyGlobal() else mainHandler.post(applyGlobal)
-        return total
     }
 
     private suspend fun missingThumbnailCountForProgress(): Int {
@@ -4890,7 +4929,7 @@ class SyncCoordinator(
         /** Depois disso o item sai da leva nesta sessão (grade tenta de novo sob demanda). */
         const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 8
         /** Lista na tela Sync — evita OOM com dezenas de milhares pendentes. */
-        const val THUMB_RUN_QUEUE_UI_CAP = 1_500
+        const val THUMB_RUN_QUEUE_UI_CAP = 48
         const val GPS_RUN_QUEUE_UI_CAP = 1_500
         const val PARALLEL_THUMB_PREFETCH = 8
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L

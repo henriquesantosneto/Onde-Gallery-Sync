@@ -21,7 +21,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import java.io.File
+import java.util.Base64
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 data class AuthState(
@@ -38,6 +41,8 @@ class MsalAuthManager(
     private val authPreferences: AuthPreferences,
 ) {
     private val appContext = context.applicationContext
+    private val silentTokenMutex = Mutex()
+    private var tokenAcceptedAtMs = 0L
 
     private val _state = MutableStateFlow(AuthState())
     val state: StateFlow<AuthState> = _state.asStateFlow()
@@ -311,6 +316,7 @@ class MsalAuthManager(
 
     /** Remove token em memória (ex.: Graph respondeu 401). */
     fun clearCachedAccessToken() {
+        tokenAcceptedAtMs = 0L
         _state.value = _state.value.copy(accessToken = null)
     }
 
@@ -335,6 +341,26 @@ class MsalAuthManager(
     }
 
     suspend fun acquireTokenSilent(): Result<String> {
+        freshCachedToken()?.let { return Result.success(it) }
+        return silentTokenMutex.withLock {
+            freshCachedToken()?.let { return@withLock Result.success(it) }
+            val result = acquireTokenSilentFromMsal()
+            if (result.isSuccess) tokenAcceptedAtMs = System.currentTimeMillis()
+            result
+        }
+    }
+
+    private fun freshCachedToken(): String? {
+        val token = _state.value.accessToken?.takeIf { it.isNotBlank() } ?: return null
+        val now = System.currentTimeMillis()
+        val expiresAt = jwtExpiresAtEpochMs(token)
+        if (expiresAt != null) {
+            return token.takeIf { expiresAt - now > TOKEN_RENEW_SKEW_MS }
+        }
+        return token.takeIf { now - tokenAcceptedAtMs in 0 until TOKEN_REUSE_WITHOUT_EXP_MS }
+    }
+
+    private suspend fun acquireTokenSilentFromMsal(): Result<String> {
         val msal = client ?: return Result.failure(IllegalStateException("MSAL não inicializado"))
         val account = withContext(Dispatchers.IO) {
             msal.currentAccount?.currentAccount
@@ -397,6 +423,7 @@ class MsalAuthManager(
         return suspendCancellableCoroutine { cont ->
             msal.signOut(object : ISingleAccountPublicClientApplication.SignOutCallback {
                 override fun onSignOut() {
+                    tokenAcceptedAtMs = 0L
                     _state.value = AuthState()
                     if (cont.isActive) cont.resume(Result.success(Unit))
                 }
@@ -407,4 +434,18 @@ class MsalAuthManager(
             })
         }
     }
+
+    private companion object {
+        const val TOKEN_RENEW_SKEW_MS = 120_000L
+        const val TOKEN_REUSE_WITHOUT_EXP_MS = 10 * 60 * 1000L
+    }
+}
+
+/** `exp` do JWT em milissegundos. Token da Graph é reutilizado até perto do vencimento. */
+internal fun jwtExpiresAtEpochMs(token: String): Long? {
+    val payload = token.split('.').getOrNull(1) ?: return null
+    val bytes = runCatching { Base64.getUrlDecoder().decode(payload) }.getOrNull() ?: return null
+    val json = bytes.toString(Charsets.UTF_8)
+    val expSeconds = Regex("\"exp\"\\s*:\\s*(\\d+)").find(json)?.groupValues?.getOrNull(1) ?: return null
+    return expSeconds.toLongOrNull()?.times(1_000L)
 }

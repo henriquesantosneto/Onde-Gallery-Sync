@@ -52,7 +52,7 @@ internal class GalleryThumbnailIndex(
     }
 
     companion object {
-        const val THUMB_RUN_QUEUE_UI_CAP = 1_500
+        const val THUMB_RUN_QUEUE_UI_CAP = 48
         const val THUMB_PREFETCH_MAX_SESSION_ATTEMPTS = 8
     }
 }
