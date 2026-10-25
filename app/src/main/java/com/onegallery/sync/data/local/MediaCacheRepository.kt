@@ -285,6 +285,7 @@ class MediaCacheRepository(context: Context) {
 
     private fun isReadableThumbnailFile(file: File): Boolean {
         if (file.length() < 24L) return false
+        if (file.length() >= LARGE_THUMB_SKIP_DECODE_BYTES) return true
         return decodeBounds(file)?.let { (w, h) -> w > 0 && h > 0 } == true
     }
 
@@ -295,6 +296,8 @@ class MediaCacheRepository(context: Context) {
     private fun isDisplayableGalleryThumb(file: File): Boolean {
         if (isSyncStubPlaceholderThumbnail(file)) return false
         if (file.length() < MIN_DISPLAYABLE_THUMB_BYTES) return false
+        if (file.length() >= LARGE_THUMB_SKIP_DECODE_BYTES) return true
+        if (isSyncFailurePlaceholderThumbnail(file)) return false
         val (w, h) = decodeBounds(file) ?: return false
         return w >= MIN_DISPLAYABLE_THUMB_EDGE_PX && h >= MIN_DISPLAYABLE_THUMB_EDGE_PX
     }
@@ -331,6 +334,8 @@ class MediaCacheRepository(context: Context) {
         const val MIN_DISPLAYABLE_THUMB_EDGE_PX = 32
         /** JPEG cinza 32×32 fica abaixo deste tamanho; miniaturas reais são maiores. */
         const val SYNC_STUB_PLACEHOLDER_MAX_BYTES = 2_048L
+        /** JPEG real de preview passa disto; stub e cinza 96px ficam abaixo e ainda são medidos. */
+        const val LARGE_THUMB_SKIP_DECODE_BYTES = 8_192L
         /** Placeholder após falhas — maior que stub 32×32 para não ser apagado no disco. */
         const val SYNC_FAILURE_PLACEHOLDER_EDGE_PX = 96
         /** Cor neutra para placeholder de sync (evita célula totalmente preta). */

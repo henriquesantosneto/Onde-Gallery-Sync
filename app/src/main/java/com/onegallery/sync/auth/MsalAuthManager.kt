@@ -2,6 +2,8 @@ package com.onegallery.sync.auth
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.HandlerThread
 import com.microsoft.identity.client.AcquireTokenParameters
 import com.microsoft.identity.client.AcquireTokenSilentParameters
 import com.microsoft.identity.client.AuthenticationCallback
@@ -43,6 +45,8 @@ class MsalAuthManager(
     private val appContext = context.applicationContext
     private val silentTokenMutex = Mutex()
     private var tokenAcceptedAtMs = 0L
+    private val msalSilentThread = HandlerThread("msal-silent").apply { start() }
+    private val msalSilentHandler = Handler(msalSilentThread.looper)
 
     private val _state = MutableStateFlow(AuthState())
     val state: StateFlow<AuthState> = _state.asStateFlow()
@@ -369,8 +373,8 @@ class MsalAuthManager(
             requestInteractiveSignIn()
             return Result.failure(IllegalStateException("Nenhuma conta Microsoft ativa"))
         }
-        return withContext(Dispatchers.Main.immediate) {
-            suspendCancellableCoroutine { cont ->
+        return suspendCancellableCoroutine { cont ->
+            msalSilentHandler.post {
                 val params = AcquireTokenSilentParameters.Builder()
                     .withScopes(scopes.toList())
                     .forAccount(account)

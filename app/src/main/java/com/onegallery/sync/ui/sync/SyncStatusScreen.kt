@@ -93,7 +93,7 @@ fun SyncStatusScreen(
     val stats = indexStats?.toSyncStats() ?: SyncStats.empty()
     val problemCount = indexStats?.attention ?: problemItems.size
     LaunchedEffect(Unit) {
-        syncCoordinator.refreshThumbnailCacheStats(force = true)
+        syncCoordinator.refreshThumbnailCacheStats(force = false)
     }
     DisposableEffect(Unit) {
         syncCoordinator.setSyncStatusScreenVisible(true)

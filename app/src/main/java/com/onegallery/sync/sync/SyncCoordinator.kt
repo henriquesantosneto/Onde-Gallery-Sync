@@ -344,7 +344,12 @@ class SyncCoordinator(
         }
         bulkGalleryDisplayRefreshJob?.cancel()
         bulkGalleryDisplayRefreshJob = scope.launch {
-            delay(GALLERY_DISPLAY_REFRESH_COALESCE_MS)
+            val waitMs = if (bulkThumbnailPrefetchDepth.get() > 0) {
+                GALLERY_DISPLAY_REFRESH_DURING_PREFETCH_MS
+            } else {
+                GALLERY_DISPLAY_REFRESH_COALESCE_MS
+            }
+            delay(waitMs)
             notifyGalleryDisplayRefresh()
         }
     }
@@ -781,7 +786,13 @@ class SyncCoordinator(
     private val galleryMetadataSource = syncMetadataDao.observeGalleryIndex()
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = merge(
         galleryMetadataSource.take(1),
-        galleryMetadataSource.drop(1).debounce(GALLERY_METADATA_DEBOUNCE_MS),
+        galleryMetadataSource.drop(1).debounce {
+            if (bulkThumbnailPrefetchDepth.get() > 0) {
+                GALLERY_METADATA_DEBOUNCE_DURING_PREFETCH_MS
+            } else {
+                GALLERY_METADATA_DEBOUNCE_MS
+            }
+        },
     )
     private val indexStatsSqlQuery =
         androidx.sqlite.db.SimpleSQLiteQuery(GalleryMapper.buildSyncIndexStatsSql())
@@ -4907,6 +4918,7 @@ class SyncCoordinator(
 
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
+        const val GALLERY_METADATA_DEBOUNCE_DURING_PREFETCH_MS = 20_000L
         const val INDEX_STATS_SAMPLE_MS = 20_000L
         /** Espera Coil gravar JPEG antes de reindexar miniaturas na grade. */
         const val GALLERY_DISPLAY_REFRESH_AFTER_SCROLL_MS = 450L
@@ -4949,6 +4961,7 @@ class SyncCoordinator(
         const val ACTIVE_ITEM_PROGRESS_MIN_INTERVAL_MS = 280L
         const val ALBUM_COVER_REVISION_COALESCE_MS = 280L
         const val GALLERY_DISPLAY_REFRESH_COALESCE_MS = 2_000L
+        const val GALLERY_DISPLAY_REFRESH_DURING_PREFETCH_MS = 20_000L
         const val THUMBNAIL_STATS_MIN_REFRESH_MS = 8_000L
         const val GPS_BACKFILL_ROUNDS = 8
         /** Indexação manual (mapa): varre a biblioteca inteira em várias levas. */

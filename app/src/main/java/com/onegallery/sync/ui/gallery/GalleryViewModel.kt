@@ -379,6 +379,7 @@ class GalleryViewModel(
             previous.fingerprint.matchesIndex(next.fingerprint) &&
                 previous.userAlbums == next.userAlbums
         }
+        .flowOn(Dispatchers.IO)
         .flatMapLatest { inputs ->
             flow {
                 val metadata = inputs.metadata
@@ -751,30 +752,30 @@ class GalleryViewModel(
         localRevision: Long,
     ) {
         if (catalogItems.isEmpty()) return
-        val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
-        val albumItems = itemsForAlbumListGrouping(
-            catalogItems,
-            visibleItems,
-            mediaCacheRepository,
-            onlyItemsWithThumbnail = onlyThumb,
-        )
-        val placeItems = itemsForPlaceAlbumGrouping(
-            catalogItems,
-            visibleItems,
-            mediaCacheRepository,
-            onlyItemsWithThumbnail = onlyThumb,
-        )
-        val pending = deferredAlbumLists.value
-        if (!onlyThumb &&
-            pending.albums.isNotEmpty() &&
-            pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
-            pending.albumSort == albumSort &&
-            pending.localRevision == localRevision
-        ) {
-            return
-        }
         albumListsBuildJob?.cancel()
         albumListsBuildJob = viewModelScope.launch(Dispatchers.Default) {
+            val onlyThumb = galleryPreferences.browseOnlyItemsWithThumbnail
+            val albumItems = itemsForAlbumListGrouping(
+                catalogItems,
+                visibleItems,
+                mediaCacheRepository,
+                onlyItemsWithThumbnail = onlyThumb,
+            )
+            val placeItems = itemsForPlaceAlbumGrouping(
+                catalogItems,
+                visibleItems,
+                mediaCacheRepository,
+                onlyItemsWithThumbnail = onlyThumb,
+            )
+            val pending = deferredAlbumLists.value
+            if (!onlyThumb &&
+                pending.albums.isNotEmpty() &&
+                pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
+                pending.albumSort == albumSort &&
+                pending.localRevision == localRevision
+            ) {
+                return@launch
+            }
             val deferCovers = catalogItems.size > 3_000
             val app = appContext.applicationContext as OneGalleryApplication
             val skipHeavyCoverPass = deferCovers &&
