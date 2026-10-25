@@ -803,8 +803,17 @@ class SyncCoordinator(
 
     fun flushPendingGalleryDisplayRefreshIfAny() {
         if (!pendingGalleryDisplayRefresh) return
-        pendingGalleryDisplayRefresh = false
-        _galleryDisplayRefreshEpoch.value = System.nanoTime()
+        val scope = backgroundScope ?: run {
+            pendingGalleryDisplayRefresh = false
+            _galleryDisplayRefreshEpoch.value = System.nanoTime()
+            return
+        }
+        scope.launch {
+            delay(GALLERY_DISPLAY_REFRESH_AFTER_SCROLL_MS)
+            if (!pendingGalleryDisplayRefresh) return@launch
+            pendingGalleryDisplayRefresh = false
+            _galleryDisplayRefreshEpoch.value = System.nanoTime()
+        }
     }
 
     fun setSyncStatusScreenVisible(visible: Boolean) {
@@ -4830,6 +4839,8 @@ class SyncCoordinator(
 
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
+        /** Espera Coil gravar JPEG antes de reindexar miniaturas na grade. */
+        const val GALLERY_DISPLAY_REFRESH_AFTER_SCROLL_MS = 450L
         const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 10_000
         const val THUMB_BACKGROUND_CONTINUE_PASSES = 64
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 600L

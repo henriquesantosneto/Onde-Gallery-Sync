@@ -29,6 +29,7 @@ object CloudThumbnailStaging {
         staging: File,
         mediaCacheRepository: MediaCacheRepository,
     ): Boolean {
+        if (VideoThumbnailHelper.isCloudPosterThumbnailFile(staging)) return true
         if (acceptDownloadedCloudThumbnail(staging, mediaCacheRepository, isVideo = true)) return true
         if (reencodeFileToDisplayableThumbnail(staging, staging, mediaCacheRepository) &&
             VideoThumbnailHelper.isAcceptableThumbnailFile(staging)

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,11 +23,12 @@ import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.CloudSyncState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Vídeo na grade: **local com URI → Coil no 1º frame** (como antes); JPEG/cache e MediaStore
- * entram depois; nuvem só quando não há arquivo local.
+ * Vídeo na grade: local com URI; nuvem/cache usa um único AsyncImage (arquivo ou Coil Graph)
+ * com paint estável entre refreshes da lista.
  */
 @Composable
 fun GridVideoThumbnail(
@@ -37,21 +39,30 @@ fun GridVideoThumbnail(
     contentScale: ContentScale = ContentScale.Crop,
     style: GalleryThumbnailStyle = GalleryThumbnailStyle.Grid,
 ) {
-    val forFilmstrip = style == GalleryThumbnailStyle.Filmstrip
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCache = remember(app) { app.mediaCacheRepository }
     val thumbCache = remember(app) { app.galleryThumbnailCache }
     var coilRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
-    var cacheRevision by remember(item.canonicalPath) { mutableIntStateOf(0) }
+    var diskPoll by remember(item.canonicalPath) { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
 
-    val cacheFile = remember(
+    val diskThumb = remember(
         item.canonicalPath,
         item.oneDriveItemId,
         item.cachedPlaceholderThumb?.absolutePath,
-        cacheRevision,
+        diskPoll,
     ) {
         item.resolvedGridVideoThumbFile(mediaCache)
+            ?: GridVideoThumbPaintCache.recall(item.canonicalPath)?.let { recalled ->
+                recalled.takeIf {
+                    isCommittedGridVideoThumbFile(it, item.isCloudOnlyVideoThumb())
+                }
+            }
+    }
+
+    if (diskThumb != null) {
+        GridVideoThumbPaintCache.remember(item.canonicalPath, diskThumb)
     }
 
     val cloudKey = remember(item.canonicalPath, item.oneDriveItemId, item.localUri) {
@@ -77,6 +88,7 @@ fun GridVideoThumbnail(
             val onDisk = mediaCache.thumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
             if (onDisk != null && isInvalidCommittedVideoThumb(onDisk, allowCloudPoster)) {
                 mediaCache.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
+                GridVideoThumbPaintCache.forget(item.canonicalPath)
             }
             thumbCache.ensureThumbnailCached(
                 item.canonicalPath,
@@ -84,6 +96,9 @@ fun GridVideoThumbnail(
                 cloudVideoAggressive = true,
                 lightweightPrefetch = item.localUri != null,
             )
+            if (item.resolvedGridVideoThumbFile(mediaCache) != null) {
+                diskPoll++
+            }
         }
     }
 
@@ -123,7 +138,7 @@ fun GridVideoThumbnail(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = contentScale,
                     )
-                } ?: cacheFile?.let { file ->
+                } ?: diskThumb?.let { file ->
                     val fileRequest = remember(file, sizePx) {
                         ImageRequest.Builder(context)
                             .data(file)
@@ -140,38 +155,38 @@ fun GridVideoThumbnail(
                 }
             }
         }
-        cacheFile != null -> {
-            val request = remember(cacheFile, sizePx, item.canonicalPath) {
-                ImageRequest.Builder(context)
-                    .data(cacheFile)
-                    .size(sizePx)
-                    .allowHardware(false)
-                    .memoryCacheKey("${item.canonicalPath}:gridvid:file:$sizePx")
-                    .build()
+        diskThumb != null || cloudKey != null -> {
+            val paintModel: Any = diskThumb ?: cloudKey!!
+            var showLoadingUnderlay by remember(item.canonicalPath) {
+                mutableStateOf(diskThumb == null)
             }
-            AsyncImage(
-                model = request,
-                contentDescription = contentDescription,
-                modifier = layerModifier,
-                contentScale = contentScale,
-            )
-        }
-        cloudKey != null && cacheFile == null -> {
-            var cloudPosterVisible by remember(item.canonicalPath) { mutableStateOf(false) }
-            val request = remember(cloudKey, sizePx, coilRetry) {
+            val request = remember(paintModel, sizePx, coilRetry, item.canonicalPath) {
                 ImageRequest.Builder(context)
-                    .data(cloudKey)
+                    .data(paintModel)
                     .size(sizePx)
-                    .applyGalleryThumbnailLoading(
-                        style = style,
-                        allowHardwareBitmap = false,
-                        videoDecode = false,
+                    .apply {
+                        if (paintModel is java.io.File) {
+                            allowHardware(false)
+                        } else {
+                            applyGalleryThumbnailLoading(
+                                style = style,
+                                allowHardwareBitmap = false,
+                                videoDecode = false,
+                            )
+                        }
+                    }
+                    .memoryCacheKey(
+                        when (paintModel) {
+                            is java.io.File ->
+                                "${item.canonicalPath}:gridvid:file:$sizePx"
+                            else ->
+                                "${item.canonicalPath}:gridvid:cloud:$sizePx:$coilRetry"
+                        },
                     )
-                    .memoryCacheKey("${item.canonicalPath}:gridvid:cloud:$sizePx:$coilRetry")
                     .build()
             }
             Box(modifier = layerModifier) {
-                if (!cloudPosterVisible) {
+                if (showLoadingUnderlay && diskThumb == null) {
                     MediaThumbnailPlaceholder(
                         modifier = Modifier.fillMaxSize(),
                         showCloudIcon = true,
@@ -186,14 +201,25 @@ fun GridVideoThumbnail(
                     onState = { state ->
                         when (state) {
                             is AsyncImagePainter.State.Success -> {
-                                if (!cloudPosterVisible) {
-                                    cloudPosterVisible = true
-                                    cacheRevision++
+                                showLoadingUnderlay = false
+                                if (diskThumb == null) {
+                                    scope.launch {
+                                        val file = withContext(Dispatchers.IO) {
+                                            item.resolvedGridVideoThumbFile(mediaCache)
+                                        } ?: return@launch
+                                        GridVideoThumbPaintCache.remember(
+                                            item.canonicalPath,
+                                            file,
+                                        )
+                                        diskPoll++
+                                    }
                                 }
                             }
                             is AsyncImagePainter.State.Error -> {
-                                cloudPosterVisible = false
-                                coilRetry++
+                                if (diskThumb == null) {
+                                    showLoadingUnderlay = true
+                                    coilRetry++
+                                }
                             }
                             else -> Unit
                         }
