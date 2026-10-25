@@ -43,14 +43,7 @@ fun GalleryGridThumb(
     val paintModel = remember(thumbFile?.absolutePath, thumbFile?.length(), localPhotoUri) {
         when {
             thumbFile == null -> localPhotoUri
-            else -> {
-                val ext = thumbFile.extension.lowercase()
-                if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
-                    thumbFile
-                } else {
-                    thumbFile.readBytes()
-                }
-            }
+            else -> thumbFile.asGalleryImageModel()
         }
     } ?: return
 

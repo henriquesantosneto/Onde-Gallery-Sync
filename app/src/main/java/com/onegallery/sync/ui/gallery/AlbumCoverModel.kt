@@ -22,6 +22,7 @@ fun GalleryDisplayItem.isEligibleForAlbumCover(
 ): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (isLocalPhotoOnDevice()) return true
+    if (hasLocalVideoCoverOnDevice()) return true
     return hasCachedThumbnailFile(this, mediaCacheRepository)
 }
 
@@ -116,6 +117,9 @@ fun resolveGalleryCoverModel(
         mediaCacheRepository?.isDisplayableGalleryThumbFile(thumb) == true
     }
     if (item.kind == MediaKind.VIDEO) {
+        if (mediaCacheRepository != null) {
+            item.resolvedGridVideoThumbFile(mediaCacheRepository)?.let { return it }
+        }
         cachedThumb?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
             ?.let { return it }
         if (item.hasLocalVideoCoverOnDevice() || item.videoCountsAsLocalBrowseThumb()) {

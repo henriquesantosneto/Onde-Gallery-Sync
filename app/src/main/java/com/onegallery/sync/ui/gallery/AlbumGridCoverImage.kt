@@ -89,8 +89,9 @@ fun AlbumGridCoverImage(
         if (displayModel != null) {
             val coverSizePx = 480
             val request = remember(displayModel, coverCacheKey, coverRevision, allowHardwareBitmap) {
+                val paint = (displayModel as? java.io.File)?.asGalleryImageModel() ?: displayModel
                 ImageRequest.Builder(context)
-                    .data(displayModel)
+                    .data(paint)
                     .size(coverSizePx)
                     .applyGalleryThumbnailLoading(GalleryThumbnailStyle.Grid, allowHardwareBitmap)
                     .memoryCacheKey(

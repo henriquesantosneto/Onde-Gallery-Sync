@@ -45,7 +45,8 @@ class AlbumCoverLocalVideoTest {
     fun syncedLocalVideo_withoutPoster_notBrowsableUntilSync() {
         val item = syncedLocalVideo("v.mp4")
         assertFalse(item.hasBrowsableThumbnail(repo))
-        assertFalse(item.isEligibleForAlbumCover(repo))
+        assertTrue(item.isEligibleForAlbumCover(repo))
+        assertEquals(item.localUri, resolveGalleryCoverModel(item, repo))
     }
 
     @Test

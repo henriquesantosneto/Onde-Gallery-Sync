@@ -20,6 +20,14 @@ internal fun GalleryDisplayItem.resolvedGalleryGridThumbFile(
     }
 }
 
+internal fun File.asGalleryImageModel(): Any {
+    val ext = extension.lowercase()
+    if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif") {
+        return this
+    }
+    return readBytes()
+}
+
 internal fun GalleryDisplayItem.isCloudBackedGalleryItem(): Boolean =
     !oneDriveItemId.isNullOrBlank() ||
         cloudState == com.onegallery.sync.sync.CloudSyncState.CLOUD_ONLY ||
