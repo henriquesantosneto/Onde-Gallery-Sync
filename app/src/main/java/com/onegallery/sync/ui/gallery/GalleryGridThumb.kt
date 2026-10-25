@@ -6,14 +6,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaKind
@@ -22,8 +20,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Miniatura da grade: prioriza **JPEG no cache**; enquanto não existe, placeholder estável
- * e prefetch (sync/Graph). Atualiza só esta célula quando o arquivo é commitado.
+ * Grade OneDrive: **só JPEG commitado no cache** (estável ao rolar).
+ * Sem Coil/URI na nuvem — placeholder até o sync/gravar terminar.
  */
 @Composable
 fun GalleryGridThumb(
@@ -52,7 +50,6 @@ fun GalleryGridThumb(
     val thumbCache = remember(app) { app.galleryThumbnailCache }
 
     var revision by remember(item.canonicalPath) { mutableIntStateOf(0) }
-    var coilRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
 
     LaunchedEffect(item.canonicalPath) {
         GalleryThumbRevisionBus.commits.collect { path ->
@@ -69,18 +66,15 @@ fun GalleryGridThumb(
         item.resolvedGalleryGridThumbFile(mediaCache)
     }
 
-    val cloudVideoKey = remember(item.canonicalPath, item.oneDriveItemId, item.localUri) {
-        if (item.kind != MediaKind.VIDEO || item.localUri != null) null
-        else GalleryThumbnailResolver.cloudVideoCoilKey(item, forFilmstrip = true)
-    }
+    val cloudOnly = item.isCloudBackedGalleryItem() && item.localUri == null
 
-    LaunchedEffect(item.canonicalPath, item.oneDriveItemId, item.localUri) {
+    LaunchedEffect(item.canonicalPath, item.oneDriveItemId, item.localUri, item.kind) {
         withContext(Dispatchers.IO) {
             thumbCache.ensureThumbnailCached(
                 canonicalPath = item.canonicalPath,
-                preferCloudFirst = item.isCloudBackedGalleryItem() && item.localUri == null,
+                preferCloudFirst = cloudOnly,
                 cloudVideoAggressive = item.kind == MediaKind.VIDEO,
-                lightweightPrefetch = item.localUri != null && item.kind != MediaKind.VIDEO,
+                lightweightPrefetch = false,
             )
             if (item.resolvedGalleryGridThumbFile(mediaCache) != null) {
                 revision++
@@ -89,69 +83,52 @@ fun GalleryGridThumb(
     }
 
     val layerModifier = modifier.galleryGridThumbnailLayer(style)
-    val paintModel: Any? = thumbFile ?: item.localUri ?: cloudVideoKey
 
     when {
-        paintModel != null -> {
-            var showUnderlay by remember(item.canonicalPath) {
-                mutableStateOf(thumbFile == null && cloudVideoKey != null)
-            }
-            val request = remember(paintModel, sizePx, coilRetry, item.canonicalPath) {
+        thumbFile != null -> {
+            val request = remember(thumbFile, sizePx, item.canonicalPath) {
                 ImageRequest.Builder(context)
-                    .data(paintModel)
+                    .data(thumbFile)
                     .size(sizePx)
-                    .apply {
-                        when (paintModel) {
-                            is java.io.File -> allowHardware(false)
-                            is android.net.Uri -> applyGalleryThumbnailLoading(
-                                style = style,
-                                allowHardwareBitmap = false,
-                                videoDecode = item.kind == MediaKind.VIDEO,
-                            )
-                            else -> applyGalleryThumbnailLoading(
-                                style = style,
-                                allowHardwareBitmap = false,
-                                videoDecode = false,
-                            )
-                        }
-                    }
-                    .memoryCacheKey("${item.canonicalPath}:grid:${sizePx}:$coilRetry:$revision")
+                    .allowHardware(false)
+                    .memoryCacheKey("${item.canonicalPath}:grid:disk:$sizePx")
                     .build()
             }
-            Box(modifier = layerModifier) {
-                if (showUnderlay && thumbFile == null) {
-                    MediaThumbnailPlaceholder(
-                        modifier = Modifier.fillMaxSize(),
-                        showCloudIcon = item.isCloudBackedGalleryItem(),
-                        showLoading = true,
+            AsyncImage(
+                model = request,
+                contentDescription = contentDescription,
+                modifier = layerModifier,
+                contentScale = contentScale,
+            )
+        }
+        !cloudOnly && item.localUri != null && item.kind == MediaKind.IMAGE -> {
+            val uri = item.localUri
+            val request = remember(uri, sizePx, item.canonicalPath) {
+                ImageRequest.Builder(context)
+                    .data(uri)
+                    .size(sizePx)
+                    .applyGalleryThumbnailLoading(
+                        style = style,
+                        allowHardwareBitmap = false,
+                        videoDecode = false,
                     )
-                }
-                AsyncImage(
-                    model = request,
-                    contentDescription = contentDescription,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = contentScale,
-                    onState = { state ->
-                        when (state) {
-                            is AsyncImagePainter.State.Success -> {
-                                showUnderlay = false
-                                if (thumbFile == null) revision++
-                            }
-                            is AsyncImagePainter.State.Error -> {
-                                if (thumbFile == null) coilRetry++
-                            }
-                            else -> Unit
-                        }
-                    },
-                )
+                    .memoryCacheKey("${item.canonicalPath}:grid:uri:$sizePx")
+                    .build()
             }
+            AsyncImage(
+                model = request,
+                contentDescription = contentDescription,
+                modifier = layerModifier,
+                contentScale = contentScale,
+            )
         }
         else -> {
-            val cloudOnly = item.cloudState == CloudSyncState.CLOUD_ONLY ||
-                item.cloudState == CloudSyncState.PENDING_DOWNLOAD
+            val pendingCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
+                item.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
+                cloudOnly
             MediaThumbnailPlaceholder(
                 modifier = modifier,
-                showCloudIcon = cloudOnly || item.isCloudBackedGalleryItem(),
+                showCloudIcon = pendingCloud,
                 showLoading = true,
             )
         }

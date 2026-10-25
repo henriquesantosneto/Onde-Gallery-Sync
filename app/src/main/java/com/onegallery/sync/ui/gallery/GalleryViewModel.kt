@@ -1486,29 +1486,34 @@ class GalleryViewModel(
         videoAggressive: Boolean = false,
     ) {
         if (paths.isEmpty()) return
-        var cachedAny = false
+        var cachedCount = 0
         supervisorScope {
             val semaphore = Semaphore(GRID_THUMB_PREFETCH_PARALLEL)
             paths.map { path ->
                 async {
                     semaphore.withPermit {
+                        val row = latestCatalogItems.find { it.canonicalPath == path }
+                        val cloudOnly = row != null &&
+                            row.isCloudBackedGalleryItem() &&
+                            row.localUri == null
                         galleryThumbnailCache.ensureThumbnailCached(
                             path,
+                            preferCloudFirst = cloudOnly,
                             lightweightPrefetch = lightweightPrefetch,
-                            cloudVideoAggressive = videoAggressive,
+                            cloudVideoAggressive = videoAggressive ||
+                                row?.kind == MediaKind.VIDEO,
                         ).getOrNull()
-                        val hit = gridThumbnailCached(path)
-                        if (hit) cachedAny = true
+                        if (gridThumbnailCached(path)) {
+                            cachedCount++
+                            GalleryThumbRevisionBus.onThumbnailCommitted(path)
+                        }
                     }
                 }
             }.awaitAll()
         }
         GalleryPerfLogger.log(
-            "grid-thumb-prefetch count=${paths.size} cached=$cachedAny",
+            "grid-thumb-prefetch count=${paths.size} cached=$cachedCount",
         )
-        if (cachedAny && !GalleryGridScrollGate.isUserScrollingGrid) {
-            syncCoordinator.notifyGalleryDisplayRefresh()
-        }
     }
 
     private companion object {
@@ -1523,11 +1528,7 @@ class GalleryViewModel(
             return mediaCacheRepository.displayableThumbnailIfCached(canonicalPath) != null
         }
         if (item.kind == MediaKind.VIDEO) {
-            return mediaCacheRepository.galleryThumbnailResolved(
-                item.canonicalPath,
-                item.oneDriveItemId,
-                requireVideoAcceptable = true,
-            ) != null
+            return item.resolvedGalleryGridThumbFile(mediaCacheRepository) != null
         }
         if (item.localUri != null) return true
         return mediaCacheRepository.displayableThumbnailIfCached(
