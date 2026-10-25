@@ -28,6 +28,18 @@ fun GalleryDisplayItem.mediaCountsAsLocalBrowseThumb(): Boolean {
     return true
 }
 
+/** Vídeo ainda no aparelho (URI MediaStore) — capa de álbum, não a grade na nuvem. */
+fun GalleryDisplayItem.hasLocalVideoCoverOnDevice(): Boolean {
+    if (kind != MediaKind.VIDEO) return false
+    if (localReleasedForSpace || localUri == null) return false
+    if (cloudState == CloudSyncState.CLOUD_ONLY ||
+        cloudState == CloudSyncState.PENDING_DOWNLOAD
+    ) {
+        return false
+    }
+    return true
+}
+
 fun GalleryDisplayItem.hasStubBrowseThumbnailFile(): Boolean {
     val stub = cachedPlaceholderThumb ?: return false
     if (!stub.isFile || stub.length() <= 0L) return false

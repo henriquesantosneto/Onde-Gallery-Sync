@@ -16,19 +16,32 @@ data class LiveAlbumCover(
  * 1) mídia **mais recente** (`sortTimestamp`) que já tenha **arquivo de miniatura** no cache do app;
  * 2) se nenhuma, a mais recente exibível (URI local / original / thumb).
  */
+/** Capa de álbum: inclui vídeo local no aparelho mesmo sync/OneDrive (grade continua mais restrita). */
+fun GalleryDisplayItem.isEligibleForAlbumCover(
+    mediaCacheRepository: MediaCacheRepository,
+): Boolean {
+    if (GalleryMapper.isAudioFileName(displayName)) return false
+    if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
+    if (localReleasedForSpace) return false
+    if (hasLocalVideoCoverOnDevice()) return true
+    return hasBrowsableThumbnail(mediaCacheRepository)
+}
+
 fun resolveAlbumCoverItem(
     items: List<GalleryDisplayItem>,
     mediaCacheRepository: MediaCacheRepository,
 ): GalleryDisplayItem? {
     if (items.isEmpty()) return null
-    val browsable = items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
-    if (browsable.isEmpty()) return null
-    val preferred = browsable.filter { isStrongCoverCandidate(it, mediaCacheRepository) }
+    val eligible = items.filter { it.isEligibleForAlbumCover(mediaCacheRepository) }
+    if (eligible.isEmpty()) return null
+    val preferred = eligible.filter { isStrongCoverCandidate(it, mediaCacheRepository) }
     val pool = if (preferred.isNotEmpty()) {
         preferred
     } else {
-        browsable.filter {
-            it.imageCountsAsLocalBrowseThumb() || it.videoCountsAsLocalBrowseThumb()
+        eligible.filter {
+            it.imageCountsAsLocalBrowseThumb() ||
+                it.videoCountsAsLocalBrowseThumb() ||
+                it.hasLocalVideoCoverOnDevice()
         }
     }
     if (pool.isEmpty()) return null
@@ -41,6 +54,7 @@ private fun isStrongCoverCandidate(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (hasCachedThumbnailFile(item, mediaCacheRepository)) return true
+    if (item.hasLocalVideoCoverOnDevice()) return true
     return item.videoCountsAsLocalBrowseThumb() || item.imageCountsAsLocalBrowseThumb()
 }
 
@@ -111,7 +125,7 @@ fun resolveGalleryCoverModel(
     mediaCacheRepository: MediaCacheRepository? = null,
 ): Any? {
     if (mediaCacheRepository != null &&
-        !item.hasBrowsableThumbnail(mediaCacheRepository)
+        !item.isEligibleForAlbumCover(mediaCacheRepository)
     ) {
         return null
     }
@@ -122,8 +136,9 @@ fun resolveGalleryCoverModel(
         mediaCacheRepository?.isDisplayableGalleryThumbFile(thumb) == true
     }
     if (item.kind == MediaKind.VIDEO) {
-        cachedThumb?.takeIf { VideoThumbnailHelper.isGalleryVideoThumbnailFile(it) }?.let { return it }
-        if (item.videoCountsAsLocalBrowseThumb()) {
+        cachedThumb?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
+            ?.let { return it }
+        if (item.hasLocalVideoCoverOnDevice() || item.videoCountsAsLocalBrowseThumb()) {
             item.localUri?.let { return it }
         }
         return null

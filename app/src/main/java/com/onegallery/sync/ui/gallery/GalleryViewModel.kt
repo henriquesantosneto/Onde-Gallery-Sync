@@ -1826,7 +1826,7 @@ internal fun buildAlbums(
     val titles = (userAlbums.map { it.title } + grouped.keys).distinct()
     val albums = titles.mapNotNull { title ->
         val rawItems = grouped[title].orEmpty()
-        val items = rawItems.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+        val items = rawItems.filter { it.isEligibleForAlbumCover(mediaCacheRepository) }
         val userMeta = userAlbums.find { it.title == title }
         if (items.isEmpty() && userMeta == null) return@mapNotNull null
         val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
@@ -1871,8 +1871,8 @@ internal fun buildPlaceAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    val browsable = items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
-    return groupDisplayItemsForPlaceAlbums(browsable).mapNotNull { (encodedKey, group) ->
+    val coverPool = items.filter { it.isEligibleForAlbumCover(mediaCacheRepository) }
+    return groupDisplayItemsForPlaceAlbums(coverPool).mapNotNull { (encodedKey, group) ->
         if (group.isEmpty()) return@mapNotNull null
         val coverItem = if (resolveCoverModels) {
             resolveAlbumCoverItem(group, mediaCacheRepository)
