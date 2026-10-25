@@ -1508,8 +1508,8 @@ class GalleryViewModel(
     }
 
     private companion object {
-        const val GRID_THUMB_PREFETCH_PARALLEL = 14
-        const val GRID_THUMB_PREFETCH_BATCH = 96
+        const val GRID_THUMB_PREFETCH_PARALLEL = 3
+        const val GRID_THUMB_PREFETCH_BATCH = 24
         const val DEFER_ALBUM_LISTS_MIN_ITEMS = 800
     }
 

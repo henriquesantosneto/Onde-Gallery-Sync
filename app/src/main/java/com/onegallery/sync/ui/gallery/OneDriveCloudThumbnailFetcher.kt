@@ -14,17 +14,28 @@ import com.onegallery.sync.data.onedrive.CloudVideoThumbnailLoader
 import okio.Path.Companion.toOkioPath
 import java.io.File
 
+/** Coil: JPEG em disco ou poster Graph (foto e vídeo). Commit no cache para a célula não depender da rede de novo. */
 class OneDriveCloudThumbnailFetcher(
     private val key: OneDriveCloudThumbnailKey,
     private val app: OneGalleryApplication,
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult {
-        app.mediaCacheRepository.galleryThumbnailResolved(
-            key.canonicalPath,
-            key.oneDriveItemId,
-            requireVideoAcceptable = true,
-        )?.let { cached ->
+        val isVideo = GalleryMapper.isVideoFileName(key.canonicalPath)
+        val cached = if (isVideo) {
+            app.mediaCacheRepository.galleryThumbnailResolved(
+                key.canonicalPath,
+                key.oneDriveItemId,
+                requireVideoAcceptable = true,
+                allowCloudVideoPoster = true,
+            )
+        } else {
+            app.mediaCacheRepository.displayableThumbnailIfCached(
+                key.canonicalPath,
+                key.oneDriveItemId,
+            )
+        }
+        if (cached != null) {
             return SourceResult(
                 source = ImageSource(file = cached.toOkioPath()),
                 mimeType = "image/jpeg",
@@ -33,9 +44,43 @@ class OneDriveCloudThumbnailFetcher(
         }
         val staging = File(
             app.cacheDir,
-            "coil-cloud-vid-${key.oneDriveItemId.hashCode()}.jpg",
+            "coil-cloud-${key.oneDriveItemId.hashCode()}.jpg",
         )
         staging.delete()
+        val displayFile = if (isVideo) {
+            fetchVideo(staging)
+        } else {
+            fetchImage(staging)
+        }
+        return SourceResult(
+            source = ImageSource(file = displayFile.toOkioPath()),
+            mimeType = "image/jpeg",
+            dataSource = DataSource.NETWORK,
+        )
+    }
+
+    private suspend fun fetchImage(staging: File): File {
+        val downloaded = app.oneDriveRepository.downloadThumbnailToFile(
+            key.oneDriveItemId,
+            staging,
+            onProgress = null,
+        ).isSuccess && CloudThumbnailStaging.acceptDownloadedCloudThumbnail(
+            staging,
+            app.mediaCacheRepository,
+            isVideo = false,
+        )
+        if (!downloaded) {
+            staging.delete()
+            error("Miniatura Graph indisponível para ${key.oneDriveItemId}")
+        }
+        return app.mediaCacheRepository.commitThumbnail(
+            staging,
+            key.canonicalPath,
+            key.oneDriveItemId,
+        ) ?: error("Falha ao gravar miniatura ${key.canonicalPath}")
+    }
+
+    private suspend fun fetchVideo(staging: File): File {
         val remoteSizeBytes = app.database.syncMetadataDao()
             .getByCanonicalPath(key.canonicalPath)
             ?.remoteSizeBytes
@@ -45,7 +90,7 @@ class OneDriveCloudThumbnailFetcher(
             itemId = key.oneDriveItemId,
             staging = staging,
             remoteSizeBytes = remoteSizeBytes,
-            aggressive = true,
+            aggressive = false,
             onProgress = null,
         )
         val fromGraphPoster = loaded == CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
@@ -58,7 +103,7 @@ class OneDriveCloudThumbnailFetcher(
             staging.delete()
             error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
         }
-        val displayFile = CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
+        return CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
             staging,
             app.mediaCacheRepository,
             key.canonicalPath,
@@ -68,11 +113,6 @@ class OneDriveCloudThumbnailFetcher(
             staging.delete()
             error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
         }
-        return SourceResult(
-            source = ImageSource(file = displayFile.toOkioPath()),
-            mimeType = "image/jpeg",
-            dataSource = if (fromGraphPoster) DataSource.NETWORK else DataSource.DISK,
-        )
     }
 
     class Factory(
@@ -82,8 +122,6 @@ class OneDriveCloudThumbnailFetcher(
             data: OneDriveCloudThumbnailKey,
             options: Options,
             imageLoader: ImageLoader,
-        ): Fetcher {
-            return OneDriveCloudThumbnailFetcher(data, app)
-        }
+        ): Fetcher = OneDriveCloudThumbnailFetcher(data, app)
     }
 }
