@@ -1,5 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
+import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -20,6 +22,7 @@ import android.graphics.Bitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -30,10 +33,15 @@ import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaKind
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
+private val albumCoverResolveSlots = Semaphore(2)
+
 /**
- * Capa na grade: ao aparecer na rolagem ou após revisão do álbum, relê disco (foto/vídeo).
+ * Capa na grade de álbuns. Reaproveita a imagem já mostrada e só busca outra
+ * com a lista parada, para a rolagem não piscar nem travar.
  */
 @Composable
 fun AlbumGridCoverImage(
@@ -49,129 +57,207 @@ fun AlbumGridCoverImage(
     val mediaCacheRepository = remember(context) {
         (context.applicationContext as OneGalleryApplication).mediaCacheRepository
     }
-    var displayModel by remember(album.bucketId) { mutableStateOf<Any?>(fallbackCover) }
-    var coverIsVideo by remember(album.bucketId) { mutableStateOf(false) }
-    var coverCacheKey by remember(album.bucketId) { mutableStateOf(album.bucketId) }
+    val cachedCover = AlbumCoverBitmapCache.get(album.bucketId)
+    var displayModel by remember(album.bucketId) {
+        mutableStateOf(albumCoverDisplaySeed(cachedCover?.model, fallbackCover))
+    }
+    var coverIsVideo by remember(album.bucketId) { mutableStateOf(cachedCover?.isVideo == true) }
+    var coverCacheKey by remember(album.bucketId) {
+        mutableStateOf(cachedCover?.cacheKey ?: album.bucketId)
+    }
     var allowHardwareBitmap by remember(album.bucketId) { mutableStateOf(true) }
 
     LaunchedEffect(displayModel) {
         allowHardwareBitmap = true
     }
 
-    LaunchedEffect(album.bucketId, coverRevision, fallbackCover) {
-        val live = withContext(Dispatchers.IO) { resolveLiveCover(album) }
-        val isVideo = live.sourceItem?.kind == MediaKind.VIDEO
-        val resolved = withContext(Dispatchers.IO) {
-            val raw = live.sourceItem?.let { item ->
-                resolveGalleryCoverModel(item, mediaCacheRepository)
-            } ?: live.displayModel
-            when (raw) {
-                is android.net.Uri -> GalleryThumbnailModels.loadDeviceImagePoster(
-                    context,
-                    raw,
-                    live.sourceItem?.localMediaId,
-                    480,
+    LaunchedEffect(album.bucketId, coverRevision) {
+        val hit = AlbumCoverBitmapCache.get(album.bucketId)
+        if (hit != null && hit.revision == coverRevision) {
+            if (hit.model.isPaintableAlbumCoverModel() && displayModel != hit.model) {
+                displayModel = hit.model
+                coverIsVideo = hit.isVideo
+                coverCacheKey = hit.cacheKey
+            }
+            return@LaunchedEffect
+        }
+        GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true)
+        val outcome = albumCoverResolveSlots.withPermit {
+            GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true)
+            withContext(Dispatchers.IO) {
+                val live = resolveLiveCover(album)
+                val raw = live.sourceItem?.let { item ->
+                    resolveGalleryCoverModel(item, mediaCacheRepository)
+                } ?: live.displayModel
+                val videoCover = raw.asDeviceVideoCover()
+                val paintable = when {
+                    raw is android.net.Uri -> GalleryThumbnailModels.loadDeviceImagePoster(
+                        context,
+                        raw,
+                        live.sourceItem?.localMediaId,
+                        480,
+                    )
+                    videoCover != null -> GalleryThumbnailModels.loadDeviceVideoPoster(
+                        context,
+                        videoCover.uri,
+                        videoCover.mediaId ?: live.sourceItem?.localMediaId,
+                        480,
+                    )
+                    else -> raw
+                }
+                ResolvedAlbumCover(
+                    model = paintable?.takeIf { it.isPaintableAlbumCoverModel() },
+                    isVideo = live.sourceItem?.kind == MediaKind.VIDEO || videoCover != null,
+                    cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId,
                 )
-                else -> raw
             }
         }
-        val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId
-        if (resolved != null && cacheKey == coverCacheKey && displayModel != null) {
-            return@LaunchedEffect
-        }
-        when {
-            resolved != null -> {
+        val resolved = outcome.model
+        if (resolved.isPaintableAlbumCoverModel()) {
+            val keepShown = outcome.cacheKey == coverCacheKey &&
+                displayModel.isPaintableAlbumCoverModel()
+            val shown = if (keepShown) displayModel!! else resolved!!
+            AlbumCoverBitmapCache.put(
+                album.bucketId,
+                shown,
+                outcome.isVideo,
+                outcome.cacheKey,
+                coverRevision,
+            )
+            if (!keepShown) {
                 displayModel = resolved
-                coverIsVideo = isVideo
-                coverCacheKey = cacheKey
+                coverIsVideo = outcome.isVideo
+                coverCacheKey = outcome.cacheKey
             }
-            fallbackCover != null && fallbackCover !is android.net.Uri -> {
-                displayModel = fallbackCover
-                coverIsVideo = fallbackCover.asDeviceVideoCover() != null
-                coverCacheKey = album.bucketId
-            }
-            else -> {
-                displayModel = null
-                coverIsVideo = false
-                coverCacheKey = album.bucketId
-            }
-        }
-    }
-
-    val videoCover = displayModel.asDeviceVideoCover()
-    var devicePoster by remember(album.bucketId) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(album.bucketId, videoCover) {
-        val cover = videoCover
-        if (cover == null) {
-            devicePoster = null
             return@LaunchedEffect
         }
-        devicePoster = GalleryThumbnailModels.loadDeviceVideoPoster(
-            context,
-            cover.uri,
-            cover.mediaId,
-            480,
-        )
+        if (displayModel.isPaintableAlbumCoverModel()) {
+            AlbumCoverBitmapCache.put(
+                album.bucketId,
+                displayModel!!,
+                coverIsVideo,
+                coverCacheKey,
+                coverRevision,
+            )
+            return@LaunchedEffect
+        }
+        val fallback = nextAlbumCoverModel(displayModel, resolved = null, fallback = fallbackCover)
+        if (fallback == null) {
+            AlbumCoverBitmapCache.markUnresolved(album.bucketId, coverRevision)
+            return@LaunchedEffect
+        }
+        displayModel = fallback
+        coverIsVideo = false
+        coverCacheKey = album.bucketId
+        AlbumCoverBitmapCache.put(album.bucketId, fallback, false, album.bucketId, coverRevision)
     }
     val coilModel = remember(displayModel, coverCacheKey) { coverCoilModel(displayModel) }
-    val paintModel = coilModel ?: devicePoster
+    val paintModel = coilModel
 
+    val shownBitmap = (displayModel as? Bitmap)?.takeIf { !it.isRecycled }
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (paintModel != null) {
-            val coverSizePx = 480
-            val request = remember(paintModel, coverCacheKey, allowHardwareBitmap) {
-                ImageRequest.Builder(context)
-                    .data(paintModel)
-                    .size(coverSizePx)
-                    .applyGalleryThumbnailLoading(
-                        GalleryThumbnailStyle.Grid,
-                        allowHardwareBitmap && paintModel !is Bitmap,
-                    )
-                    .memoryCacheKey(
-                        galleryThumbnailMemoryCacheKey(
-                            "album-cover:$coverCacheKey",
-                            coverSizePx,
-                            GalleryThumbnailStyle.Grid,
-                            allowHardwareBitmap,
-                        ),
-                    )
-                    .diskCacheKey("album-cover:$coverCacheKey")
-                    .build()
-            }
-            AsyncImage(
-                model = request,
-                contentDescription = contentDescription,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .galleryGridThumbnailLayer(GalleryThumbnailStyle.Grid),
-                contentScale = ContentScale.Crop,
-                onState = { state ->
-                    if (state is AsyncImagePainter.State.Error && allowHardwareBitmap) {
-                        allowHardwareBitmap = false
-                    }
-                },
-            )
-            if (coverIsVideo) {
-                Icon(
-                    imageVector = Icons.Outlined.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
+        when {
+            shownBitmap != null -> {
+                Image(
+                    bitmap = shownBitmap.asImageBitmap(),
+                    contentDescription = contentDescription,
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .size(22.dp),
+                        .fillMaxSize()
+                        .galleryGridThumbnailLayer(GalleryThumbnailStyle.Grid),
+                    contentScale = ContentScale.Crop,
                 )
             }
-        } else {
+            paintModel != null -> {
+                val coverSizePx = 480
+                val request = remember(paintModel, coverCacheKey, allowHardwareBitmap, coverRevision) {
+                    ImageRequest.Builder(context)
+                        .data(paintModel)
+                        .size(coverSizePx)
+                        .applyGalleryThumbnailLoading(
+                            GalleryThumbnailStyle.Grid,
+                            allowHardwareBitmap && paintModel !is Bitmap,
+                        )
+                        .memoryCacheKey(
+                            galleryThumbnailMemoryCacheKey(
+                                "album-cover:$coverCacheKey",
+                                coverSizePx,
+                                GalleryThumbnailStyle.Grid,
+                                allowHardwareBitmap,
+                            ),
+                        )
+                        .diskCacheKey("album-cover:$coverCacheKey")
+                        .listener(
+                            onSuccess = { _, result ->
+                                val raw = (result.drawable as? BitmapDrawable)?.bitmap ?: return@listener
+                                if (raw.isRecycled) return@listener
+                                val software = raw.toSoftwareBitmap() ?: return@listener
+                                val stored = if (software === raw) {
+                                    software.copy(software.config ?: Bitmap.Config.ARGB_8888, false) ?: software
+                                } else {
+                                    software
+                                }
+                                val existing = AlbumCoverBitmapCache.get(album.bucketId)
+                                if (existing != null &&
+                                    existing.revision > coverRevision &&
+                                    existing.model.isPaintableAlbumCoverModel()
+                                ) {
+                                    if (stored !== raw) stored.recycle()
+                                    return@listener
+                                }
+                                AlbumCoverBitmapCache.put(
+                                    album.bucketId,
+                                    stored,
+                                    coverIsVideo,
+                                    coverCacheKey,
+                                    coverRevision,
+                                )
+                                displayModel = stored
+                            },
+                        )
+                        .build()
+                }
+                AsyncImage(
+                    model = request,
+                    contentDescription = contentDescription,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .galleryGridThumbnailLayer(GalleryThumbnailStyle.Grid),
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (state is AsyncImagePainter.State.Error && allowHardwareBitmap) {
+                            allowHardwareBitmap = false
+                        }
+                    },
+                )
+            }
+            else -> {
+                Icon(
+                    imageVector = if (isPlace) Icons.Outlined.Place else Icons.Outlined.PhotoAlbum,
+                    contentDescription = null,
+                    modifier = Modifier.padding(32.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (coverIsVideo && (shownBitmap != null || paintModel != null)) {
             Icon(
-                imageVector = if (isPlace) Icons.Outlined.Place else Icons.Outlined.PhotoAlbum,
+                imageVector = Icons.Outlined.PlayArrow,
                 contentDescription = null,
-                modifier = Modifier.padding(32.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .size(22.dp),
             )
         }
     }
 }
+
+private data class ResolvedAlbumCover(
+    val model: Any?,
+    val isVideo: Boolean,
+    val cacheKey: String,
+)
 
 private fun coverCoilModel(model: Any?): Any? {
     if (model.asDeviceVideoCover() != null) return null

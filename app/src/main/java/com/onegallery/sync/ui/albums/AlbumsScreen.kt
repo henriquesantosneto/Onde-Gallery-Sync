@@ -66,6 +66,7 @@ import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumGridCoverImage
+import com.onegallery.sync.ui.gallery.ProvideGalleryGridScrollState
 import com.onegallery.sync.ui.gallery.LiveAlbumCover
 import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
 import com.onegallery.sync.ui.gallery.AlbumListSort
@@ -295,6 +296,10 @@ fun AlbumsScreen(
                 val albumScrollMarkers = remember(railAlbums, state.albumListSort) {
                     buildAlbumGridFastScrollMarkers(railAlbums, state.albumListSort)
                 }
+                ProvideGalleryGridScrollState(
+                    gridState = albumGridState,
+                    zeroDecodeWhileScrolling = true,
+                ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -366,6 +371,7 @@ fun AlbumsScreen(
                         markers = albumScrollMarkers,
                         modifier = Modifier.align(Alignment.CenterEnd),
                     )
+                }
                 }
             }
         }
