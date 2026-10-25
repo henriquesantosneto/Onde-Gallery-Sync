@@ -80,19 +80,12 @@ class GalleryThumbnailService(
 
     fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean {
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
-        if (
-            mediaCacheRepository.galleryThumbnailResolved(
-                row.canonicalPath,
-                row.oneDriveItemId,
-                requireVideoAcceptable = isVideo,
-            ) != null
-        ) {
-            return true
-        }
-        if (!isVideo && hasLocalThumbnailSource(row) && localContentUri(row) != null) {
-            return true
-        }
-        return false
+        return mediaCacheRepository.galleryThumbnailResolved(
+            row.canonicalPath,
+            row.oneDriveItemId,
+            requireVideoAcceptable = isVideo,
+            allowCloudVideoPoster = isVideo,
+        ) != null
     }
 
     fun needsThumbnailPrefetch(row: SyncMetadataEntity): Boolean {

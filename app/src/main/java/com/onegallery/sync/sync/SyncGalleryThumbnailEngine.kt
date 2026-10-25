@@ -2,6 +2,7 @@ package com.onegallery.sync.sync
 
 import com.onegallery.sync.data.local.db.SyncMetadataDao
 import com.onegallery.sync.ui.gallery.AlbumCoverThumbnailPlanner
+import com.onegallery.sync.ui.gallery.GalleryMapper
 import kotlinx.coroutines.yield
 
 /**
@@ -41,18 +42,41 @@ internal class SyncGalleryThumbnailEngine(
         val remoteRows = missing.filter {
             !thumbnails.hasLocalThumbnailSource(it) && !it.oneDriveItemId.isNullOrBlank()
         }
-        if (localRows.isNotEmpty()) {
+        val localImages = localRows.filter { !GalleryMapper.isVideoFileName(it.displayName) }
+        val localVideos = localRows.filter { GalleryMapper.isVideoFileName(it.displayName) }
+        if (localImages.isNotEmpty()) {
             host.setSyncProgress(
                 SyncProgressPhase.PREFETCH_THUMBNAILS,
-                "Miniaturas do aparelho…",
-                "${localRows.size} no dispositivo antes da nuvem.",
+                "Miniaturas das fotos locais…",
+                "${localImages.size} foto(s) no aparelho antes dos vídeos e da nuvem.",
                 alsoUpdateLastMessage = false,
             )
             host.warmLocalItemsForThumbnailPass()
             host.withThumbnailPrefetchUi {
                 host.runMissingThumbnailPrefetchUnified(
-                    rows = localRows.take(LOCAL_PASS_CAP),
-                    progressHeadline = "Miniaturas do aparelho…",
+                    rows = localImages.take(LOCAL_PASS_CAP),
+                    progressHeadline = "Miniaturas das fotos locais…",
+                    publishUi = true,
+                    localSourcesOnly = true,
+                )
+            }
+            host.clearActiveSyncItems()
+            host.trimThumbnailRunQueueUi()
+            host.notifyGalleryDisplayRefresh()
+        }
+        host.ensureNotCancelled()
+        if (localVideos.isNotEmpty()) {
+            host.setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas dos vídeos locais…",
+                "${localVideos.size} vídeo(s) no aparelho · fotos locais já foram.",
+                alsoUpdateLastMessage = false,
+            )
+            host.warmLocalItemsForThumbnailPass()
+            host.withThumbnailPrefetchUi {
+                host.runMissingThumbnailPrefetchUnified(
+                    rows = localVideos.take(LOCAL_PASS_CAP),
+                    progressHeadline = "Miniaturas dos vídeos locais…",
                     publishUi = true,
                     localSourcesOnly = true,
                 )

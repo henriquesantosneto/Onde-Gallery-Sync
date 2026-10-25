@@ -38,9 +38,18 @@ fun GalleryGridThumb(
         GalleryThumbStore.displayFile(item, mediaCache)
     } ?: return
 
-    val request = remember(thumbFile, sizePx, item.canonicalPath) {
+    val paintModel = remember(thumbFile.absolutePath, thumbFile.length()) {
+        val ext = thumbFile.extension.lowercase()
+        if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
+            thumbFile
+        } else {
+            thumbFile.readBytes()
+        }
+    }
+
+    val request = remember(paintModel, sizePx, item.canonicalPath) {
         ImageRequest.Builder(context)
-            .data(thumbFile)
+            .data(paintModel)
             .size(sizePx)
             .allowHardware(false)
             .memoryCacheKey("${item.canonicalPath}:grid:disk:$sizePx")

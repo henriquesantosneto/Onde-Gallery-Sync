@@ -124,11 +124,11 @@ private fun thumbnailPrefetchPriorityBucket(entity: SyncMetadataEntity): Int {
     val hasLocal = entity.localMediaId != null ||
         !entity.localContentUri.isNullOrBlank() ||
         !entity.cachedFilePath.isNullOrBlank()
-    if (hasLocal) {
-        val ext = entity.displayName.substringAfterLast('.', "").lowercase()
-        val isVideo = ext in LOCAL_VIDEO_EXTENSIONS
-        return if (isVideo) 0 else 1
-    }
+        if (hasLocal) {
+            val ext = entity.displayName.substringAfterLast('.', "").lowercase()
+            val isVideo = ext in LOCAL_VIDEO_EXTENSIONS
+            return if (isVideo) 1 else 0
+        }
     if (!entity.oneDriveItemId.isNullOrBlank()) return 2
     return 3
 }
