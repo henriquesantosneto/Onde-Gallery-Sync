@@ -27,8 +27,15 @@ data class GalleryTimelineHeader(
 )
 
 sealed class GalleryGridEntry(open val key: String) {
-    data class Header(val header: GalleryTimelineHeader) : GalleryGridEntry(header.id)
-    data class Photo(val item: GalleryDisplayItem) : GalleryGridEntry(item.canonicalPath)
+    data class Header(
+        val header: GalleryTimelineHeader,
+        override val key: String = header.id,
+    ) : GalleryGridEntry(key)
+
+    data class Photo(
+        val item: GalleryDisplayItem,
+        override val key: String = item.canonicalPath,
+    ) : GalleryGridEntry(key)
 }
 
 private val ptBr = Locale("pt", "BR")
@@ -121,6 +128,35 @@ fun sortedTimelinePhotos(
     }
 }
 
+/** Chave da LazyGrid. Um dia ou um arquivo repetido não pode derrubar a rolagem. */
+private fun claimLazyKey(preferred: String, used: MutableSet<String>): String {
+    if (used.add(preferred)) return preferred
+    var suffix = 2
+    while (true) {
+        val candidate = "$preferred#$suffix"
+        if (used.add(candidate)) return candidate
+        suffix++
+    }
+}
+
+private fun isMonotonicForDateSort(
+    items: List<GalleryDisplayItem>,
+    sortOrder: GallerySortOrder,
+): Boolean {
+    if (items.size < 2) return true
+    val newestFirst = sortOrder == GallerySortOrder.DATE_NEWEST
+    for (index in 1 until items.size) {
+        val previous = items[index - 1].sortTimestamp
+        val current = items[index].sortTimestamp
+        if (newestFirst) {
+            if (current > previous) return false
+        } else if (current < previous) {
+            return false
+        }
+    }
+    return true
+}
+
 fun buildGalleryGridEntries(
     items: List<GalleryDisplayItem>,
     sortOrder: GallerySortOrder,
@@ -128,14 +164,14 @@ fun buildGalleryGridEntries(
     /** Verdadeiro quando [items] já veio de [GalleryCatalogSession.sortedLibraryItems] na ordem de data. */
     itemsAlreadySortedForTimeline: Boolean = false,
 ): List<GalleryGridEntry> {
+    val usedKeys = HashSet<String>(items.size * 2)
     if (!isDateTimelineSort(sortOrder)) {
-        return items.map { GalleryGridEntry.Photo(it) }
+        return items.map { item ->
+            GalleryGridEntry.Photo(item, claimLazyKey(item.canonicalPath, usedKeys))
+        }
     }
-    val sorted = if (itemsAlreadySortedForTimeline) {
-        items
-    } else {
-        sortedTimelinePhotos(items, sortOrder)
-    }
+    val trustOrder = itemsAlreadySortedForTimeline && isMonotonicForDateSort(items, sortOrder)
+    val sorted = if (trustOrder) items else sortedTimelinePhotos(items, sortOrder)
     val today = LocalDate.now()
     val entries = mutableListOf<GalleryGridEntry>()
     var lastYear: Int? = null
@@ -147,13 +183,15 @@ fun buildGalleryGridEntries(
 
         if (grouping == TimelineGrouping.RELAXED && year != lastYear) {
             if (year != today.year) {
+                val yearId = "year-$year"
                 entries.add(
                     GalleryGridEntry.Header(
                         GalleryTimelineHeader(
-                            id = "year-$year",
+                            id = yearId,
                             title = year.toString(),
                             kind = TimelineHeaderKind.YEAR,
                         ),
+                        key = claimLazyKey(yearId, usedKeys),
                     ),
                 )
             }
@@ -177,11 +215,12 @@ fun buildGalleryGridEntries(
                         title = sectionTitle,
                         kind = headerKind,
                     ),
+                    key = claimLazyKey(sectionKey, usedKeys),
                 ),
             )
             lastSectionKey = sectionKey
         }
-        entries.add(GalleryGridEntry.Photo(item))
+        entries.add(GalleryGridEntry.Photo(item, claimLazyKey(item.canonicalPath, usedKeys)))
     }
     return entries
 }

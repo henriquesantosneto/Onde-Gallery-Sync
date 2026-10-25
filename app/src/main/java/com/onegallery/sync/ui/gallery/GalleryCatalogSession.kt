@@ -76,8 +76,8 @@ class GalleryCatalogSession {
             preSortVisibleRef = bundle.visibleItems
             val visible = bundle.visibleItems
             if (visible.size < 400) {
-                preSortedDateNewest = visible
-                preSortedDateOldest = visible
+                preSortedDateNewest = visible.sortedByDescending { it.sortTimestamp }
+                preSortedDateOldest = visible.sortedBy { it.sortTimestamp }
             } else {
                 when (activeSort) {
                     GallerySortOrder.DATE_NEWEST -> {
