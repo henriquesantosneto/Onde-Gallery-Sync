@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import android.net.Uri
 import com.onegallery.sync.TestApplication
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
@@ -79,6 +80,24 @@ class AlbumCoverChoiceTest {
         assertEquals("new", held?.canonicalPath)
         assertNull(restored.remembered("album:Other"))
         dir.deleteRecursively()
+    }
+
+    @Test
+    fun cheapSource_skipsShortPlaceholderKeepsRealThumbAndLocalPhoto() {
+        val tiny = File.createTempFile("stub", ".jpg")
+        tiny.writeBytes(ByteArray(400))
+        val real = File.createTempFile("real", ".jpg")
+        real.writeBytes(ByteArray(9_000))
+        val placeholderItem = photo("cloud", 5L).copy(cachedPlaceholderThumb = tiny)
+        val realItem = photo("cloud2", 4L).copy(cachedPlaceholderThumb = real)
+        val local = photo("local", 1L).copy(
+            localUri = Uri.parse("content://media/external/images/media/3"),
+        )
+        assertEquals(false, placeholderItem.hasCheapAlbumCoverSource())
+        assertEquals(true, realItem.hasCheapAlbumCoverSource())
+        assertEquals(true, local.hasCheapAlbumCoverSource())
+        tiny.delete()
+        real.delete()
     }
 
     private fun photo(path: String, timestamp: Long) = GalleryDisplayItem(

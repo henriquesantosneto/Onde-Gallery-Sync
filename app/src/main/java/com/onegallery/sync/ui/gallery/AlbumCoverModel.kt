@@ -78,6 +78,28 @@ private fun albumCoverComparator(mediaCacheRepository: MediaCacheRepository) =
         },
     )
 
+/** Miniatura de capa: JPEG real. O cinza 96px do sync não entra. */
+internal fun albumCoverThumbFile(
+    item: GalleryDisplayItem,
+    mediaCacheRepository: MediaCacheRepository,
+): File? {
+    fun accept(file: File?): File? = file?.takeIf { albumCoverThumbFileAccept(it, mediaCacheRepository) }
+    accept(mediaCacheRepository.thumbFile(item.canonicalPath))?.let { return it }
+    val remoteId = item.oneDriveItemId
+    if (!remoteId.isNullOrBlank()) {
+        accept(mediaCacheRepository.thumbFileByRemoteItemId(remoteId))?.let { return it }
+    }
+    return accept(item.cachedPlaceholderThumb)
+}
+
+private fun albumCoverThumbFileAccept(
+    file: File,
+    mediaCacheRepository: MediaCacheRepository,
+): Boolean {
+    if (!file.isSafeGridImageFile()) return false
+    return mediaCacheRepository.isDisplayableGalleryThumbFile(file)
+}
+
 fun hasCachedThumbnailFile(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
@@ -129,10 +151,14 @@ fun resolveGalleryCoverModel(
     }
     if (item.kind == MediaKind.VIDEO) {
         if (mediaCacheRepository != null) {
-            item.resolvedGridVideoThumbFile(mediaCacheRepository)?.let { return it }
+            item.resolvedGridVideoThumbFile(mediaCacheRepository)
+                ?.takeIf { albumCoverThumbFileAccept(it, mediaCacheRepository) }
+                ?.let { return it }
         }
-        cachedThumb?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
-            ?.let { return it }
+        cachedThumb?.takeIf { thumb ->
+            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(thumb) &&
+                (mediaCacheRepository == null || albumCoverThumbFileAccept(thumb, mediaCacheRepository))
+        }?.let { return it }
         if (item.hasLocalVideoCoverOnDevice() || item.videoCountsAsLocalBrowseThumb()) {
             val uri = item.localUri ?: return null
             return DeviceVideoCover(uri, item.localMediaId)
@@ -140,7 +166,7 @@ fun resolveGalleryCoverModel(
         return null
     }
     val paintableThumb = when {
-        mediaCacheRepository != null -> gridPaintFile(item, mediaCacheRepository)
+        mediaCacheRepository != null -> albumCoverThumbFile(item, mediaCacheRepository)
         else -> cachedThumb?.takeIf { it.isSafeGridImageFile() }
     }
     if (paintableThumb != null) return paintableThumb

@@ -58,8 +58,9 @@ fun AlbumGridCoverImage(
         (context.applicationContext as OneGalleryApplication).mediaCacheRepository
     }
     val cachedCover = AlbumCoverBitmapCache.get(album.bucketId)
+    val safeFallback = fallbackCover?.takeUnless { it.isBlankSyncedCover(mediaCacheRepository) }
     var displayModel by remember(album.bucketId) {
-        mutableStateOf(albumCoverDisplaySeed(cachedCover?.model, fallbackCover))
+        mutableStateOf(albumCoverDisplaySeed(cachedCover?.model, safeFallback))
     }
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(cachedCover?.isVideo == true) }
     var coverCacheKey by remember(album.bucketId) {
@@ -73,8 +74,12 @@ fun AlbumGridCoverImage(
 
     LaunchedEffect(album.bucketId, coverRevision) {
         val hit = AlbumCoverBitmapCache.get(album.bucketId)
-        if (hit != null && hit.revision == coverRevision) {
-            if (hit.model.isPaintableAlbumCoverModel() && displayModel != hit.model) {
+        if (hit != null &&
+            !hit.empty &&
+            hit.revision == coverRevision &&
+            hit.model.isPaintableAlbumCoverModel()
+        ) {
+            if (displayModel != hit.model) {
                 displayModel = hit.model
                 coverIsVideo = hit.isVideo
                 coverCacheKey = hit.cacheKey
@@ -131,7 +136,9 @@ fun AlbumGridCoverImage(
             }
             return@LaunchedEffect
         }
-        if (displayModel.isPaintableAlbumCoverModel()) {
+        if (displayModel.isPaintableAlbumCoverModel() &&
+            !displayModel.isBlankSyncedCover(mediaCacheRepository)
+        ) {
             AlbumCoverBitmapCache.put(
                 album.bucketId,
                 displayModel!!,
@@ -141,7 +148,7 @@ fun AlbumGridCoverImage(
             )
             return@LaunchedEffect
         }
-        val fallback = nextAlbumCoverModel(displayModel, resolved = null, fallback = fallbackCover)
+        val fallback = nextAlbumCoverModel(displayModel, resolved = null, fallback = safeFallback)
         if (fallback == null) {
             AlbumCoverBitmapCache.markUnresolved(album.bucketId, coverRevision)
             return@LaunchedEffect

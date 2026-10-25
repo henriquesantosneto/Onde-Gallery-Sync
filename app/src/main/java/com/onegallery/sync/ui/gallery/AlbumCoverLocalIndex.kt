@@ -38,11 +38,12 @@ class AlbumCoverLocalIndex(
     fun stickyCoverItem(
         cacheKey: String,
         items: List<GalleryDisplayItem>,
+        mediaCacheRepository: MediaCacheRepository,
         nowEpochMs: Long = System.currentTimeMillis(),
     ): GalleryDisplayItem? {
         if (items.isEmpty()) return null
         return choices.choose(cacheKey, items, nowEpochMs) { item ->
-            item.hasCheapAlbumCoverSource()
+            item.hasCheapAlbumCoverSource(mediaCacheRepository)
         }
     }
 
@@ -50,9 +51,10 @@ class AlbumCoverLocalIndex(
     fun stickyCoverSignature(
         cacheKey: String,
         items: List<GalleryDisplayItem>,
+        mediaCacheRepository: MediaCacheRepository,
         nowEpochMs: Long = System.currentTimeMillis(),
     ): Long {
-        val cover = stickyCoverItem(cacheKey, items, nowEpochMs) ?: return 0L
+        val cover = stickyCoverItem(cacheKey, items, mediaCacheRepository, nowEpochMs) ?: return 0L
         return signatureOf(cover)
     }
 
@@ -69,13 +71,18 @@ class AlbumCoverLocalIndex(
         mediaCacheRepository: MediaCacheRepository,
     ): Any? {
         if (items.isEmpty()) return null
-        val item = stickyCoverItem(cacheKey, items) ?: return null
+        val item = stickyCoverItem(cacheKey, items, mediaCacheRepository) ?: return null
         val signature = signatureOf(item)
         val cached = byKey[cacheKey]
-        if (cached != null && cached.selectionSignature == signature) {
+        if (cached != null &&
+            cached.selectionSignature == signature &&
+            cached.coverModel.isPaintableAlbumCoverModel()
+        ) {
             return cached.coverModel
         }
-        val model = resolveGalleryCoverModel(item, mediaCacheRepository) ?: return null
+        val model = resolveGalleryCoverModel(item, mediaCacheRepository)?.takeIf {
+            it.isPaintableAlbumCoverModel()
+        } ?: return null
         byKey[cacheKey] = CachedCover(signature, model)
         return model
     }

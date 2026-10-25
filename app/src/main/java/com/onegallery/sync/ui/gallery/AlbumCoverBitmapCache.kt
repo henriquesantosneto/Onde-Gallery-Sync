@@ -101,6 +101,15 @@ internal fun Any?.isPaintableAlbumCoverModel(): Boolean {
     return true
 }
 
+/** Cinza 96px ou stub do sync: não é foto de capa. */
+internal fun Any?.isBlankSyncedCover(
+    mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
+): Boolean {
+    val file = this as? java.io.File ?: return false
+    return mediaCacheRepository.isSyncStubPlaceholderThumbnail(file) ||
+        mediaCacheRepository.isSyncFailurePlaceholderThumbnail(file)
+}
+
 /** Primeiro quadro da célula: capa já vista, senão arquivo estável. Nunca URI. */
 internal fun albumCoverDisplaySeed(cached: Any?, fallback: Any?): Any? =
     cached?.takeIf { it.isPaintableAlbumCoverModel() }

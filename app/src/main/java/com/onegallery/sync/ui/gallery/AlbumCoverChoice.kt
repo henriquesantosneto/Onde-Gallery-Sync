@@ -51,12 +51,25 @@ fun chooseStickyAlbumCover(
     return current
 }
 
-/** Dá para pintar sem abrir o arquivo: foto/vídeo no aparelho ou miniatura já conhecida. */
-fun GalleryDisplayItem.hasCheapAlbumCoverSource(): Boolean {
+/**
+ * Dá para pintar sem varrer o álbum inteiro: foto/vídeo no aparelho,
+ * ou miniatura já gravada que não é o cinza de falha do sync.
+ */
+fun GalleryDisplayItem.hasCheapAlbumCoverSource(
+    mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository? = null,
+): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (isLocalPhotoOnDevice() || hasLocalVideoCoverOnDevice()) return true
-    return cachedPlaceholderThumb != null
+    val thumb = cachedPlaceholderThumb ?: return false
+    if (!thumb.isFile || thumb.length() < 128L) return false
+    if (mediaCacheRepository != null) {
+        return mediaCacheRepository.isDisplayableGalleryThumbFile(thumb)
+    }
+    return thumb.length() > BLANK_ALBUM_COVER_MAX_BYTES
 }
+
+/** JPEG cinza 96px do sync fica abaixo disto. Miniatura real de capa passa. */
+const val BLANK_ALBUM_COVER_MAX_BYTES = 6_000L
 
 /** Memória da capa por álbum, também em disco, para não recalcular a cada miniatura. */
 class AlbumCoverChoiceStore {

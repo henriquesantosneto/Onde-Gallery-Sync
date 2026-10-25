@@ -777,10 +777,6 @@ class GalleryViewModel(
                 return@launch
             }
             val deferCovers = catalogItems.size > 3_000
-            val app = appContext.applicationContext as OneGalleryApplication
-            val skipHeavyCoverPass = deferCovers &&
-                app.appForegroundState.isInForeground() &&
-                !syncCoordinator.state.value.isRunning
             fun publish(
                 albums: List<MediaAlbum>,
                 placeAlbums: List<MediaAlbum>,
@@ -829,7 +825,6 @@ class GalleryViewModel(
             if (deferCovers) {
                 publish(skeletonAlbums, skeletonPlaces)
             }
-            if (skipHeavyCoverPass) return@launch
             val resolveCovers = !deferCovers
             publish(
                 buildAlbums(
@@ -955,10 +950,6 @@ class GalleryViewModel(
         albumListsBuildJob?.cancel()
         albumListsBuildJob = viewModelScope.launch(Dispatchers.Default) {
             val deferCovers = metadata.size > 3_000
-            val app = appContext.applicationContext as OneGalleryApplication
-            val skipHeavyCoverPass = deferCovers &&
-                app.appForegroundState.isInForeground() &&
-                !syncCoordinator.state.value.isRunning
             val catalogItems = latestCatalogItems
             fun publishLists(
                 albums: List<MediaAlbum>,
@@ -1018,7 +1009,6 @@ class GalleryViewModel(
             if (deferCovers) {
                 publishLists(skeletonAlbums, skeletonPlaces, coverRevisionStamp)
             }
-            if (skipHeavyCoverPass) return@launch
             val withCovers = GalleryAlbumIndexBuilder.buildFolderAlbums(
                 metadata = metadata,
                 userAlbums = userAlbums,
@@ -1375,7 +1365,11 @@ class GalleryViewModel(
         if (items.isEmpty()) {
             return LiveAlbumCover(displayModel = album.coverModel, sourceItem = null)
         }
-        val item = albumCoverLocalIndex.stickyCoverItem(album.bucketId, items)
+        val item = albumCoverLocalIndex.stickyCoverItem(
+            album.bucketId,
+            items,
+            mediaCacheRepository,
+        )
         val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: album.coverModel
         albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
         return LiveAlbumCover(displayModel = model, sourceItem = item)
@@ -1393,7 +1387,11 @@ class GalleryViewModel(
         )
         folderPool.groupBy { it.albumName }.forEach { (name, browsable) ->
             val key = "album:$name"
-            val signature = albumCoverLocalIndex.stickyCoverSignature(key, browsable)
+            val signature = albumCoverLocalIndex.stickyCoverSignature(
+                key,
+                browsable,
+                mediaCacheRepository,
+            )
             val previous = folderAlbumCoverSignature.put(key, signature)
             if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
@@ -1408,7 +1406,11 @@ class GalleryViewModel(
             ),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
-            val signature = albumCoverLocalIndex.stickyCoverSignature(key, group)
+            val signature = albumCoverLocalIndex.stickyCoverSignature(
+                key,
+                group,
+                mediaCacheRepository,
+            )
             val previous = placeAlbumCoverSignature.put(key, signature)
             if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
