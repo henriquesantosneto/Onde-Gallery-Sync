@@ -38,12 +38,11 @@ class AlbumCoverLocalIndex(
     fun stickyCoverItem(
         cacheKey: String,
         items: List<GalleryDisplayItem>,
-        mediaCacheRepository: MediaCacheRepository,
         nowEpochMs: Long = System.currentTimeMillis(),
     ): GalleryDisplayItem? {
         if (items.isEmpty()) return null
         return choices.choose(cacheKey, items, nowEpochMs) { item ->
-            resolveGalleryCoverModel(item, mediaCacheRepository) != null
+            item.hasCheapAlbumCoverSource()
         }
     }
 
@@ -51,22 +50,16 @@ class AlbumCoverLocalIndex(
     fun stickyCoverSignature(
         cacheKey: String,
         items: List<GalleryDisplayItem>,
-        mediaCacheRepository: MediaCacheRepository,
         nowEpochMs: Long = System.currentTimeMillis(),
     ): Long {
-        val cover = stickyCoverItem(cacheKey, items, mediaCacheRepository, nowEpochMs) ?: return 0L
-        return signatureOf(cover, mediaCacheRepository)
+        val cover = stickyCoverItem(cacheKey, items, nowEpochMs) ?: return 0L
+        return signatureOf(cover)
     }
 
-    private fun signatureOf(
-        cover: GalleryDisplayItem,
-        mediaCacheRepository: MediaCacheRepository,
-    ): Long {
+    private fun signatureOf(cover: GalleryDisplayItem): Long {
         var hash = cover.canonicalPath.hashCode().toLong()
         hash = hash * 31L + cover.sortTimestamp
-        val thumb = mediaCacheRepository.thumbnailIfCached(cover.canonicalPath, cover.oneDriveItemId)
-            ?: cover.cachedPlaceholderThumb?.takeIf { it.isFile }
-        hash = hash * 31L + if (thumb != null) 1L else 0L
+        hash = hash * 31L + if (cover.cachedPlaceholderThumb != null || cover.localUri != null) 1L else 0L
         return hash
     }
 
@@ -76,8 +69,8 @@ class AlbumCoverLocalIndex(
         mediaCacheRepository: MediaCacheRepository,
     ): Any? {
         if (items.isEmpty()) return null
-        val item = stickyCoverItem(cacheKey, items, mediaCacheRepository) ?: return null
-        val signature = signatureOf(item, mediaCacheRepository)
+        val item = stickyCoverItem(cacheKey, items) ?: return null
+        val signature = signatureOf(item)
         val cached = byKey[cacheKey]
         if (cached != null && cached.selectionSignature == signature) {
             return cached.coverModel

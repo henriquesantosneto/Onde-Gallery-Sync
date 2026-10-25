@@ -24,6 +24,9 @@ interface SyncMetadataDao {
     @Query("SELECT COUNT(*) FROM sync_metadata")
     suspend fun countAll(): Int
 
+    @Query("SELECT COUNT(*) FROM sync_metadata")
+    fun observeMetadataCount(): Flow<Int>
+
     @Query("SELECT * FROM sync_metadata WHERE localMediaId IS NOT NULL")
     suspend fun getRowsWithLocalCopy(): List<SyncMetadataEntity>
 
@@ -96,8 +99,8 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
     fun observePendingDeletes(): Flow<List<SyncMetadataEntity>>
 
-    @RawQuery(observedEntities = [SyncMetadataEntity::class])
-    fun observeIndexStats(query: SupportSQLiteQuery): Flow<SyncIndexStatsRow>
+    @RawQuery
+    suspend fun queryIndexStats(query: SupportSQLiteQuery): SyncIndexStatsRow
 
     @Query(
         """

@@ -62,23 +62,30 @@ fun AlbumGridCoverImage(
         val live = withContext(Dispatchers.IO) { resolveLiveCover(album) }
         val isVideo = live.sourceItem?.kind == MediaKind.VIDEO
         val resolved = withContext(Dispatchers.IO) {
-            live.sourceItem?.let { item ->
+            val raw = live.sourceItem?.let { item ->
                 resolveGalleryCoverModel(item, mediaCacheRepository)
             } ?: live.displayModel
+            when (raw) {
+                is android.net.Uri -> GalleryThumbnailModels.loadDeviceImagePoster(
+                    context,
+                    raw,
+                    live.sourceItem?.localMediaId,
+                    480,
+                )
+                else -> raw
+            }
         }
         val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId
-        val sameCover = resolved != null &&
-            cacheKey == coverCacheKey &&
-            displayModel != null &&
-            displayModel?.javaClass == resolved.javaClass
-        if (sameCover) return@LaunchedEffect
+        if (resolved != null && cacheKey == coverCacheKey && displayModel != null) {
+            return@LaunchedEffect
+        }
         when {
             resolved != null -> {
                 displayModel = resolved
                 coverIsVideo = isVideo
                 coverCacheKey = cacheKey
             }
-            fallbackCover != null -> {
+            fallbackCover != null && fallbackCover !is android.net.Uri -> {
                 displayModel = fallbackCover
                 coverIsVideo = fallbackCover.asDeviceVideoCover() != null
                 coverCacheKey = album.bucketId

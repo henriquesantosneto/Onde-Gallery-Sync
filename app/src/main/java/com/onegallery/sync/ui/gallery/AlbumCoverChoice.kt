@@ -15,7 +15,7 @@ data class AlbumCoverChoice(
 )
 
 /** Com capa salva, uma foto mais recente só entra depois deste intervalo. */
-const val ALBUM_COVER_REPLACE_INTERVAL_MS = 3 * 60 * 1000L
+const val ALBUM_COVER_REPLACE_INTERVAL_MS = 60_000L
 
 /**
  * Mantém a capa atual se ela ainda existe.
@@ -49,6 +49,13 @@ fun chooseStickyAlbumCover(
         return newest
     }
     return current
+}
+
+/** Dá para pintar sem abrir o arquivo: foto/vídeo no aparelho ou miniatura já conhecida. */
+fun GalleryDisplayItem.hasCheapAlbumCoverSource(): Boolean {
+    if (GalleryMapper.isAudioFileName(displayName)) return false
+    if (isLocalPhotoOnDevice() || hasLocalVideoCoverOnDevice()) return true
+    return cachedPlaceholderThumb != null
 }
 
 /** Memória da capa por álbum, também em disco, para não recalcular a cada miniatura. */

@@ -1374,11 +1374,7 @@ class GalleryViewModel(
         if (items.isEmpty()) {
             return LiveAlbumCover(displayModel = album.coverModel, sourceItem = null)
         }
-        val item = albumCoverLocalIndex.stickyCoverItem(
-            album.bucketId,
-            items,
-            mediaCacheRepository,
-        )
+        val item = albumCoverLocalIndex.stickyCoverItem(album.bucketId, items)
         val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: album.coverModel
         albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
         return LiveAlbumCover(displayModel = model, sourceItem = item)
@@ -1396,11 +1392,7 @@ class GalleryViewModel(
         )
         folderPool.groupBy { it.albumName }.forEach { (name, browsable) ->
             val key = "album:$name"
-            val signature = albumCoverLocalIndex.stickyCoverSignature(
-                key,
-                browsable,
-                mediaCacheRepository,
-            )
+            val signature = albumCoverLocalIndex.stickyCoverSignature(key, browsable)
             val previous = folderAlbumCoverSignature.put(key, signature)
             if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
@@ -1415,11 +1407,7 @@ class GalleryViewModel(
             ),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
-            val signature = albumCoverLocalIndex.stickyCoverSignature(
-                key,
-                group,
-                mediaCacheRepository,
-            )
+            val signature = albumCoverLocalIndex.stickyCoverSignature(key, group)
             val previous = placeAlbumCoverSignature.put(key, signature)
             if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)

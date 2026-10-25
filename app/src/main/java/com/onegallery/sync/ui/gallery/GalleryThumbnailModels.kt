@@ -23,6 +23,25 @@ object GalleryThumbnailModels {
      * Poster já existente no MediaStore. Não decodifica o vídeo no Coil
      * e não corre durante a rolagem (quem chama espera a grade parar).
      */
+    suspend fun loadDeviceImagePoster(
+        context: Context,
+        uri: Uri,
+        mediaId: Long?,
+        sizePx: Int,
+    ): Bitmap? = devicePosterSlots.withPermit {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                loadSystemThumbnail(
+                    context,
+                    uri,
+                    mediaId,
+                    MediaKind.IMAGE,
+                    sizePx.coerceIn(64, 512),
+                )?.toSoftwareBitmap()
+            }.getOrNull()
+        }
+    }
+
     suspend fun loadDeviceVideoPoster(
         context: Context,
         uri: Uri,

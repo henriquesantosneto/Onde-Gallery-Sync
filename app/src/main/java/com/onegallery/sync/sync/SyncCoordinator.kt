@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.update
 import java.io.File
@@ -278,11 +279,19 @@ class SyncCoordinator(
             scheduleGalleryDisplayRefreshCoalesced()
         }
         backgroundScope?.launch(Dispatchers.IO) {
-            syncMetadataDao.observeIndexStats(indexStatsSqlQuery).collect { row ->
-                _syncIndexStats.value = row
-                syncPreferences.saveCachedIndexStats(row)
-            }
+            refreshIndexUsageStats()
+            syncMetadataDao.observeMetadataCount()
+                .sample(INDEX_STATS_SAMPLE_MS)
+                .collect { refreshIndexUsageStats() }
         }
+    }
+
+    private suspend fun refreshIndexUsageStats() {
+        val row = runCatching {
+            syncMetadataDao.queryIndexStats(indexStatsSqlQuery)
+        }.getOrNull() ?: return
+        _syncIndexStats.value = row
+        syncPreferences.saveCachedIndexStats(row)
     }
 
     fun scheduleThumbnailStatsRefresh(debounceMs: Long = 0L) {
@@ -4855,6 +4864,7 @@ class SyncCoordinator(
 
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
+        const val INDEX_STATS_SAMPLE_MS = 20_000L
         /** Espera Coil gravar JPEG antes de reindexar miniaturas na grade. */
         const val GALLERY_DISPLAY_REFRESH_AFTER_SCROLL_MS = 450L
         const val THUMB_BACKGROUND_MAX_TOTAL_PER_PASS = 10_000

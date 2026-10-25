@@ -269,32 +269,34 @@ object GalleryMapper {
         val notVideoImage = "$notVideo AND NOT ($image)"
         val notVideoImageAudio = "$notVideoImage AND NOT ($audio)"
         val size = SQL_EFFECTIVE_SIZE_BYTES.trim()
+        fun countWhen(condition: String) =
+            "CAST(COALESCE(SUM(CASE WHEN $condition THEN 1 ELSE 0 END), 0) AS INTEGER)"
+        fun bytesWhen(condition: String) =
+            "COALESCE(SUM(CASE WHEN $condition THEN $size ELSE 0 END), 0)"
         return """
             SELECT
-                (SELECT COUNT(*) FROM sync_metadata) AS total,
-                (SELECT COUNT(*) FROM sync_metadata WHERE localMediaId IS NOT NULL) AS withLocal,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'SYNCED') AS synced,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_UPLOAD') AS pendingUpload,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_DOWNLOAD') AS pendingDownload,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CLOUD_ONLY') AS cloudOnly,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'LOCAL_ONLY') AS localOnly,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR') AS errors,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'CONFLICT'
-                    OR pendingDeleteTarget != 'NONE') AS conflicts,
-                (SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'ERROR'
-                    OR cloudState = 'CONFLICT'
-                    OR (lastError IS NOT NULL AND TRIM(lastError) != '')) AS attention,
-                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideo AND ($image)) AS images,
-                (SELECT COUNT(*) FROM sync_metadata WHERE ($video)) AS videos,
-                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImage AND ($audio)) AS audio,
-                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND ($document)) AS documents,
-                (SELECT COUNT(*) FROM sync_metadata WHERE $notVideoImageAudio AND NOT ($document)) AS otherTypes,
-                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata) AS totalBytes,
-                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideo AND ($image)) AS imageBytes,
-                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE ($video)) AS videoBytes,
-                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideoImage AND ($audio)) AS audioBytes,
-                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideoImageAudio AND ($document)) AS documentBytes,
-                (SELECT COALESCE(SUM($size), 0) FROM sync_metadata WHERE $notVideoImageAudio AND NOT ($document)) AS otherTypeBytes
+                COUNT(*) AS total,
+                ${countWhen("localMediaId IS NOT NULL")} AS withLocal,
+                ${countWhen("cloudState = 'SYNCED'")} AS synced,
+                ${countWhen("cloudState = 'PENDING_UPLOAD'")} AS pendingUpload,
+                ${countWhen("cloudState = 'PENDING_DOWNLOAD'")} AS pendingDownload,
+                ${countWhen("cloudState = 'CLOUD_ONLY'")} AS cloudOnly,
+                ${countWhen("cloudState = 'LOCAL_ONLY'")} AS localOnly,
+                ${countWhen("cloudState = 'ERROR'")} AS errors,
+                ${countWhen("cloudState = 'CONFLICT' OR pendingDeleteTarget != 'NONE'")} AS conflicts,
+                ${countWhen("cloudState = 'ERROR' OR cloudState = 'CONFLICT' OR (lastError IS NOT NULL AND TRIM(lastError) != '')")} AS attention,
+                ${countWhen("$notVideo AND ($image)")} AS images,
+                ${countWhen("($video)")} AS videos,
+                ${countWhen("$notVideoImage AND ($audio)")} AS audio,
+                ${countWhen("$notVideoImageAudio AND ($document)")} AS documents,
+                ${countWhen("$notVideoImageAudio AND NOT ($document)")} AS otherTypes,
+                ${bytesWhen("1")} AS totalBytes,
+                ${bytesWhen("$notVideo AND ($image)")} AS imageBytes,
+                ${bytesWhen("($video)")} AS videoBytes,
+                ${bytesWhen("$notVideoImage AND ($audio)")} AS audioBytes,
+                ${bytesWhen("$notVideoImageAudio AND ($document)")} AS documentBytes,
+                ${bytesWhen("$notVideoImageAudio AND NOT ($document)")} AS otherTypeBytes
+            FROM sync_metadata
         """.trimIndent()
     }
 }
