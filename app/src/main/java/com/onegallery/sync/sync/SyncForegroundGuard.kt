@@ -17,8 +17,14 @@ class SyncForegroundGuard(private val context: Context) {
     }
 
     fun leave() {
-        if (depth.decrementAndGet() == 0) {
-            SyncForegroundService.stop(context)
+        while (true) {
+            val current = depth.get()
+            if (current <= 0) return
+            if (!depth.compareAndSet(current, current - 1)) continue
+            if (current == 1) {
+                SyncForegroundService.stop(context) { depth.get() == 0 }
+            }
+            return
         }
     }
 

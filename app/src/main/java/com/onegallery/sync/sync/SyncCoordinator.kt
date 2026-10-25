@@ -3827,15 +3827,17 @@ class SyncCoordinator(
         val scope = backgroundScope ?: return
         val thumbMessage = appContext.getString(R.string.sync_notification_thumbnails_message)
         val handoffForeground = foregroundGuard.holdsForeground()
+        var prefetchHoldsForeground = handoffForeground
         if (handoffForeground) {
             foregroundGuard.enter(thumbMessage)
         }
         backgroundThumbPrefetchJob = scope.launch {
-            refreshExtraCancellableWork()
-            if (!handoffForeground) {
-                foregroundGuard.enter(thumbMessage)
-            }
             try {
+            refreshExtraCancellableWork()
+            if (!prefetchHoldsForeground) {
+                foregroundGuard.enter(thumbMessage)
+                prefetchHoldsForeground = true
+            }
             withThumbnailPrefetchUi {
             backgroundThumbPrefetchDeferred.set(false)
             delay(BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS)
@@ -3917,7 +3919,9 @@ class SyncCoordinator(
             }
             }
             } finally {
-                foregroundGuard.leave()
+                if (prefetchHoldsForeground) {
+                    foregroundGuard.leave()
+                }
                 backgroundThumbPrefetchJob = null
                 refreshExtraCancellableWork()
             }
