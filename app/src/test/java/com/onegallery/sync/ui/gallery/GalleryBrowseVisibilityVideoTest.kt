@@ -115,6 +115,26 @@ class GalleryBrowseVisibilityVideoTest {
     }
 
     @Test
+    fun localOnlyPhoto_withUri_isBrowsableWithoutCachedJpeg() {
+        val item = GalleryDisplayItem(
+            canonicalPath = "p.jpg",
+            displayName = "p.jpg",
+            albumName = "A",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.LOCAL_ONLY,
+            localMediaId = 2L,
+            oneDriveItemId = null,
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = Uri.parse("content://media/external/images/2"),
+            cachedOriginal = null,
+            sortTimestamp = 1L,
+        )
+        assertTrue(item.isLocalPhotoOnDevice())
+        assertTrue(item.hasBrowsableThumbnail(repo))
+        assertTrue(recomputeShowInBrowseGrid(item))
+    }
+
+    @Test
     fun syncedCloudVideo_withLocalCopy_noPoster_browsableViaLocalUri() {
         val item = GalleryDisplayItem(
             canonicalPath = "v.mp4",

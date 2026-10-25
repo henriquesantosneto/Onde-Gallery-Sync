@@ -21,6 +21,7 @@ fun GalleryDisplayItem.isEligibleForAlbumCover(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
+    if (isLocalPhotoOnDevice()) return true
     return hasCachedThumbnailFile(this, mediaCacheRepository)
 }
 

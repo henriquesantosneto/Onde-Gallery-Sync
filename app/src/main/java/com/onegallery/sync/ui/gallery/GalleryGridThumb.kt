@@ -36,16 +36,23 @@ fun GalleryGridThumb(
 
     val thumbFile = remember(item.canonicalPath, item.oneDriveItemId, revision) {
         GalleryThumbStore.displayFile(item, mediaCache)
-    } ?: return
-
-    val paintModel = remember(thumbFile.absolutePath, thumbFile.length()) {
-        val ext = thumbFile.extension.lowercase()
-        if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
-            thumbFile
-        } else {
-            thumbFile.readBytes()
-        }
     }
+    val localPhotoUri = if (thumbFile == null && item.isLocalPhotoOnDevice()) item.localUri else null
+    if (thumbFile == null && localPhotoUri == null) return
+
+    val paintModel = remember(thumbFile?.absolutePath, thumbFile?.length(), localPhotoUri) {
+        when {
+            thumbFile == null -> localPhotoUri
+            else -> {
+                val ext = thumbFile.extension.lowercase()
+                if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
+                    thumbFile
+                } else {
+                    thumbFile.readBytes()
+                }
+            }
+        }
+    } ?: return
 
     val request = remember(paintModel, sizePx, item.canonicalPath) {
         ImageRequest.Builder(context)
