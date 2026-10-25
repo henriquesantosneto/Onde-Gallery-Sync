@@ -405,7 +405,8 @@ private fun SyncQueueScrollPanel(
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
     val listCount = activeItems.size + queueWaiting.size
-    val panelHeight = if (listCount == 0) SyncQueueEmptyHeight else viewportHeight
+    val keepLargeViewport = isRunning || prefetchingThumbnails || listCount > 0
+    val panelHeight = if (keepLargeViewport) viewportHeight else SyncQueueEmptyHeight
     Surface(
         modifier = Modifier
             .fillMaxWidth()
