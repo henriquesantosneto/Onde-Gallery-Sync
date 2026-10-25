@@ -67,6 +67,11 @@ fun AlbumGridCoverImage(
             } ?: live.displayModel
         }
         val cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId
+        val sameCover = resolved != null &&
+            cacheKey == coverCacheKey &&
+            displayModel != null &&
+            displayModel?.javaClass == resolved.javaClass
+        if (sameCover) return@LaunchedEffect
         when {
             resolved != null -> {
                 displayModel = resolved
@@ -88,7 +93,7 @@ fun AlbumGridCoverImage(
 
     val videoCover = displayModel.asDeviceVideoCover()
     var devicePoster by remember(album.bucketId) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(album.bucketId, videoCover, coverRevision) {
+    LaunchedEffect(album.bucketId, videoCover) {
         val cover = videoCover
         if (cover == null) {
             devicePoster = null
@@ -101,13 +106,13 @@ fun AlbumGridCoverImage(
             480,
         )
     }
-    val coilModel = remember(displayModel, coverRevision) { coverCoilModel(displayModel) }
+    val coilModel = remember(displayModel, coverCacheKey) { coverCoilModel(displayModel) }
     val paintModel = coilModel ?: devicePoster
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (paintModel != null) {
             val coverSizePx = 480
-            val request = remember(paintModel, coverCacheKey, coverRevision, allowHardwareBitmap) {
+            val request = remember(paintModel, coverCacheKey, allowHardwareBitmap) {
                 ImageRequest.Builder(context)
                     .data(paintModel)
                     .size(coverSizePx)
@@ -117,13 +122,13 @@ fun AlbumGridCoverImage(
                     )
                     .memoryCacheKey(
                         galleryThumbnailMemoryCacheKey(
-                            "album-cover:$coverCacheKey:$coverRevision",
+                            "album-cover:$coverCacheKey",
                             coverSizePx,
                             GalleryThumbnailStyle.Grid,
                             allowHardwareBitmap,
                         ),
                     )
-                    .diskCacheKey("album-cover:$coverCacheKey:$coverRevision")
+                    .diskCacheKey("album-cover:$coverCacheKey")
                     .build()
             }
             AsyncImage(

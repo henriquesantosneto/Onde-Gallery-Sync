@@ -1,13 +1,16 @@
 package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.MediaCacheRepository
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Capas de álbum só com fontes locais (URI, original em cache, pasta `thumbs`).
  * Não usa rede. Invalida em lote quando o app sinaliza novas miniaturas (debounce).
  */
-class AlbumCoverLocalIndex {
+class AlbumCoverLocalIndex(
+    private val choices: AlbumCoverChoiceStore = AlbumCoverChoiceStore(),
+) {
 
     private data class CachedCover(
         val selectionSignature: Long,
@@ -15,6 +18,14 @@ class AlbumCoverLocalIndex {
     )
 
     private val byKey = ConcurrentHashMap<String, CachedCover>()
+
+    fun loadChoices(file: File) {
+        choices.load(file)
+    }
+
+    fun saveChoicesIfDirty(file: File) {
+        choices.saveIfDirty(file)
+    }
 
     fun invalidateAfterThumbnailBatch() {
         byKey.clear()
@@ -24,30 +35,55 @@ class AlbumCoverLocalIndex {
         byKey.remove(cacheKey)
     }
 
+    fun stickyCoverItem(
+        cacheKey: String,
+        items: List<GalleryDisplayItem>,
+        mediaCacheRepository: MediaCacheRepository,
+        nowEpochMs: Long = System.currentTimeMillis(),
+    ): GalleryDisplayItem? {
+        if (items.isEmpty()) return null
+        return choices.choose(cacheKey, items, nowEpochMs) { item ->
+            resolveGalleryCoverModel(item, mediaCacheRepository) != null
+        }
+    }
+
+    /** Assinatura estável enquanto a mesma foto continuar sendo a capa. */
+    fun stickyCoverSignature(
+        cacheKey: String,
+        items: List<GalleryDisplayItem>,
+        mediaCacheRepository: MediaCacheRepository,
+        nowEpochMs: Long = System.currentTimeMillis(),
+    ): Long {
+        val cover = stickyCoverItem(cacheKey, items, mediaCacheRepository, nowEpochMs) ?: return 0L
+        return signatureOf(cover, mediaCacheRepository)
+    }
+
+    private fun signatureOf(
+        cover: GalleryDisplayItem,
+        mediaCacheRepository: MediaCacheRepository,
+    ): Long {
+        var hash = cover.canonicalPath.hashCode().toLong()
+        hash = hash * 31L + cover.sortTimestamp
+        val thumb = mediaCacheRepository.thumbnailIfCached(cover.canonicalPath, cover.oneDriveItemId)
+            ?: cover.cachedPlaceholderThumb?.takeIf { it.isFile }
+        hash = hash * 31L + if (thumb != null) 1L else 0L
+        return hash
+    }
+
     fun coverModelForKey(
         cacheKey: String,
         items: List<GalleryDisplayItem>,
         mediaCacheRepository: MediaCacheRepository,
     ): Any? {
         if (items.isEmpty()) return null
-        val live = computeLiveCover(items, mediaCacheRepository) ?: return null
+        val item = stickyCoverItem(cacheKey, items, mediaCacheRepository) ?: return null
+        val signature = signatureOf(item, mediaCacheRepository)
         val cached = byKey[cacheKey]
-        if (cached != null && cached.selectionSignature == live.selectionSignature) {
+        if (cached != null && cached.selectionSignature == signature) {
             return cached.coverModel
         }
-        byKey[cacheKey] = live
-        return live.coverModel
-    }
-
-    private fun computeLiveCover(
-        items: List<GalleryDisplayItem>,
-        mediaCacheRepository: MediaCacheRepository,
-    ): CachedCover? {
-        val item = resolveAlbumCoverItem(items, mediaCacheRepository) ?: return null
         val model = resolveGalleryCoverModel(item, mediaCacheRepository) ?: return null
-        return CachedCover(
-            selectionSignature = albumCoverSelectionSignature(items, mediaCacheRepository),
-            coverModel = model,
-        )
+        byKey[cacheKey] = CachedCover(signature, model)
+        return model
     }
 }

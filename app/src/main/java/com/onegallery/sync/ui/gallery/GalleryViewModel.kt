@@ -20,6 +20,7 @@ import com.onegallery.sync.data.local.preferredBrowseKey
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumEntity
 import android.content.Context
+import java.io.File
 import com.onegallery.sync.data.local.MediaStorageAccess
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.OneGalleryApplication
@@ -147,7 +148,7 @@ class GalleryViewModel(
     private var lastAlbumCoverRevisions: Map<String, Long> = emptyMap()
     private val folderAlbumCoverSignature = mutableMapOf<String, Long>()
     private val placeAlbumCoverSignature = mutableMapOf<String, Long>()
-    private var lastSeenLocalRevisionForCovers: Long = -1L
+    private val albumCoverChoiceFile = File(appContext.filesDir, "album-cover-choices-v1.txt")
     @Volatile
     private var initialLibrarySnapshotApplied = false
     @Volatile
@@ -169,6 +170,7 @@ class GalleryViewModel(
 
     init {
         syncCoordinator.registerUserStopHook(userStopHook)
+        albumCoverLocalIndex.loadChoices(albumCoverChoiceFile)
     }
 
     private val catalogSession = GalleryCatalogSession()
@@ -1174,12 +1176,6 @@ class GalleryViewModel(
         val visibleItems = snapshot.visibleItems
         latestCatalogItems = catalogItems
         latestLibraryItems = visibleItems
-        val sessionLocalRevision = catalogSession.lastBundle?.localRevision
-            ?: localMediaRepository.localGalleryRevision.value
-        if (sessionLocalRevision != lastSeenLocalRevisionForCovers) {
-            lastSeenLocalRevisionForCovers = sessionLocalRevision
-            albumCoverLocalIndex.invalidateAfterThumbnailBatch()
-        }
         val deferAlbumCoverModels = catalogItems.size > 3_000
         val fingerprint = snapshot.fingerprint
             ?: catalogSession.lastBundle?.fingerprint
@@ -1199,6 +1195,7 @@ class GalleryViewModel(
         if (coverKeysToRefresh.isNotEmpty()) {
             syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(coverKeysToRefresh)
         }
+        albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
         val userAlbums = snapshot.userAlbums
         val coverRevisionStamp = coverRevisions.values.fold(0L) { acc, stamp -> acc xor stamp }
         val onlyThumbBrowse = galleryPreferences.browseOnlyItemsWithThumbnail
@@ -1377,7 +1374,14 @@ class GalleryViewModel(
         if (items.isEmpty()) {
             return LiveAlbumCover(displayModel = album.coverModel, sourceItem = null)
         }
-        return resolveLiveAlbumCover(items, mediaCacheRepository, album.coverModel)
+        val item = albumCoverLocalIndex.stickyCoverItem(
+            album.bucketId,
+            items,
+            mediaCacheRepository,
+        )
+        val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: album.coverModel
+        albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
+        return LiveAlbumCover(displayModel = model, sourceItem = item)
     }
 
     private fun detectAlbumCoverSignatureChanges(catalogItems: List<GalleryDisplayItem>): Set<String> {
@@ -1392,7 +1396,11 @@ class GalleryViewModel(
         )
         folderPool.groupBy { it.albumName }.forEach { (name, browsable) ->
             val key = "album:$name"
-            val signature = albumCoverSelectionSignature(browsable, mediaCacheRepository)
+            val signature = albumCoverLocalIndex.stickyCoverSignature(
+                key,
+                browsable,
+                mediaCacheRepository,
+            )
             val previous = folderAlbumCoverSignature.put(key, signature)
             if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
@@ -1407,7 +1415,11 @@ class GalleryViewModel(
             ),
         ).forEach { (encoded, group) ->
             val key = "place:$encoded"
-            val signature = albumCoverSelectionSignature(group, mediaCacheRepository)
+            val signature = albumCoverLocalIndex.stickyCoverSignature(
+                key,
+                group,
+                mediaCacheRepository,
+            )
             val previous = placeAlbumCoverSignature.put(key, signature)
             if (previous != signature && (previous != null || signature != 0L)) {
                 changed.add(key)
