@@ -51,26 +51,9 @@ fun GalleryDisplayItem.hasStubBrowseThumbnailFile(): Boolean {
     }
 }
 
-/** Flag rápida alinhada a [hasBrowsableThumbnail] (sem I/O). */
-fun recomputeShowInBrowseGrid(item: GalleryDisplayItem): Boolean {
-    if (GalleryMapper.isAudioFileName(item.displayName)) return false
-    val hasDiskThumb = item.hasStubBrowseThumbnailFile()
-    if (item.isCloudBackedInIndex()) {
-        if (item.kind == MediaKind.VIDEO) {
-            if (hasDiskThumb) return true
-            if (item.hasLocalVideoCoverOnDevice()) return true
-            return item.localUri == null && !item.oneDriveItemId.isNullOrBlank()
-        }
-        if (item.kind == MediaKind.IMAGE && !item.oneDriveItemId.isNullOrBlank()) {
-            if (hasDiskThumb) return true
-            return item.localUri == null
-        }
-        if (item.mediaCountsAsLocalBrowseThumb()) return true
-        return hasDiskThumb
-    }
-    if (hasDiskThumb) return true
-    return item.mediaCountsAsLocalBrowseThumb()
-}
+/** Flag rápida alinhada a [appearsInOneDriveGalleryBrowse] (sem I/O). */
+fun recomputeShowInBrowseGrid(item: GalleryDisplayItem): Boolean =
+    recomputeOneDriveShowInBrowseGrid(item)
 
 fun spillShowInBrowseGrid(
     kind: MediaKind,

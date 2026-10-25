@@ -473,25 +473,15 @@ class GalleryViewModel(
             }.flowOn(Dispatchers.IO)
         }
 
-    private val librarySnapshotLive = combine(
-        librarySnapshotCore,
-        syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
-        syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
-    ) { snapshot, _, isSyncRunning ->
-        if (isSyncRunning || GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
-            snapshot
-        } else {
-            catalogSession.refreshThumbnailFlags(
-                mediaCacheRepository,
-                galleryPreferences.browseOnlyItemsWithThumbnail,
-            )?.toLibrarySnapshot() ?: snapshot
+    /** Catálogo só muda com índice Room/local — miniaturas não remontam a lista. */
+    private val librarySnapshotLive = librarySnapshotCore
+        .distinctUntilChanged { previous, next ->
+            previous.catalogItems === next.catalogItems &&
+                previous.visibleItems === next.visibleItems &&
+                previous.fingerprint == next.fingerprint &&
+                previous.userAlbums == next.userAlbums
         }
-    }.distinctUntilChanged { previous, next ->
-        previous.catalogItems === next.catalogItems &&
-            previous.visibleItems === next.visibleItems &&
-            previous.fingerprint == next.fingerprint &&
-            previous.userAlbums == next.userAlbums
-    }.flowOn(Dispatchers.Default)
+        .flowOn(Dispatchers.Default)
 
     private val effectiveLibrarySnapshot = combine(
         galleryBootstrap,
@@ -625,6 +615,7 @@ class GalleryViewModel(
                     )
                 }
         }
+        syncCoordinator.kickThumbnailPrefetchIfIdle()
     }
 
     private fun GalleryCatalogSession.SnapshotBundle.toLibrarySnapshot(): LibrarySnapshot =

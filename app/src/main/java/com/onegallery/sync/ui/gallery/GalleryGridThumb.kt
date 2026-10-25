@@ -1,6 +1,5 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,10 +18,7 @@ import com.onegallery.sync.sync.CloudSyncState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Grade OneDrive: **só JPEG commitado no cache** (estável ao rolar).
- * Sem Coil/URI na nuvem — placeholder até o sync/gravar terminar.
- */
+/** Grade: JPEG commitado; placeholder até [GalleryThumbStore] / sync preencherem. */
 @Composable
 fun GalleryGridThumb(
     item: GalleryDisplayItem,
@@ -60,29 +56,21 @@ fun GalleryGridThumb(
     val thumbFile = remember(
         item.canonicalPath,
         item.oneDriveItemId,
-        item.cachedPlaceholderThumb?.absolutePath,
         revision,
     ) {
-        item.resolvedGalleryGridThumbFile(mediaCache)
+        GalleryThumbStore.displayFile(item, mediaCache)
     }
 
-    val cloudOnly = item.isCloudBackedGalleryItem() && item.localUri == null
-
-    LaunchedEffect(item.canonicalPath, item.oneDriveItemId, item.localUri, item.kind) {
+    LaunchedEffect(item.canonicalPath, item.oneDriveItemId, revision) {
+        if (thumbFile != null) return@LaunchedEffect
         withContext(Dispatchers.IO) {
-            thumbCache.ensureThumbnailCached(
-                canonicalPath = item.canonicalPath,
-                preferCloudFirst = cloudOnly,
-                cloudVideoAggressive = item.kind == MediaKind.VIDEO,
-                lightweightPrefetch = false,
-            )
-            if (item.resolvedGalleryGridThumbFile(mediaCache) != null) {
-                revision++
-            }
+            val file = GalleryThumbStore.ensureCachedForGrid(item, thumbCache, mediaCache)
+            if (file != null) revision++
         }
     }
 
     val layerModifier = modifier.galleryGridThumbnailLayer(style)
+    val cloudBacked = item.isCloudBackedGalleryItem()
 
     when {
         thumbFile != null -> {
@@ -101,7 +89,7 @@ fun GalleryGridThumb(
                 contentScale = contentScale,
             )
         }
-        !cloudOnly && item.localUri != null && item.kind == MediaKind.IMAGE -> {
+        item.localUri != null && item.kind == MediaKind.IMAGE -> {
             val uri = item.localUri
             val request = remember(uri, sizePx, item.canonicalPath) {
                 ImageRequest.Builder(context)
@@ -123,12 +111,12 @@ fun GalleryGridThumb(
             )
         }
         else -> {
-            val pendingCloud = item.cloudState == CloudSyncState.CLOUD_ONLY ||
+            val cloudOnly = item.cloudState == CloudSyncState.CLOUD_ONLY ||
                 item.cloudState == CloudSyncState.PENDING_DOWNLOAD ||
-                cloudOnly
+                (cloudBacked && item.localUri == null)
             MediaThumbnailPlaceholder(
                 modifier = modifier,
-                showCloudIcon = pendingCloud,
+                showCloudIcon = cloudOnly,
                 showLoading = true,
             )
         }

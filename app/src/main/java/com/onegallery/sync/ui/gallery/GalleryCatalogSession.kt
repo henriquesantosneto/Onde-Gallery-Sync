@@ -98,44 +98,19 @@ class GalleryCatalogSession {
 
     fun geoItems(): List<GalleryDisplayItem> = cachedGeoItems
 
+    /** Miniaturas atualizam células via [GalleryThumbRevisionBus] — não remonta o catálogo. */
     fun refreshThumbnailFlags(
         mediaCacheRepository: MediaCacheRepository,
         onlyItemsWithThumbnail: Boolean = false,
     ): SnapshotBundle? {
         val current = lastBundle ?: return null
-        var changed = false
-        val catalog = current.catalogItems.map { item ->
-            val thumb = if (item.kind == MediaKind.VIDEO) {
-                mediaCacheRepository.galleryThumbnailResolved(
-                    item.canonicalPath,
-                    item.oneDriveItemId,
-                    requireVideoAcceptable = true,
-                    allowCloudVideoPoster = item.localUri == null &&
-                        !item.oneDriveItemId.isNullOrBlank(),
-                )
-            } else {
-                mediaCacheRepository.displayableThumbnailIfCached(
-                    item.canonicalPath,
-                    item.oneDriveItemId,
-                )
-            }
-            val next = item.copy(cachedPlaceholderThumb = thumb)
-            val nextShow = recomputeShowInBrowseGrid(next)
-            val merged = next.copy(showInBrowseGrid = nextShow)
-            if (merged != item) {
-                changed = true
-                merged
-            } else {
-                item
-            }
-        }
         val visible = filterVisibleForGalleryBrowse(
-            catalog,
+            current.catalogItems,
             mediaCacheRepository,
             onlyItemsWithThumbnail,
         )
-        if (!changed && visible === current.visibleItems) return current
-        val next = current.copy(catalogItems = catalog, visibleItems = visible)
+        if (visible === current.visibleItems) return current
+        val next = current.copy(visibleItems = visible)
         publish(next)
         return next
     }

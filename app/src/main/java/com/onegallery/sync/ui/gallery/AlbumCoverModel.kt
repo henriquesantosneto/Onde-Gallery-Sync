@@ -74,25 +74,7 @@ fun hasCachedThumbnailFile(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (item.kind == MediaKind.VIDEO) {
-        val resolved = mediaCacheRepository.galleryThumbnailResolved(
-            item.canonicalPath,
-            item.oneDriveItemId,
-            requireVideoAcceptable = true,
-        )
-        if (resolved != null) {
-            if (VideoThumbnailHelper.isDisplayableVideoThumbnailFile(resolved)) {
-                return true
-            }
-            mediaCacheRepository.invalidateCommittedThumbnail(
-                item.canonicalPath,
-                item.oneDriveItemId,
-            )
-        }
-        val stub = item.cachedPlaceholderThumb
-        if (stub != null && VideoThumbnailHelper.isDisplayableVideoThumbnailFile(stub)) {
-            return true
-        }
-        return false
+        return item.resolvedGridVideoThumbFile(mediaCacheRepository) != null
     }
     val cached = mediaCacheRepository.displayableThumbnailIfCached(
         item.canonicalPath,
