@@ -23,10 +23,13 @@ fun GalleryDisplayItem.hasBrowsableThumbnail(
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
-    if (kind == MediaKind.VIDEO && isCloudBackedInIndex()) {
-        if (hasLocalVideoCoverOnDevice()) return true
-        if (localUri == null && !oneDriveItemId.isNullOrBlank()) return true
-        return false
+    if (isCloudBackedInIndex() && !oneDriveItemId.isNullOrBlank()) {
+        if (kind == MediaKind.VIDEO) {
+            if (hasLocalVideoCoverOnDevice()) return true
+            if (localUri == null) return true
+            return false
+        }
+        if (kind == MediaKind.IMAGE && localUri == null) return true
     }
     return mediaCountsAsLocalBrowseThumb()
 }

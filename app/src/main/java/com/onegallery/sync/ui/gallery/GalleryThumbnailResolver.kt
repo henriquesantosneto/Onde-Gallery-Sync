@@ -60,15 +60,13 @@ object GalleryThumbnailResolver {
         item: GalleryDisplayItem,
         mediaCacheRepository: MediaCacheRepository,
     ): Any? {
-        return mediaCacheRepository.displayableThumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
-            ?.let { cached ->
-                if (item.kind == MediaKind.VIDEO && !VideoThumbnailHelper.isGalleryVideoThumbnailFile(cached)) {
-                    mediaCacheRepository.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
-                    null
-                } else {
-                    cached
-                }
-            }
+        if (item.kind == MediaKind.VIDEO) {
+            return item.resolvedGridVideoThumbFile(mediaCacheRepository)
+        }
+        return mediaCacheRepository.displayableThumbnailIfCached(
+            item.canonicalPath,
+            item.oneDriveItemId,
+        )
     }
 
     fun isStaleDisplayData(

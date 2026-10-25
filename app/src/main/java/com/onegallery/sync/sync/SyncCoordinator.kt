@@ -246,8 +246,14 @@ class SyncCoordinator(
     )
     private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(thumbnailSyncHost)
     private val thumbnailPostSyncEngine = ThumbnailPostSyncEngine(thumbnailSyncHost, thumbnailPrefetchRunner)
+    private val syncGalleryThumbnailEngine = SyncGalleryThumbnailEngine(
+        syncMetadataDao = syncMetadataDao,
+        mediaCacheRepository = mediaCacheRepository,
+        thumbnails = galleryThumbnailService,
+        host = thumbnailSyncHost,
+    )
     private val syncThumbnailOrchestrator = SyncThumbnailOrchestrator(
-        pipeline = thumbnailSyncPipeline,
+        engine = syncGalleryThumbnailEngine,
         host = thumbnailSyncHost,
     )
 
@@ -264,18 +270,14 @@ class SyncCoordinator(
 
     init {
         mediaCacheRepository.onThumbnailCommitted = onThumbnailCommitted@{ canonicalPath ->
-            if (appForegroundState.isInForeground() && !_state.value.isRunning) {
-                scheduleAlbumCoverRevisionForPath(canonicalPath)
-                scheduleThumbnailStatsRefresh(debounceMs = 60_000L)
-                return@onThumbnailCommitted
-            }
-            if (bulkThumbnailPrefetchDepth.get() == 0) {
-                notifyGalleryDisplayRefresh()
-            } else {
-                scheduleGalleryDisplayRefreshCoalesced()
-            }
+            com.onegallery.sync.ui.gallery.GalleryThumbRevisionBus.onThumbnailCommitted(
+                canonicalPath,
+            )
             scheduleAlbumCoverRevisionForPath(canonicalPath)
             scheduleThumbnailStatsRefresh(debounceMs = 4_000L)
+            if (_state.value.isRunning || bulkThumbnailPrefetchDepth.get() > 0) {
+                scheduleGalleryDisplayRefreshCoalesced()
+            }
         }
         backgroundScope?.launch(Dispatchers.IO) {
             syncMetadataDao.observeIndexStats(indexStatsSqlQuery).collect { row ->
@@ -4672,9 +4674,23 @@ class SyncCoordinator(
         ThumbnailPrefetchHost,
         ThumbnailPostSyncHost,
         ThumbnailSyncPipelineHost,
-        SyncThumbnailOrchestratorHost {
+        SyncGalleryThumbnailEngineHost {
         override suspend fun runCompleteThumbnailPrefetchBeforeMetadata(): Int =
             this@SyncCoordinator.runCompleteThumbnailPrefetchBeforeMetadata()
+
+        override suspend fun runMissingThumbnailPrefetchUnified(
+            rows: List<SyncMetadataEntity>,
+            progressHeadline: String,
+            publishUi: Boolean,
+        ): Int = runMissingThumbnailPrefetch(
+            rows = rows,
+            honorSyncCancel = true,
+            parallelSlots = ThumbnailPrefetchRunner.adaptiveParallelSlots(PARALLEL_THUMBNAILS),
+            localSourcesOnly = false,
+            cloudSourcesOnly = false,
+            progressHeadline = progressHeadline,
+            publishUi = publishUi,
+        )
         override val thumbnailPrefetchBlocking get() = this@SyncCoordinator.thumbnailPrefetchBlocking
 
         override fun isSyncCancelRequested(): Boolean = syncCancelRequested.get()

@@ -61,6 +61,10 @@ fun recomputeShowInBrowseGrid(item: GalleryDisplayItem): Boolean {
             if (item.hasLocalVideoCoverOnDevice()) return true
             return item.localUri == null && !item.oneDriveItemId.isNullOrBlank()
         }
+        if (item.kind == MediaKind.IMAGE && !item.oneDriveItemId.isNullOrBlank()) {
+            if (hasDiskThumb) return true
+            return item.localUri == null
+        }
         if (item.mediaCountsAsLocalBrowseThumb()) return true
         return hasDiskThumb
     }

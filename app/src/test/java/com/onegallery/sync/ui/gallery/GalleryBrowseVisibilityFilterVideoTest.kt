@@ -26,7 +26,7 @@ class GalleryBrowseVisibilityFilterVideoTest {
     }
 
     @Test
-    fun cloudPhotoWithoutThumb_notListed() {
+    fun cloudPhotoWithoutThumb_listedForGalleryThumbFetch() {
         val item = GalleryDisplayItem(
             canonicalPath = "cloud/p.jpg",
             displayName = "p.jpg",
@@ -42,7 +42,8 @@ class GalleryBrowseVisibilityFilterVideoTest {
             showInBrowseGrid = true,
         )
         val visible = filterVisibleForGalleryBrowse(listOf(item), repo, onlyItemsWithThumbnail = false)
-        assertTrue(visible.isEmpty())
+        assertEquals(1, visible.size)
+        assertEquals("cloud/p.jpg", visible.single().canonicalPath)
     }
 
     @Test

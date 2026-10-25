@@ -477,8 +477,8 @@ class GalleryViewModel(
         librarySnapshotCore,
         syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
         syncCoordinator.state.map { it.isRunning }.distinctUntilChanged(),
-    ) { snapshot, _, _ ->
-        if (GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
+    ) { snapshot, _, isSyncRunning ->
+        if (isSyncRunning || GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
             snapshot
         } else {
             catalogSession.refreshThumbnailFlags(

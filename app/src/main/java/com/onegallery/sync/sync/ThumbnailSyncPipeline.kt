@@ -166,7 +166,7 @@ internal class ThumbnailSyncPipeline(
 
     /** Local + Graph no mesmo item (vídeo sync que falhou no aparelho tenta OneDrive). */
     suspend fun ensureUnifiedGalleryThumbnailPrefetch(
-        maxPerRun: Int = SyncThumbnailOrchestrator.UNIFIED_PREFETCH_MAX_PER_PASS,
+        maxPerRun: Int = SyncGalleryThumbnailEngine.FIRST_PASS_CAP,
     ) {
         host.ensureNotCancelled()
         if (!host.isOnline() || !host.isOneDriveGraphMode()) return
