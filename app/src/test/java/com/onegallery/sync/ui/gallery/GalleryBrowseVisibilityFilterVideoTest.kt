@@ -46,7 +46,7 @@ class GalleryBrowseVisibilityFilterVideoTest {
     }
 
     @Test
-    fun cloudVideoWithoutThumb_notListed_evenInLargeLibraryMode() {
+    fun cloudVideoWithoutThumb_listedForCoil_evenInLargeLibraryMode() {
         val item = GalleryDisplayItem(
             canonicalPath = "cloud/v.mp4",
             displayName = "v.mp4",
@@ -62,10 +62,21 @@ class GalleryBrowseVisibilityFilterVideoTest {
             showInBrowseGrid = true,
         )
         val largeList = List(1_500) { idx ->
-            if (idx == 0) item else item.copy(canonicalPath = "x$idx.mp4", showInBrowseGrid = false)
+            if (idx == 0) {
+                item
+            } else {
+                item.copy(
+                    canonicalPath = "x$idx.jpg",
+                    displayName = "x$idx.jpg",
+                    kind = MediaKind.IMAGE,
+                    oneDriveItemId = null,
+                    cloudState = CloudSyncState.LOCAL_ONLY,
+                    showInBrowseGrid = false,
+                )
+            }
         }
         val visible = filterVisibleForGalleryBrowse(largeList, repo, onlyItemsWithThumbnail = false)
-        assertTrue(visible.none { it.canonicalPath == "cloud/v.mp4" })
-        assertEquals(0, visible.count { it.kind == MediaKind.VIDEO && it.oneDriveItemId != null })
+        assertTrue(visible.any { it.canonicalPath == "cloud/v.mp4" })
+        assertEquals(1, visible.count { it.kind == MediaKind.VIDEO && it.oneDriveItemId != null })
     }
 }

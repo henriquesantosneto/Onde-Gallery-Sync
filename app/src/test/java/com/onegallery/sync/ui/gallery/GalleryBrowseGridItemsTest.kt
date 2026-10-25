@@ -79,7 +79,7 @@ class GalleryBrowseGridItemsTest {
     }
 
     @Test
-    fun albumRoute_dropsCloudVideoWithoutPoster_evenWhenStateIncludesIt() {
+    fun albumRoute_keepsCloudVideoWithoutPoster_forCoilFetch() {
         val cloudVideo = GalleryDisplayItem(
             canonicalPath = "v.mp4",
             displayName = "v.mp4",
@@ -106,7 +106,8 @@ class GalleryBrowseGridItemsTest {
             routePlaceTitle = null,
             mediaCacheRepository = repo,
         )
-        assertEquals(1, result.size)
-        assertEquals("p", result.single().canonicalPath)
+        assertEquals(2, result.size)
+        assertTrue(result.any { it.canonicalPath == "v.mp4" })
+        assertTrue(result.any { it.canonicalPath == "p" })
     }
 }

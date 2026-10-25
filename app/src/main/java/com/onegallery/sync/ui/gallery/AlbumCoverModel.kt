@@ -24,7 +24,8 @@ fun GalleryDisplayItem.isEligibleForAlbumCover(
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
     if (hasLocalVideoCoverOnDevice()) return true
-    return hasBrowsableThumbnail(mediaCacheRepository)
+    if (kind == MediaKind.VIDEO && isCloudBackedInIndex() && localUri == null) return false
+    return mediaCountsAsLocalBrowseThumb()
 }
 
 fun resolveAlbumCoverItem(

@@ -115,7 +115,7 @@ class GalleryBrowseVisibilityVideoTest {
     }
 
     @Test
-    fun syncedCloudVideo_withLocalCopy_noPoster_notBrowsable() {
+    fun syncedCloudVideo_withLocalCopy_noPoster_browsableViaLocalUri() {
         val item = GalleryDisplayItem(
             canonicalPath = "v.mp4",
             displayName = "v.mp4",
@@ -130,11 +130,12 @@ class GalleryBrowseVisibilityVideoTest {
             sortTimestamp = 1L,
         )
         assertFalse(item.videoCountsAsLocalBrowseThumb())
-        assertFalse(item.hasBrowsableThumbnail(repo))
+        assertTrue(item.hasBrowsableThumbnail(repo))
+        assertTrue(recomputeShowInBrowseGrid(item))
     }
 
     @Test
-    fun cloudOnlyVideo_withoutPoster_notBrowsable() {
+    fun cloudOnlyVideo_withoutPoster_browsableForCoilPosterFetch() {
         val item = GalleryDisplayItem(
             canonicalPath = "v.mp4",
             displayName = "v.mp4",
@@ -149,7 +150,7 @@ class GalleryBrowseVisibilityVideoTest {
             sortTimestamp = 1L,
             showInBrowseGrid = true,
         )
-        assertFalse(item.hasBrowsableThumbnail(repo))
-        assertFalse(recomputeShowInBrowseGrid(item))
+        assertTrue(item.hasBrowsableThumbnail(repo))
+        assertTrue(recomputeShowInBrowseGrid(item))
     }
 }

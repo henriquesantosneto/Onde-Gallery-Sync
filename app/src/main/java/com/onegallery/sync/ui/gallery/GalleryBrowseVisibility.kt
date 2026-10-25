@@ -16,14 +16,18 @@ fun GalleryDisplayItem.isVisibleInGalleryBrowseWithThumbnail(
     return hasBrowsableThumbnail(mediaCacheRepository)
 }
 
-/** Vídeo na nuvem: só JPEG/poster; vídeo no aparelho: cache ou URI local (frame na grade). */
+/** Vídeo: JPEG no cache, arquivo local no aparelho, ou só nuvem (Coil baixa poster na grade). */
 fun GalleryDisplayItem.hasBrowsableThumbnail(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
     if (localReleasedForSpace) return false
-    if (kind == MediaKind.VIDEO && isCloudBackedInIndex()) return false
+    if (kind == MediaKind.VIDEO && isCloudBackedInIndex()) {
+        if (hasLocalVideoCoverOnDevice()) return true
+        if (localUri == null && !oneDriveItemId.isNullOrBlank()) return true
+        return false
+    }
     return mediaCountsAsLocalBrowseThumb()
 }
 

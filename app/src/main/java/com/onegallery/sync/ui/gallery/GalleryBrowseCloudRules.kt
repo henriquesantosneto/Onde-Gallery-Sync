@@ -56,7 +56,11 @@ fun recomputeShowInBrowseGrid(item: GalleryDisplayItem): Boolean {
     if (GalleryMapper.isAudioFileName(item.displayName)) return false
     val hasDiskThumb = item.hasStubBrowseThumbnailFile()
     if (item.isCloudBackedInIndex()) {
-        if (item.kind == MediaKind.VIDEO) return hasDiskThumb
+        if (item.kind == MediaKind.VIDEO) {
+            if (hasDiskThumb) return true
+            if (item.hasLocalVideoCoverOnDevice()) return true
+            return item.localUri == null && !item.oneDriveItemId.isNullOrBlank()
+        }
         if (item.mediaCountsAsLocalBrowseThumb()) return true
         return hasDiskThumb
     }

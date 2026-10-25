@@ -72,7 +72,7 @@ fun GridVideoThumbnail(
 
     val cloudKey = remember(item.canonicalPath, item.oneDriveItemId, item.localUri) {
         if (item.localUri != null) null
-        else GalleryThumbnailResolver.cloudVideoCoilKey(item, forFilmstrip = forFilmstrip)
+        else GalleryThumbnailResolver.cloudVideoCoilKey(item, forFilmstrip = true)
     }
 
     val mediaStoreFrame by produceState<Bitmap?>(
@@ -185,7 +185,8 @@ fun GridVideoThumbnail(
                 contentScale = contentScale,
             )
         }
-        cloudKey != null && forFilmstrip && cacheFile == null -> {
+        cloudKey != null && cacheFile == null -> {
+            var cloudPosterVisible by remember(item.canonicalPath) { mutableStateOf(false) }
             val request = remember(cloudKey, sizePx, coilRetry) {
                 ImageRequest.Builder(context)
                     .data(cloudKey)
@@ -198,17 +199,33 @@ fun GridVideoThumbnail(
                     .memoryCacheKey("${item.canonicalPath}:gridvid:cloud:$sizePx:$coilRetry")
                     .build()
             }
-            AsyncImage(
-                model = request,
-                contentDescription = contentDescription,
-                modifier = layerModifier,
-                contentScale = contentScale,
-                onState = { state ->
-                    if (state is AsyncImagePainter.State.Error) {
-                        coilRetry++
-                    }
-                },
-            )
+            Box(modifier = layerModifier) {
+                if (!cloudPosterVisible) {
+                    MediaThumbnailPlaceholder(
+                        modifier = Modifier.fillMaxSize(),
+                        showCloudIcon = true,
+                        showLoading = true,
+                    )
+                }
+                AsyncImage(
+                    model = request,
+                    contentDescription = contentDescription,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = contentScale,
+                    onState = { state ->
+                        when (state) {
+                            is AsyncImagePainter.State.Success -> {
+                                cloudPosterVisible = true
+                            }
+                            is AsyncImagePainter.State.Error -> {
+                                cloudPosterVisible = false
+                                coilRetry++
+                            }
+                            else -> Unit
+                        }
+                    },
+                )
+            }
         }
         else -> {
             val cloudOnly = item.cloudState == CloudSyncState.CLOUD_ONLY ||
