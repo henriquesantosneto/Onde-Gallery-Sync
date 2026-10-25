@@ -42,18 +42,19 @@ class AlbumCoverLocalVideoTest {
     )
 
     @Test
-    fun syncedLocalVideo_browsableAndEligibleForAlbumCover() {
+    fun syncedLocalVideo_withoutPoster_notBrowsableUntilSync() {
         val item = syncedLocalVideo("v.mp4")
-        assertTrue(item.hasBrowsableThumbnail(repo))
-        assertTrue(item.isEligibleForAlbumCover(repo))
+        assertFalse(item.hasBrowsableThumbnail(repo))
+        assertFalse(item.isEligibleForAlbumCover(repo))
     }
 
     @Test
-    fun resolveAlbumCover_usesLocalVideoUri() {
-        val item = syncedLocalVideo("v.mp4")
+    fun resolveAlbumCover_usesCommittedJpeg() {
+        val jpeg = galleryTestJpeg()
+        val item = syncedLocalVideo("v.mp4").copy(cachedPlaceholderThumb = jpeg)
         val cover = resolveAlbumCoverItem(listOf(item), repo)
-        assertEquals(item, cover)
-        assertEquals(item.localUri, resolveGalleryCoverModel(cover!!, repo))
+        assertEquals(item.canonicalPath, cover?.canonicalPath)
+        assertEquals(jpeg, resolveGalleryCoverModel(cover!!, repo))
     }
 
     @Test

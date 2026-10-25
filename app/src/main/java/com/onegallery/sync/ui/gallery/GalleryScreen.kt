@@ -336,38 +336,6 @@ fun GalleryScreen(
                     enabled = dateTimeline,
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
-                LaunchedEffect(gridItems) {
-                    viewModel.prefetchGridThumbnails(
-                        gridItems.take(24).map { it.canonicalPath },
-                    )
-                }
-                LaunchedEffect(gridState, gridEntries) {
-                    snapshotFlow {
-                        val scrolling = gridState.isScrollInProgress
-                        val layout = gridState.layoutInfo
-                        val visible = layout.visibleItemsInfo
-                        val paths = if (visible.isEmpty()) {
-                            emptyList()
-                        } else {
-                            val first = visible.first().index
-                            val last = visible.last().index
-                            val end = (last + 24).coerceAtMost(gridEntries.lastIndex)
-                            (first..end).mapNotNull { index ->
-                                when (val entry = gridEntries.getOrNull(index)) {
-                                    is GalleryGridEntry.Photo -> entry.item.canonicalPath
-                                    else -> null
-                                }
-                            }
-                        }
-                        scrolling to paths
-                    }
-                        .distinctUntilChanged()
-                        .collect { (scrolling, paths) ->
-                            if (!scrolling && paths.isNotEmpty()) {
-                                viewModel.prefetchGridThumbnails(paths)
-                            }
-                        }
-                }
                 LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
                     if (!browseGridHasMore) return@LaunchedEffect
                     snapshotFlow {

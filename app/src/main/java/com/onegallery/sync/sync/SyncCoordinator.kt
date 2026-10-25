@@ -275,9 +275,7 @@ class SyncCoordinator(
             )
             scheduleAlbumCoverRevisionForPath(canonicalPath)
             scheduleThumbnailStatsRefresh(debounceMs = 4_000L)
-            if (_state.value.isRunning || bulkThumbnailPrefetchDepth.get() > 0) {
-                scheduleGalleryDisplayRefreshCoalesced()
-            }
+            scheduleGalleryDisplayRefreshCoalesced()
         }
         backgroundScope?.launch(Dispatchers.IO) {
             syncMetadataDao.observeIndexStats(indexStatsSqlQuery).collect { row ->

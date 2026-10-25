@@ -53,16 +53,18 @@ class GalleryAlbumListItemsTest {
         pendingDeleteTarget = PendingDeleteTarget.NONE,
         localUri = Uri.parse("content://media/external/images/1"),
         cachedOriginal = null,
+        cachedPlaceholderThumb = galleryTestJpeg(),
         sortTimestamp = 2L,
     )
 
     @Test
     fun albumGrouping_prefersVisibleItems_andDropsCloudWithoutThumb() {
         val catalog = listOf(cloudVideo("a"), cloudVideo("b"))
-        val visible = listOf(cloudVideo("a"), localPhoto("b"))
+        val photo = localPhoto("b")
+        val visible = listOf(cloudVideo("a"), photo)
         assertEquals(
-            listOf(localPhoto("b")),
-            itemsForAlbumListGrouping(catalog, visible, repo),
+            listOf(photo.canonicalPath),
+            itemsForAlbumListGrouping(catalog, visible, repo).map { it.canonicalPath },
         )
     }
 

@@ -16,16 +16,12 @@ data class LiveAlbumCover(
  * 1) mídia **mais recente** (`sortTimestamp`) que já tenha **arquivo de miniatura** no cache do app;
  * 2) se nenhuma, a mais recente exibível (URI local / original / thumb).
  */
-/** Capa de álbum: inclui vídeo local no aparelho mesmo sync/OneDrive (grade continua mais restrita). */
+/** Capa e pasta: só item que já tem miniatura gravada pelo sincronismo. */
 fun GalleryDisplayItem.isEligibleForAlbumCover(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (GalleryMapper.isAudioFileName(displayName)) return false
-    if (hasCachedThumbnailFile(this, mediaCacheRepository)) return true
-    if (localReleasedForSpace) return false
-    if (hasLocalVideoCoverOnDevice()) return true
-    if (kind == MediaKind.VIDEO && isCloudBackedInIndex() && localUri == null) return false
-    return mediaCountsAsLocalBrowseThumb()
+    return hasCachedThumbnailFile(this, mediaCacheRepository)
 }
 
 fun resolveAlbumCoverItem(

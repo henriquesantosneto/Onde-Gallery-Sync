@@ -36,6 +36,7 @@ class GalleryBrowseGridItemsTest {
         pendingDeleteTarget = PendingDeleteTarget.NONE,
         localUri = Uri.parse("content://media/external/images/1"),
         cachedOriginal = null,
+        cachedPlaceholderThumb = galleryTestJpeg(),
         sortTimestamp = 1L,
     )
 
@@ -79,7 +80,7 @@ class GalleryBrowseGridItemsTest {
     }
 
     @Test
-    fun albumRoute_keepsCloudVideoWithoutPoster_forCoilFetch() {
+    fun albumRoute_dropsCloudVideoWithoutPoster() {
         val cloudVideo = GalleryDisplayItem(
             canonicalPath = "v.mp4",
             displayName = "v.mp4",
@@ -106,8 +107,7 @@ class GalleryBrowseGridItemsTest {
             routePlaceTitle = null,
             mediaCacheRepository = repo,
         )
-        assertEquals(2, result.size)
-        assertTrue(result.any { it.canonicalPath == "v.mp4" })
-        assertTrue(result.any { it.canonicalPath == "p" })
+        assertEquals(1, result.size)
+        assertEquals("p", result.single().canonicalPath)
     }
 }

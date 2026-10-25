@@ -338,7 +338,6 @@ class GalleryViewModel(
 
     fun onReturningToForeground() {
         loading.value = false
-        syncCoordinator.kickThumbnailPrefetchIfIdle()
     }
 
     fun loadMoreGridItems() {
@@ -473,15 +472,25 @@ class GalleryViewModel(
             }.flowOn(Dispatchers.IO)
         }
 
-    /** Catálogo só muda com índice Room/local — miniaturas não remontam a lista. */
-    private val librarySnapshotLive = librarySnapshotCore
-        .distinctUntilChanged { previous, next ->
-            previous.catalogItems === next.catalogItems &&
-                previous.visibleItems === next.visibleItems &&
-                previous.fingerprint == next.fingerprint &&
-                previous.userAlbums == next.userAlbums
+    /** Lista visível muda quando o sincronismo grava JPEG (não na rolagem). */
+    private val librarySnapshotLive = combine(
+        librarySnapshotCore,
+        syncCoordinator.galleryDisplayRefreshEpoch.onStart { emit(0L) },
+    ) { snapshot, _ ->
+        if (GalleryGridScrollGate.shouldDeferCatalogThumbnailRefresh()) {
+            snapshot
+        } else {
+            catalogSession.refreshThumbnailFlags(
+                mediaCacheRepository,
+                onlyItemsWithThumbnail = true,
+            )?.toLibrarySnapshot() ?: snapshot
         }
-        .flowOn(Dispatchers.Default)
+    }.distinctUntilChanged { previous, next ->
+        previous.catalogItems === next.catalogItems &&
+            previous.visibleItems === next.visibleItems &&
+            previous.fingerprint == next.fingerprint &&
+            previous.userAlbums == next.userAlbums
+    }.flowOn(Dispatchers.Default)
 
     private val effectiveLibrarySnapshot = combine(
         galleryBootstrap,
@@ -505,9 +514,7 @@ class GalleryViewModel(
                     else -> liveFiltered
                 }
             }
-            liveVisible > bootstrapVisible -> liveFiltered
-            bootstrapFiltered != null && bootstrapVisible > 0 && liveVisible <= bootstrapVisible ->
-                bootstrapFiltered
+            liveFiltered.catalogItems.isNotEmpty() -> liveFiltered
             liveVisible > 0 -> liveFiltered
             else -> bootstrapFiltered ?: liveFiltered
         }
@@ -615,7 +622,6 @@ class GalleryViewModel(
                     )
                 }
         }
-        syncCoordinator.kickThumbnailPrefetchIfIdle()
     }
 
     private fun GalleryCatalogSession.SnapshotBundle.toLibrarySnapshot(): LibrarySnapshot =
@@ -1446,30 +1452,8 @@ class GalleryViewModel(
         }
     }
 
-    /** Miniaturas visíveis / próximas na grade (prioridade sobre prefetch em massa do sync). */
-    fun prefetchGridThumbnails(canonicalPaths: List<String>) {
-        if (GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch()) return
-        val paths = canonicalPaths
-            .asSequence()
-            .filter { it.isNotBlank() }
-            .filter { path -> !gridThumbnailCached(path) }
-            .filter { path -> gridThumbnailPrefetchQueued.add(path) }
-            .take(GRID_THUMB_PREFETCH_BATCH)
-            .toList()
-        if (paths.isEmpty()) return
-        val scrolling = GalleryGridScrollGate.isUserScrollingGrid
-        gridThumbnailPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                prefetchThumbnailPathsParallel(
-                    paths,
-                    lightweightPrefetch = scrolling,
-                    videoAggressive = true,
-                )
-            } finally {
-                paths.forEach { gridThumbnailPrefetchQueued.remove(it) }
-            }
-        }
-    }
+    /** Miniaturas não são baixadas na rolagem — só o sincronismo grava JPEG. */
+    fun prefetchGridThumbnails(canonicalPaths: List<String>) = Unit
 
     private suspend fun prefetchThumbnailPathsParallel(
         paths: List<String>,

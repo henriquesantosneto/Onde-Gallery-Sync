@@ -26,7 +26,7 @@ class GalleryBrowseVisibilityFilterVideoTest {
     }
 
     @Test
-    fun cloudPhotoWithoutThumb_listedForGalleryThumbFetch() {
+    fun cloudPhotoWithoutThumb_hiddenUntilSync() {
         val item = GalleryDisplayItem(
             canonicalPath = "cloud/p.jpg",
             displayName = "p.jpg",
@@ -42,12 +42,11 @@ class GalleryBrowseVisibilityFilterVideoTest {
             showInBrowseGrid = true,
         )
         val visible = filterVisibleForGalleryBrowse(listOf(item), repo, onlyItemsWithThumbnail = false)
-        assertEquals(1, visible.size)
-        assertEquals("cloud/p.jpg", visible.single().canonicalPath)
+        assertTrue(visible.isEmpty())
     }
 
     @Test
-    fun cloudVideoWithoutThumb_listedForCoil_evenInLargeLibraryMode() {
+    fun cloudVideoWithoutThumb_hidden_evenInLargeLibraryMode() {
         val item = GalleryDisplayItem(
             canonicalPath = "cloud/v.mp4",
             displayName = "v.mp4",
@@ -77,7 +76,7 @@ class GalleryBrowseVisibilityFilterVideoTest {
             }
         }
         val visible = filterVisibleForGalleryBrowse(largeList, repo, onlyItemsWithThumbnail = false)
-        assertTrue(visible.any { it.canonicalPath == "cloud/v.mp4" })
-        assertEquals(1, visible.count { it.kind == MediaKind.VIDEO && it.oneDriveItemId != null })
+        assertTrue(visible.none { it.canonicalPath == "cloud/v.mp4" })
+        assertEquals(0, visible.count { it.kind == MediaKind.VIDEO && it.oneDriveItemId != null })
     }
 }

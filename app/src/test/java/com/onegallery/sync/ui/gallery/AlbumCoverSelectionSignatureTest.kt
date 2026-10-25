@@ -35,6 +35,7 @@ class AlbumCoverSelectionSignatureTest {
         pendingDeleteTarget = PendingDeleteTarget.NONE,
         localUri = Uri.parse("content://media/external/images/$id"),
         cachedOriginal = null,
+        cachedPlaceholderThumb = galleryTestJpeg(),
         sortTimestamp = ts,
     )
 
