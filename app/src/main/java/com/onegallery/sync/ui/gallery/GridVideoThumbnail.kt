@@ -43,6 +43,7 @@ fun GridVideoThumbnail(
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCache = remember(app) { app.mediaCacheRepository }
     val thumbCache = remember(app) { app.galleryThumbnailCache }
+    val syncCoordinator = remember(app) { app.syncCoordinator }
 
     var coilRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
     var cacheRevision by remember(item.canonicalPath) { mutableIntStateOf(0) }
@@ -88,14 +89,15 @@ fun GridVideoThumbnail(
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.oneDriveItemId) {
         withContext(Dispatchers.IO) {
-            mediaCache.galleryThumbnailResolved(
+            val invalid = mediaCache.galleryThumbnailResolved(
                 item.canonicalPath,
                 item.oneDriveItemId,
                 requireVideoAcceptable = true,
             )?.takeIf { !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
-                ?.let {
-                    mediaCache.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
-                }
+            if (invalid != null) {
+                mediaCache.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
+                syncCoordinator.notifyGalleryDisplayRefresh()
+            }
             thumbCache.ensureThumbnailCached(
                 item.canonicalPath,
                 preferCloudFirst = item.localUri == null && item.oneDriveItemId != null,
@@ -183,7 +185,7 @@ fun GridVideoThumbnail(
                 contentScale = contentScale,
             )
         }
-        cloudKey != null && cacheFile == null -> {
+        cloudKey != null && forFilmstrip && cacheFile == null -> {
             val request = remember(cloudKey, sizePx, coilRetry) {
                 ImageRequest.Builder(context)
                     .data(cloudKey)

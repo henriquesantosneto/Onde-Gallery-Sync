@@ -85,7 +85,7 @@ object GalleryMapper {
             MediaKind.VIDEO ->
                 (placeholderThumb != null &&
                     com.onegallery.sync.data.local.VideoThumbnailHelper
-                        .isGalleryVideoThumbnailFile(placeholderThumb)) ||
+                        .isDisplayableVideoThumbnailFile(placeholderThumb)) ||
                     (!cloudBacked &&
                         localUri != null &&
                         videoEntityAllowsLocalBrowseThumb(entity) &&

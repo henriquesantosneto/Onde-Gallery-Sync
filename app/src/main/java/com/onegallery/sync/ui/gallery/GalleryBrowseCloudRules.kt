@@ -32,7 +32,7 @@ fun GalleryDisplayItem.hasStubBrowseThumbnailFile(): Boolean {
     val stub = cachedPlaceholderThumb ?: return false
     if (!stub.isFile || stub.length() <= 0L) return false
     return when (kind) {
-        MediaKind.VIDEO -> VideoThumbnailHelper.isGalleryVideoThumbnailFile(stub)
+        MediaKind.VIDEO -> VideoThumbnailHelper.isDisplayableVideoThumbnailFile(stub)
         MediaKind.IMAGE ->
             VideoThumbnailHelper.isAcceptableThumbnailFile(stub) && stub.length() >= 128L
         else -> false
@@ -44,6 +44,7 @@ fun recomputeShowInBrowseGrid(item: GalleryDisplayItem): Boolean {
     if (GalleryMapper.isAudioFileName(item.displayName)) return false
     val hasDiskThumb = item.hasStubBrowseThumbnailFile()
     if (item.isCloudBackedInIndex()) {
+        if (item.kind == MediaKind.VIDEO) return hasDiskThumb
         if (item.mediaCountsAsLocalBrowseThumb()) return true
         return hasDiskThumb
     }

@@ -150,5 +150,6 @@ class GalleryBrowseVisibilityVideoTest {
             showInBrowseGrid = true,
         )
         assertFalse(item.hasBrowsableThumbnail(repo))
+        assertFalse(recomputeShowInBrowseGrid(item))
     }
 }

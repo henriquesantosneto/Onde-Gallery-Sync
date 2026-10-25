@@ -59,13 +59,22 @@ fun hasCachedThumbnailFile(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (item.kind == MediaKind.VIDEO) {
-        mediaCacheRepository.galleryThumbnailResolved(
+        val resolved = mediaCacheRepository.galleryThumbnailResolved(
             item.canonicalPath,
             item.oneDriveItemId,
             requireVideoAcceptable = true,
-        )?.let { return true }
+        )
+        if (resolved != null) {
+            if (VideoThumbnailHelper.isDisplayableVideoThumbnailFile(resolved)) {
+                return true
+            }
+            mediaCacheRepository.invalidateCommittedThumbnail(
+                item.canonicalPath,
+                item.oneDriveItemId,
+            )
+        }
         val stub = item.cachedPlaceholderThumb
-        if (stub != null && VideoThumbnailHelper.isGalleryVideoThumbnailFile(stub)) {
+        if (stub != null && VideoThumbnailHelper.isDisplayableVideoThumbnailFile(stub)) {
             return true
         }
         return false
