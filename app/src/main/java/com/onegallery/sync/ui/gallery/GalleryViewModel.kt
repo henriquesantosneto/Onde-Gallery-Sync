@@ -544,16 +544,9 @@ class GalleryViewModel(
 
     init {
         viewModelScope.launch {
-            combine(
-                effectiveLibrarySnapshot.map { it.fingerprint },
-                sortOrder,
-            ) { fingerprint, order ->
-                fingerprint to order
+            sortOrder.collect { _ ->
+                gridWindowLimit.value = GalleryGridPagination.initialLimit
             }
-                .distinctUntilChanged()
-                .collect {
-                    gridWindowLimit.value = GalleryGridPagination.initialLimit
-                }
         }
         viewModelScope.launch {
             combine(
@@ -1808,7 +1801,7 @@ internal fun buildAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    val grouped = mirrored.groupBy { it.albumName }
+    val grouped = dedupeGalleryDisplayItems(mirrored).groupBy { it.albumName }
     val titles = (userAlbums.map { it.title } + grouped.keys).distinct()
     val albums = titles.mapNotNull { title ->
         val rawItems = grouped[title].orEmpty()
@@ -1857,7 +1850,8 @@ internal fun buildPlaceAlbums(
     mediaCacheRepository: MediaCacheRepository,
     resolveCoverModels: Boolean = true,
 ): List<MediaAlbum> {
-    val coverPool = items.filter { it.isEligibleForAlbumCover(mediaCacheRepository) }
+    val coverPool = dedupeGalleryDisplayItems(items)
+        .filter { it.isEligibleForAlbumCover(mediaCacheRepository) }
     return groupDisplayItemsForPlaceAlbums(coverPool).mapNotNull { (encodedKey, group) ->
         if (group.isEmpty()) return@mapNotNull null
         val coverItem = if (resolveCoverModels) {

@@ -44,13 +44,17 @@ fun resolveAlbumCoverItem(
         preferred
     } else {
         eligible.filter {
-            it.imageCountsAsLocalBrowseThumb() ||
+            it.isLocalPhotoOnDevice() ||
+                it.imageCountsAsLocalBrowseThumb() ||
                 it.videoCountsAsLocalBrowseThumb() ||
                 it.hasLocalVideoCoverOnDevice()
         }
     }
     if (pool.isEmpty()) return null
-    return pool.maxWithOrNull(albumCoverComparator(mediaCacheRepository))
+    val ranked = pool.sortedWith(albumCoverComparator(mediaCacheRepository)).asReversed()
+    return ranked.firstOrNull { item ->
+        resolveGalleryCoverModel(item, mediaCacheRepository) != null
+    }
 }
 
 /** Miniatura em disco ou vídeo local (frame via MediaStore na UI). */
@@ -60,6 +64,7 @@ private fun isStrongCoverCandidate(
 ): Boolean {
     if (hasCachedThumbnailFile(item, mediaCacheRepository)) return true
     if (item.hasLocalVideoCoverOnDevice()) return true
+    if (item.isLocalPhotoOnDevice()) return true
     return item.videoCountsAsLocalBrowseThumb() || item.imageCountsAsLocalBrowseThumb()
 }
 
@@ -134,11 +139,15 @@ fun resolveGalleryCoverModel(
         }
         return null
     }
-    if (item.imageCountsAsLocalBrowseThumb()) {
-        cachedThumb?.let { return it }
-        item.localUri?.let { return it }
-        item.cachedOriginal?.takeIf { it.exists() && it.length() > 0L }?.let { return it }
+    val paintableThumb = when {
+        mediaCacheRepository != null -> gridPaintFile(item, mediaCacheRepository)
+        else -> cachedThumb?.takeIf { it.isSafeGridImageFile() }
     }
+    if (paintableThumb != null) return paintableThumb
+    if (item.isLocalPhotoOnDevice()) {
+        item.localUri?.let { return it }
+    }
+    item.cachedOriginal?.takeIf { it.isSafeGridImageFile() }?.let { return it }
     return null
 }
 

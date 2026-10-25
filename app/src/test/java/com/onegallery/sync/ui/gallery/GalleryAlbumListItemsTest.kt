@@ -81,6 +81,25 @@ class GalleryAlbumListItemsTest {
     }
 
     @Test
+    fun albumCount_collapsesIndexRowsThatShareTheSameLocalId() {
+        val first = localPhoto("Camera/a.jpg").copy(localMediaId = 7L, sortTimestamp = 1L)
+        val duplicate = localPhoto("Camera/a-copy.jpg").copy(
+            canonicalPath = "Camera/a-copy.jpg",
+            localMediaId = 7L,
+            sortTimestamp = 9L,
+        )
+        val albums = buildAlbums(
+            mirrored = listOf(first, duplicate),
+            userAlbums = emptyList(),
+            sort = AlbumListSort.NAME_A_Z,
+            albumCoverLocalIndex = AlbumCoverLocalIndex(),
+            mediaCacheRepository = repo,
+        )
+        assertEquals(1, albums.single().itemCount)
+        assertEquals(1, albums.single().photoCount)
+    }
+
+    @Test
     fun albumGrouping_withoutThumbnailFilter_stillRequiresBrowsableCover() {
         val catalog = listOf(cloudVideo("a"))
         assertTrue(

@@ -63,6 +63,48 @@ class AlbumCoverLocalVideoTest {
     }
 
     @Test
+    fun syncedLocalPhoto_withoutJpeg_coverUsesDeviceUri() {
+        val uri = Uri.parse("content://media/external/images/9")
+        val item = GalleryDisplayItem(
+            canonicalPath = "Camera/synced.jpg",
+            displayName = "synced.jpg",
+            albumName = "Camera",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.SYNCED,
+            localMediaId = 9L,
+            oneDriveItemId = "drive-photo",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = uri,
+            cachedOriginal = null,
+            sortTimestamp = 50L,
+        )
+        assertFalse(item.imageCountsAsLocalBrowseThumb())
+        assertEquals(uri, resolveGalleryCoverModel(item, repo))
+        assertEquals(item.canonicalPath, resolveAlbumCoverItem(listOf(item), repo)?.canonicalPath)
+    }
+
+    @Test
+    fun cloudPhoto_withCachedJpeg_coverUsesThatFile() {
+        val jpeg = galleryTestJpeg()
+        val item = GalleryDisplayItem(
+            canonicalPath = "Cloud/only.jpg",
+            displayName = "only.jpg",
+            albumName = "Cloud",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "drive-cloud",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            cachedPlaceholderThumb = jpeg,
+            sortTimestamp = 40L,
+        )
+        assertEquals(jpeg, resolveGalleryCoverModel(item, repo))
+        assertNotNull(resolveAlbumCoverItem(listOf(item), repo))
+    }
+
+    @Test
     fun cloudOnlyVideo_withoutPoster_notEligibleForCover() {
         val item = GalleryDisplayItem(
             canonicalPath = "cloud/v.mp4",

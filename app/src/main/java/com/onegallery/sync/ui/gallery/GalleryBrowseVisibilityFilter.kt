@@ -25,7 +25,7 @@ fun mapMetadataToBrowsableDisplayItems(
         GalleryMapper.toDisplayItem(entity, mediaCacheRepository, localMediaRepository)
     }
     return filterVisibleForGalleryBrowse(
-        mapped,
+        dedupeGalleryDisplayItems(mapped),
         mediaCacheRepository,
         onlyItemsWithThumbnail,
     )
