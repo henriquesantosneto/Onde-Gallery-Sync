@@ -11,6 +11,12 @@ data class LiveAlbumCover(
     val sourceItem: GalleryDisplayItem?,
 )
 
+/** Poster de vídeo no aparelho. A UI lê o MediaStore; o Coil não recebe o arquivo. */
+data class DeviceVideoCover(
+    val uri: android.net.Uri,
+    val mediaId: Long?,
+)
+
 /**
  * Capa de álbum:
  * 1) mídia **mais recente** (`sortTimestamp`) que já tenha **arquivo de miniatura** no cache do app;
@@ -123,7 +129,8 @@ fun resolveGalleryCoverModel(
         cachedThumb?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
             ?.let { return it }
         if (item.hasLocalVideoCoverOnDevice() || item.videoCountsAsLocalBrowseThumb()) {
-            item.localUri?.let { return it }
+            val uri = item.localUri ?: return null
+            return DeviceVideoCover(uri, item.localMediaId)
         }
         return null
     }

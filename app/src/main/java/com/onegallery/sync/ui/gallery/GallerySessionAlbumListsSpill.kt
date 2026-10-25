@@ -142,6 +142,10 @@ object GallerySessionAlbumListsSpill {
                 out.writeInt(COVER_FILE)
                 out.writeUTF(model.absolutePath)
             }
+            is DeviceVideoCover -> {
+                out.writeInt(COVER_URI)
+                out.writeUTF(model.uri.toString())
+            }
             else -> out.writeInt(COVER_NONE)
         }
     }

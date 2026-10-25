@@ -150,8 +150,9 @@ class GalleryBrowseVisibilityVideoTest {
             sortTimestamp = 1L,
         )
         assertFalse(item.videoCountsAsLocalBrowseThumb())
-        assertFalse(item.hasBrowsableThumbnail(repo))
-        assertFalse(recomputeShowInBrowseGrid(item))
+        assertTrue(item.hasLocalVideoCoverOnDevice())
+        assertTrue(item.hasBrowsableThumbnail(repo))
+        assertTrue(recomputeShowInBrowseGrid(item))
     }
 
     @Test

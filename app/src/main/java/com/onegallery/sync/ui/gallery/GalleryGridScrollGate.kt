@@ -39,17 +39,22 @@ fun ProvideGalleryGridScrollState(
     content: @Composable () -> Unit,
 ) {
     LaunchedEffect(gridState) {
-        snapshotFlow { gridState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { scrolling ->
-                GalleryGridScrollGate.isUserScrollingGrid = scrolling
-                if (!scrolling) {
-                    delay(64)
-                    if (!gridState.isScrollInProgress) {
-                        onScrollEnd()
+        try {
+            snapshotFlow { gridState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { scrolling ->
+                    GalleryGridScrollGate.isUserScrollingGrid = scrolling
+                    if (!scrolling) {
+                        delay(64)
+                        if (!gridState.isScrollInProgress) {
+                            onScrollEnd()
+                        }
                     }
                 }
-            }
+        } finally {
+            GalleryGridScrollGate.isUserScrollingGrid = false
+            onScrollEnd()
+        }
     }
     CompositionLocalProvider(LocalZeroDecodeGridScroll provides zeroDecodeWhileScrolling) {
         content()

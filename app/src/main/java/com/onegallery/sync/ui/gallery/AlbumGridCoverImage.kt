@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.graphics.Bitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -74,7 +75,7 @@ fun AlbumGridCoverImage(
             }
             fallbackCover != null -> {
                 displayModel = fallbackCover
-                coverIsVideo = false
+                coverIsVideo = fallbackCover.asDeviceVideoCover() != null
                 coverCacheKey = album.bucketId
             }
             else -> {
@@ -85,15 +86,35 @@ fun AlbumGridCoverImage(
         }
     }
 
+    val videoCover = displayModel.asDeviceVideoCover()
+    var devicePoster by remember(album.bucketId) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(album.bucketId, videoCover, coverRevision) {
+        val cover = videoCover
+        if (cover == null) {
+            devicePoster = null
+            return@LaunchedEffect
+        }
+        devicePoster = GalleryThumbnailModels.loadDeviceVideoPoster(
+            context,
+            cover.uri,
+            cover.mediaId,
+            480,
+        )
+    }
+    val coilModel = remember(displayModel, coverRevision) { coverCoilModel(displayModel) }
+    val paintModel = coilModel ?: devicePoster
+
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (displayModel != null) {
+        if (paintModel != null) {
             val coverSizePx = 480
-            val request = remember(displayModel, coverCacheKey, coverRevision, allowHardwareBitmap) {
-                val paint = (displayModel as? java.io.File)?.asGalleryImageModel() ?: displayModel
+            val request = remember(paintModel, coverCacheKey, coverRevision, allowHardwareBitmap) {
                 ImageRequest.Builder(context)
-                    .data(paint)
+                    .data(paintModel)
                     .size(coverSizePx)
-                    .applyGalleryThumbnailLoading(GalleryThumbnailStyle.Grid, allowHardwareBitmap)
+                    .applyGalleryThumbnailLoading(
+                        GalleryThumbnailStyle.Grid,
+                        allowHardwareBitmap && paintModel !is Bitmap,
+                    )
                     .memoryCacheKey(
                         galleryThumbnailMemoryCacheKey(
                             "album-cover:$coverCacheKey:$coverRevision",
@@ -137,5 +158,13 @@ fun AlbumGridCoverImage(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+private fun coverCoilModel(model: Any?): Any? {
+    if (model.asDeviceVideoCover() != null) return null
+    return when (model) {
+        is java.io.File -> model.asGalleryImageModel()
+        else -> model
     }
 }

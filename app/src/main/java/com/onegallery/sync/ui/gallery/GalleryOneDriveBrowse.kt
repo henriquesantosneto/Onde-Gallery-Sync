@@ -17,8 +17,8 @@ fun GalleryDisplayItem.isLocalPhotoOnDevice(): Boolean {
 }
 
 /**
- * Grade: JPEG do sincronismo, ou foto local no aparelho.
- * Vídeo e item só na nuvem continuam fora até existir miniatura.
+ * Grade: JPEG do sincronismo, foto local, ou vídeo que ainda está no aparelho.
+ * Item só na nuvem continua fora até o sincronismo gravar a miniatura.
  */
 fun GalleryDisplayItem.appearsInOneDriveGalleryBrowse(
     mediaCacheRepository: MediaCacheRepository,
@@ -26,6 +26,7 @@ fun GalleryDisplayItem.appearsInOneDriveGalleryBrowse(
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (kind != MediaKind.IMAGE && kind != MediaKind.VIDEO) return false
     if (isLocalPhotoOnDevice()) return true
+    if (hasLocalVideoCoverOnDevice()) return true
     return hasCachedThumbnailFile(this, mediaCacheRepository)
 }
 
@@ -39,4 +40,6 @@ fun filterOneDriveGalleryBrowse(
 }
 
 fun recomputeOneDriveShowInBrowseGrid(item: GalleryDisplayItem): Boolean =
-    item.isLocalPhotoOnDevice() || item.hasStubBrowseThumbnailFile()
+    item.isLocalPhotoOnDevice() ||
+        item.hasLocalVideoCoverOnDevice() ||
+        item.hasStubBrowseThumbnailFile()

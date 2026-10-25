@@ -8,10 +8,39 @@ import android.provider.MediaStore
 import android.util.Size
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.VideoThumbnailHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 
 /** Modelos de miniatura otimizados para a grade (MediaStore + tamanho fixo). */
 object GalleryThumbnailModels {
+    private val devicePosterSlots = Semaphore(2)
+
     fun gridPixelSize(cellMinPx: Int): Int = (cellMinPx * 1.35f).toInt().coerceIn(128, 512)
+
+    /**
+     * Poster já existente no MediaStore. Não decodifica o vídeo no Coil
+     * e não corre durante a rolagem (quem chama espera a grade parar).
+     */
+    suspend fun loadDeviceVideoPoster(
+        context: Context,
+        uri: Uri,
+        mediaId: Long?,
+        sizePx: Int,
+    ): Bitmap? = devicePosterSlots.withPermit {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                loadSystemThumbnail(
+                    context,
+                    uri,
+                    mediaId,
+                    MediaKind.VIDEO,
+                    sizePx.coerceIn(64, 512),
+                )?.toSoftwareBitmap()
+            }.getOrNull()
+        }
+    }
 
     /**
      * Preferência: miniatura do sistema (rápida). Fallback: URI/arquivo para o Coil redimensionar.
@@ -112,4 +141,11 @@ object GalleryThumbnailModels {
         }
         return null
     }
+}
+
+internal fun Bitmap.toSoftwareBitmap(): Bitmap? {
+    if (config != Bitmap.Config.HARDWARE) return this
+    val software = copy(Bitmap.Config.ARGB_8888, false)
+    recycle()
+    return software
 }

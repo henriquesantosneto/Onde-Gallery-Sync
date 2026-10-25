@@ -1,19 +1,22 @@
 package com.onegallery.sync.ui.gallery
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
+import kotlinx.coroutines.delay
 
-/** Grade: só pinta o JPEG que o sincronismo já gravou. Sem rede e sem decode na rolagem. */
+/** Grade: JPEG do sync, foto local, ou poster do MediaStore. Sem rede e sem vídeo no Coil. */
 @Composable
 fun GalleryGridThumb(
     item: GalleryDisplayItem,
@@ -26,33 +29,52 @@ fun GalleryGridThumb(
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCache = remember(app) { app.mediaCacheRepository }
-    var revision by remember(item.canonicalPath) { mutableIntStateOf(0) }
-
-    LaunchedEffect(item.canonicalPath) {
-        GalleryThumbRevisionBus.commits.collect { path ->
-            if (path == item.canonicalPath) revision++
-        }
+    val epoch by GalleryThumbRevisionBus.epoch.collectAsStateWithLifecycle()
+    val revision = remember(epoch, item.canonicalPath) {
+        GalleryThumbRevisionBus.revisionFor(item.canonicalPath)
     }
-
     val thumbFile = remember(item.canonicalPath, item.oneDriveItemId, revision) {
         GalleryThumbStore.displayFile(item, mediaCache)
     }
     val localPhotoUri = if (thumbFile == null && item.isLocalPhotoOnDevice()) item.localUri else null
-    if (thumbFile == null && localPhotoUri == null) return
+    var devicePoster by remember(item.canonicalPath) { mutableStateOf<Bitmap?>(null) }
+    val wantsDevicePoster = thumbFile == null &&
+        localPhotoUri == null &&
+        item.hasLocalVideoCoverOnDevice()
 
-    val paintModel = remember(thumbFile?.absolutePath, thumbFile?.length(), localPhotoUri) {
-        when {
-            thumbFile == null -> localPhotoUri
-            else -> thumbFile.asGalleryImageModel()
+    LaunchedEffect(item.canonicalPath, item.localUri, wantsDevicePoster, sizePx) {
+        if (!wantsDevicePoster) {
+            devicePoster = null
+            return@LaunchedEffect
         }
-    } ?: return
+        val uri = item.localUri ?: return@LaunchedEffect
+        while (GalleryGridScrollGate.isUserScrollingGrid) {
+            delay(64)
+        }
+        devicePoster = GalleryThumbnailModels.loadDeviceVideoPoster(
+            context,
+            uri,
+            item.localMediaId,
+            sizePx,
+        )
+    }
 
-    val request = remember(paintModel, sizePx, item.canonicalPath) {
+    val fileModel = remember(
+        thumbFile?.absolutePath,
+        thumbFile?.lastModified(),
+        thumbFile?.length(),
+    ) {
+        thumbFile?.asGalleryImageModel()
+    }
+    val paintModel = fileModel ?: devicePoster ?: localPhotoUri ?: return
+    val cacheStamp = thumbFile?.lastModified() ?: revision.toLong()
+
+    val request = remember(paintModel, sizePx, item.canonicalPath, cacheStamp) {
         ImageRequest.Builder(context)
             .data(paintModel)
             .size(sizePx)
             .allowHardware(false)
-            .memoryCacheKey("${item.canonicalPath}:grid:disk:$sizePx")
+            .memoryCacheKey("${item.canonicalPath}:grid:disk:$sizePx:$cacheStamp")
             .build()
     }
     AsyncImage(

@@ -1,16 +1,24 @@
 package com.onegallery.sync.ui.gallery
 
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
-/** Miniatura gravada no disco — a grade atualiza só a célula, sem remontar o catálogo. */
+/**
+ * Miniatura gravada no disco. A revisão fica guardada por caminho: a célula
+ * que já está na tela vê o arquivo novo, igual à capa do álbum.
+ */
 object GalleryThumbRevisionBus {
-    private val _commits = MutableSharedFlow<String>(extraBufferCapacity = 256)
-    val commits: SharedFlow<String> = _commits.asSharedFlow()
+    private val revisions = ConcurrentHashMap<String, Int>()
+    private val _epoch = MutableStateFlow(0)
+    val epoch: StateFlow<Int> = _epoch.asStateFlow()
 
     fun onThumbnailCommitted(canonicalPath: String) {
         if (canonicalPath.isBlank()) return
-        _commits.tryEmit(canonicalPath)
+        revisions.merge(canonicalPath, 1, Int::plus)
+        _epoch.value = _epoch.value + 1
     }
+
+    fun revisionFor(canonicalPath: String): Int = revisions[canonicalPath] ?: 0
 }

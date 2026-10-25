@@ -9,7 +9,9 @@ import com.onegallery.sync.sync.PendingDeleteTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import java.io.File
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,11 +44,13 @@ class AlbumCoverLocalVideoTest {
     )
 
     @Test
-    fun syncedLocalVideo_withoutPoster_notBrowsableUntilSync() {
+    fun syncedLocalVideo_withoutPoster_staysInGalleryAndCoverUsesMediaStore() {
         val item = syncedLocalVideo("v.mp4")
-        assertFalse(item.hasBrowsableThumbnail(repo))
+        assertTrue(item.hasBrowsableThumbnail(repo))
         assertTrue(item.isEligibleForAlbumCover(repo))
-        assertEquals(item.localUri, resolveGalleryCoverModel(item, repo))
+        val cover = resolveGalleryCoverModel(item, repo) as DeviceVideoCover
+        assertEquals(item.localUri, cover.uri)
+        assertEquals(item.localMediaId, cover.mediaId)
     }
 
     @Test
@@ -75,5 +79,24 @@ class AlbumCoverLocalVideoTest {
         )
         assertFalse(item.isEligibleForAlbumCover(repo))
         org.junit.Assert.assertNull(resolveAlbumCoverItem(listOf(item), repo))
+    }
+
+    @Test
+    fun videoFileIsNotLoadedAsImageBytes() {
+        val video = File.createTempFile("clip", ".mp4")
+        video.writeBytes(byteArrayOf(0, 0, 0, 0x18, 'f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte()))
+        assertNull(video.asGalleryImageModel())
+        video.delete()
+    }
+
+    @Test
+    fun jpegSavedWithMp4Name_isInlineImage() {
+        val jpeg = galleryTestJpeg()
+        val renamed = File(jpeg.parentFile, "clip.mp4")
+        jpeg.copyTo(renamed, overwrite = true)
+        val model = renamed.asGalleryImageModel()
+        assertTrue(model is ByteArray)
+        renamed.delete()
+        jpeg.delete()
     }
 }
