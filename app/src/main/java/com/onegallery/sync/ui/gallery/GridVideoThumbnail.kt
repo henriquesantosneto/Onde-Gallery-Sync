@@ -53,12 +53,19 @@ fun GridVideoThumbnail(
         item.cachedPlaceholderThumb?.absolutePath,
         cacheRevision,
     ) {
-        item.cachedPlaceholderThumb?.takeIf {
-            VideoThumbnailHelper.isGalleryVideoThumbnailFile(it)
-        } ?: mediaCache.galleryThumbnailResolved(
-            item.canonicalPath,
-            item.oneDriveItemId,
-            requireVideoAcceptable = true,
+        fun validVideoThumb(file: java.io.File?): java.io.File? =
+            file?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
+
+        validVideoThumb(
+            item.cachedPlaceholderThumb?.takeIf {
+                VideoThumbnailHelper.isGalleryVideoThumbnailFile(it)
+            },
+        ) ?: validVideoThumb(
+            mediaCache.galleryThumbnailResolved(
+                item.canonicalPath,
+                item.oneDriveItemId,
+                requireVideoAcceptable = true,
+            ),
         )
     }
 
@@ -81,6 +88,14 @@ fun GridVideoThumbnail(
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.oneDriveItemId) {
         withContext(Dispatchers.IO) {
+            mediaCache.galleryThumbnailResolved(
+                item.canonicalPath,
+                item.oneDriveItemId,
+                requireVideoAcceptable = true,
+            )?.takeIf { !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
+                ?.let {
+                    mediaCache.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
+                }
             thumbCache.ensureThumbnailCached(
                 item.canonicalPath,
                 preferCloudFirst = item.localUri == null && item.oneDriveItemId != null,
@@ -92,7 +107,7 @@ fun GridVideoThumbnail(
                     item.canonicalPath,
                     item.oneDriveItemId,
                     requireVideoAcceptable = true,
-                ) != null
+                )?.let { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) } == true
             ) {
                 cacheRevision++
             }
@@ -168,7 +183,7 @@ fun GridVideoThumbnail(
                 contentScale = contentScale,
             )
         }
-        cloudKey != null && forFilmstrip -> {
+        cloudKey != null && cacheFile == null -> {
             val request = remember(cloudKey, sizePx, coilRetry) {
                 ImageRequest.Builder(context)
                     .data(cloudKey)

@@ -49,11 +49,7 @@ class OneDriveCloudThumbnailFetcher(
             onProgress = null,
         )
         val stagingOk = loaded != CloudVideoThumbnailLoader.Outcome.NONE &&
-            (
-                VideoThumbnailHelper.isGalleryVideoThumbnailFile(staging) ||
-                    VideoThumbnailHelper.isCloudPosterThumbnailFile(staging) ||
-                    VideoThumbnailHelper.isAcceptableThumbnailFile(staging)
-                )
+            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
         if (!stagingOk) {
             staging.delete()
             error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")

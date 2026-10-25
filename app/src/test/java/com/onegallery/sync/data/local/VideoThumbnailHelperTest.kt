@@ -49,6 +49,7 @@ class VideoThumbnailHelperTest {
         val dir = tempDir.root
         val poster = File(dir, "poster.jpg")
         val bitmap = Bitmap.createBitmap(128, 128, Bitmap.Config.RGB_565)
+        bitmap.eraseColor(0xFF909090.toInt())
         try {
             poster.outputStream().use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -58,6 +59,23 @@ class VideoThumbnailHelperTest {
         }
         assertTrue(VideoThumbnailHelper.isCloudPosterThumbnailFile(poster))
         assertTrue(VideoThumbnailHelper.isGalleryVideoThumbnailFile(poster))
+    }
+
+    @Test
+    fun isGalleryVideoThumbnailFile_rejectsBlackCloudPosterSize() {
+        val dir = tempDir.root
+        val poster = File(dir, "black-poster.jpg")
+        val bitmap = Bitmap.createBitmap(128, 128, Bitmap.Config.RGB_565)
+        bitmap.eraseColor(0xFF000000.toInt())
+        try {
+            poster.outputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+        } finally {
+            bitmap.recycle()
+        }
+        assertTrue(VideoThumbnailHelper.isCloudPosterThumbnailFile(poster))
+        assertFalse(VideoThumbnailHelper.isGalleryVideoThumbnailFile(poster))
     }
 
     @Test

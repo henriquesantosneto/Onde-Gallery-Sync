@@ -114,10 +114,22 @@ fun VideoPlayerView(
         onDispose { }
     }
     DisposableEffect(uri) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    userPlaying = false
+                    player.playWhenReady = false
+                    player.pause()
+                    player.seekTo(0)
+                }
+            }
+        }
+        player.addListener(listener)
         if (isActive) {
             focusRequester.requestFocus()
         }
         onDispose {
+            player.removeListener(listener)
             runCatching {
                 player.playWhenReady = false
                 player.pause()
@@ -188,7 +200,14 @@ fun VideoPlayerView(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = { userPlaying = !userPlaying },
+                    onClick = {
+                        if (!userPlaying &&
+                            player.playbackState == Player.STATE_ENDED
+                        ) {
+                            player.seekTo(0)
+                        }
+                        userPlaying = !userPlaying
+                    },
                     modifier = Modifier
                         .size(56.dp)
                         .background(Color.Black.copy(alpha = 0.55f), CircleShape),

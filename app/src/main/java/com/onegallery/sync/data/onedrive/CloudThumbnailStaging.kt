@@ -114,9 +114,7 @@ object CloudThumbnailStaging {
                 return null
             }
         }
-        val frameOk = VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
-        val posterOk = fromGraphPoster && VideoThumbnailHelper.isCloudPosterThumbnailFile(staging)
-        if (!frameOk && !posterOk) {
+        if (!VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)) {
             staging.delete()
             return null
         }

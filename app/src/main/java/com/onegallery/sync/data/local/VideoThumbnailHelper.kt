@@ -87,10 +87,10 @@ object VideoThumbnailHelper {
             bounds.outHeight >= CLOUD_POSTER_MIN_EDGE_PX
     }
 
-    /** Grade: frame extraído (filtro de preto) ou poster Graph. */
+    /** Grade: JPEG com conteúdo visível (rejeita poster/frame quase todo preto). */
     fun isGalleryVideoThumbnailFile(file: File): Boolean {
         if (isSyncGiveUpPlaceholderFile(file)) return false
-        return isDisplayableVideoThumbnailFile(file) || isCloudPosterThumbnailFile(file)
+        return isDisplayableVideoThumbnailFile(file)
     }
 
     /** Placeholder cinza 96×96 — não confundir com poster Graph pequeno. */

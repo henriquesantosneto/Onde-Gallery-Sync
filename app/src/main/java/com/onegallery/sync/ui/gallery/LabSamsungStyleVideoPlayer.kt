@@ -175,8 +175,17 @@ fun LabSamsungStyleMediaPlayer(
     DisposableEffect(uri) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    durationMs = player.duration.coerceAtLeast(0L)
+                when (playbackState) {
+                    Player.STATE_READY -> {
+                        durationMs = player.duration.coerceAtLeast(0L)
+                    }
+                    Player.STATE_ENDED -> {
+                        userPlaying = false
+                        positionMs = 0L
+                        player.playWhenReady = false
+                        player.pause()
+                        player.seekTo(0)
+                    }
                 }
             }
 
@@ -286,7 +295,15 @@ fun LabSamsungStyleMediaPlayer(
         if (isActive) {
             LabPlaybackControlPill(
                 userPlaying = userPlaying,
-                onTogglePlay = { userPlaying = !userPlaying },
+                onTogglePlay = {
+                    if (!userPlaying &&
+                        player.playbackState == Player.STATE_ENDED
+                    ) {
+                        player.seekTo(0)
+                        positionMs = 0L
+                    }
+                    userPlaying = !userPlaying
+                },
                 positionMs = positionMs,
                 durationMs = durationMs,
                 muted = muted,
