@@ -1,6 +1,7 @@
 package com.onegallery.sync.sync
 
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
+import com.onegallery.sync.ui.gallery.GalleryGridScrollGate
 import com.onegallery.sync.ui.gallery.GalleryMapper
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -131,7 +132,7 @@ internal class ThumbnailPrefetchRunner(
         chunkCount: Int,
     ): Int {
         if (rows.isEmpty()) return 0
-        val slots = parallelSlots.coerceIn(1, PARALLEL_THUMBNAILS)
+        val slots = adaptiveParallelSlots(parallelSlots).coerceIn(1, PARALLEL_THUMBNAILS)
         val semaphore = Semaphore(slots)
         val completed = AtomicInteger(0)
         val cachedCount = AtomicInteger(0)
@@ -172,8 +173,9 @@ internal class ThumbnailPrefetchRunner(
                                             lightweightPrefetch = !localSourcesOnly && !cloudSourcesOnly,
                                             localSourcesOnly = localSourcesOnly,
                                             cloudSourcesOnly = cloudSourcesOnly,
-                                            cloudVideoAggressive = cloudSourcesOnly &&
-                                                GalleryMapper.isVideoFileName(row.displayName),
+                                            cloudVideoAggressive = GalleryMapper.isVideoFileName(
+                                                row.displayName,
+                                            ) && (cloudSourcesOnly || (!localSourcesOnly && !cloudSourcesOnly)),
                                         )
                                     }
                                 }
@@ -222,8 +224,17 @@ internal class ThumbnailPrefetchRunner(
         }
     }
 
-    private companion object {
-        const val THUMB_PREFETCH_RUN_CHUNK = 40
+    companion object {
+        fun adaptiveParallelSlots(requested: Int = PARALLEL_THUMBNAILS): Int {
+            val max = requested.coerceIn(1, PARALLEL_THUMBNAILS)
+            return if (GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch()) {
+                minOf(2, max)
+            } else {
+                max
+            }
+        }
+
+        private const val THUMB_PREFETCH_RUN_CHUNK = 40
         const val PARALLEL_THUMB_PREFETCH = 8
         const val PARALLEL_THUMBNAILS = 8
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L

@@ -246,6 +246,10 @@ class SyncCoordinator(
     )
     private val thumbnailPrefetchRunner = ThumbnailPrefetchRunner(thumbnailSyncHost)
     private val thumbnailPostSyncEngine = ThumbnailPostSyncEngine(thumbnailSyncHost, thumbnailPrefetchRunner)
+    private val syncThumbnailOrchestrator = SyncThumbnailOrchestrator(
+        pipeline = thumbnailSyncPipeline,
+        host = thumbnailSyncHost,
+    )
 
     val thumbnailCache: GalleryThumbnailCache
         get() = galleryThumbnailService
@@ -3662,31 +3666,10 @@ class SyncCoordinator(
                 seedResidualRunQueueAfterCoreSync()
                 drainRemainingRunQueueBeforePrefetch()
                 ensureNotCancelled()
-                ensureAllLocalMediaPresentInIndex()
-                ensureLocalMediaThumbnailsEarly()
-                setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Capas dos álbuns…",
-                    "Uma miniatura por álbum — fila local já terminou.",
-                    alsoUpdateLastMessage = false,
-                )
-                ensureNotCancelled()
-                ensureAlbumCoverThumbnails()
-                ensureNotCancelled()
-                ensureCloudThumbnailsPrefetch()
-                ensureNotCancelled()
-                materializeNonVisualThumbnails()
-                ensureNotCancelled()
-                publishFullPendingThumbnailQueueToUi()
+                syncThumbnailOrchestrator.runPostSyncThumbnailWork()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
-                setSyncProgress(
-                    SyncProgressPhase.PREFETCH_THUMBNAILS,
-                    "Miniaturas na galeria…",
-                    "Grade e itens restantes — originais completos sob demanda.",
-                    alsoUpdateLastMessage = false,
-                )
-                val thumbsStillMissing = runCompleteThumbnailPrefetchBeforeMetadata()
+                val thumbsStillMissing = countIndexedMissingThumbnails()
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_GPS,
                     "Indexando localização (GPS)…",
@@ -3965,7 +3948,9 @@ class SyncCoordinator(
         honorUserSyncCancel: Boolean = true,
         maxTotalPerRun: Int = ThumbnailPostSyncEngine.THUMB_PREFETCH_MAX_TOTAL_PER_SYNC,
         completeAllPending: Boolean = false,
-        parallelSlots: Int = ThumbnailPostSyncEngine.PARALLEL_THUMBNAILS,
+        parallelSlots: Int = ThumbnailPrefetchRunner.adaptiveParallelSlots(
+            ThumbnailPostSyncEngine.PARALLEL_THUMBNAILS,
+        ),
         progressHeadline: String = "Completando cache da galeria…",
     ) {
         thumbnailPostSyncEngine.prefetchMissingThumbnails(
@@ -4677,7 +4662,10 @@ class SyncCoordinator(
     private inner class SyncCoordinatorThumbnailSyncHost :
         ThumbnailPrefetchHost,
         ThumbnailPostSyncHost,
-        ThumbnailSyncPipelineHost {
+        ThumbnailSyncPipelineHost,
+        SyncThumbnailOrchestratorHost {
+        override suspend fun runCompleteThumbnailPrefetchBeforeMetadata(): Int =
+            this@SyncCoordinator.runCompleteThumbnailPrefetchBeforeMetadata()
         override val thumbnailPrefetchBlocking get() = this@SyncCoordinator.thumbnailPrefetchBlocking
 
         override fun isSyncCancelRequested(): Boolean = syncCancelRequested.get()

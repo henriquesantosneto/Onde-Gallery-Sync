@@ -164,6 +164,72 @@ internal class ThumbnailSyncPipeline(
         host.notifyGalleryDisplayRefresh()
     }
 
+    /** Local + Graph no mesmo item (vídeo sync que falhou no aparelho tenta OneDrive). */
+    suspend fun ensureUnifiedGalleryThumbnailPrefetch(
+        maxPerRun: Int = SyncThumbnailOrchestrator.UNIFIED_PREFETCH_MAX_PER_PASS,
+    ) {
+        host.ensureNotCancelled()
+        if (!host.isOnline() || !host.isOneDriveGraphMode()) return
+        host.setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Miniaturas na galeria…",
+            "Nuvem e sincronizados · local + Graph por item.",
+            alsoUpdateLastMessage = false,
+        )
+        yield()
+        val rows = syncMetadataDao.getAll()
+            .asSequence()
+            .filter { row ->
+                thumbnails.canBuildThumbnail(row) &&
+                    thumbnails.needsThumbnailPrefetch(row)
+            }
+            .sortedWith(missingThumbnailPrefetchComparator)
+            .take(maxPerRun)
+            .toList()
+        if (rows.isEmpty()) {
+            host.setSyncProgress(
+                SyncProgressPhase.PREFETCH_THUMBNAILS,
+                "Miniaturas",
+                "Nenhum item pendente nesta leva unificada.",
+                alsoUpdateLastMessage = false,
+            )
+            return
+        }
+        val cloudCount = rows.count { !it.oneDriveItemId.isNullOrBlank() }
+        val localCount = rows.count { thumbnails.hasLocalThumbnailSource(it) }
+        host.setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Miniaturas na galeria…",
+            buildString {
+                append("${rows.size} pendente(s)")
+                if (cloudCount > 0) append(" · $cloudCount com OneDrive")
+                if (localCount > 0) append(" · $localCount com arquivo local")
+                append(" — prioridade vídeo e recentes.")
+            },
+            alsoUpdateLastMessage = false,
+        )
+        val cached = host.withThumbnailPrefetchUi {
+            host.runMissingThumbnailPrefetch(
+                rows,
+                honorSyncCancel = true,
+                parallelSlots = ThumbnailPrefetchRunner.adaptiveParallelSlots(PARALLEL_THUMB_PREFETCH),
+                localSourcesOnly = false,
+                cloudSourcesOnly = false,
+                progressHeadline = "Miniaturas na galeria…",
+                publishUi = true,
+            )
+        }
+        host.clearActiveSyncItems()
+        host.trimThumbnailRunQueueUi()
+        host.setSyncProgress(
+            SyncProgressPhase.PREFETCH_THUMBNAILS,
+            "Leva unificada concluída",
+            "$cached JPEG nesta passagem · completando restante do índice…",
+            alsoUpdateLastMessage = false,
+        )
+        host.notifyGalleryDisplayRefresh()
+    }
+
     suspend fun ensureAlbumCoverThumbnails(parallelThumbnails: Int) {
         host.ensureNotCancelled()
         val paths = AlbumCoverThumbnailPlanner.coverPathsNeedingThumbnail(
