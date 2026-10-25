@@ -63,6 +63,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onegallery.sync.BuildConfig
+import com.onegallery.sync.debug.DebugCrashLog
+import com.onegallery.sync.ui.debug.DebugCrashScreen
 import com.onegallery.sync.R
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.auth.MsalAuthManager
@@ -139,6 +141,7 @@ fun SettingsScreen(
         mutableStateOf(syncPreferences.localCopyIdleReleaseDays.toFloat())
     }
     var settingsInfo by remember { mutableStateOf<SettingsInfoDialog?>(null) }
+    var debugReport by remember { mutableStateOf<String?>(null) }
     var showResetIndexConfirm by remember { mutableStateOf(false) }
     var pendingAutoReleaseAfterSync by remember { mutableStateOf(false) }
     var pendingAutoReleaseWhenIdle by remember { mutableStateOf(false) }
@@ -193,6 +196,14 @@ fun SettingsScreen(
     val cloudFolderLabel = when (syncPreferences.syncMode) {
         SyncMode.ONEDRIVE_GRAPH -> syncCoordinator.graphSyncRootLabel() ?: "Pasta na nuvem não escolhida"
         else -> "Conecte a conta e escolha a pasta na nuvem"
+    }
+
+    debugReport?.let { report ->
+        DebugCrashScreen(
+            report = report,
+            onContinue = { debugReport = null },
+        )
+        return
     }
 
     settingsInfo?.let { info ->
@@ -829,6 +840,27 @@ fun SettingsScreen(
                         logPerformanceTraces = enabled
                         galleryPreferences.logPerformanceTraces = enabled
                         com.onegallery.sync.util.GalleryPerfLogger.enabled = enabled
+                    },
+                )
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Erro ao fechar") },
+                    supportingContent = {
+                        Text(
+                            "Mostra o texto do último fechamento. Abre sozinho na próxima entrada.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    trailingContent = {
+                        Button(
+                            onClick = {
+                                debugReport = DebugCrashLog.read(context)
+                                    ?: "Nenhum erro gravado ainda.\n\nSe o app fechar e esta tela não aparecer na próxima abertura, a queda foi nativa (vídeo ou memória)."
+                            },
+                        ) {
+                            Text("Ver")
+                        }
                     },
                 )
             }

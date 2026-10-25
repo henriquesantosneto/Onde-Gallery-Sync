@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.snapshotFlow
+import com.onegallery.sync.debug.DebugCrashLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -44,6 +45,7 @@ fun ProvideGalleryGridScrollState(
                 .distinctUntilChanged()
                 .collect { scrolling ->
                     GalleryGridScrollGate.isUserScrollingGrid = scrolling
+                    DebugCrashLog.mark(if (scrolling) "rolagem-inicio" else "rolagem-fim")
                     if (!scrolling) {
                         delay(64)
                         if (!gridState.isScrollInProgress) {

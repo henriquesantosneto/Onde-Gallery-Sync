@@ -11,6 +11,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
+import com.onegallery.sync.debug.DebugCrashLog
 
 /**
  * Grade: só o JPEG já gravado, ou a foto que está no aparelho.
@@ -28,6 +29,9 @@ fun GalleryGridThumb(
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCache = remember(app) { app.mediaCacheRepository }
+    remember(item.canonicalPath) {
+        DebugCrashLog.mark("celula ${item.kind} ${item.displayName}")
+    }
     val epoch by GalleryThumbRevisionBus.epoch.collectAsStateWithLifecycle()
     val revision = remember(epoch, item.canonicalPath) {
         GalleryThumbRevisionBus.revisionFor(item.canonicalPath)

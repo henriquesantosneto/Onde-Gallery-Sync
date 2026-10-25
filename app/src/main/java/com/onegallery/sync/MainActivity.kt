@@ -8,7 +8,13 @@ import android.graphics.Color
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.onegallery.sync.debug.DebugCrashLog
 import com.onegallery.sync.ui.OneGalleryApp
+import com.onegallery.sync.ui.debug.DebugCrashScreen
 import com.onegallery.sync.ui.theme.OneGalleryTheme
 
 class MainActivity : ComponentActivity() {
@@ -58,6 +64,17 @@ class MainActivity : ComponentActivity() {
         val app = application as OneGalleryApplication
         setContent {
             OneGalleryTheme {
+                var crashReport by remember { mutableStateOf(DebugCrashLog.read(app)) }
+                if (crashReport != null) {
+                    DebugCrashScreen(
+                        report = crashReport.orEmpty(),
+                        onContinue = {
+                            DebugCrashLog.clear(app)
+                            crashReport = null
+                        },
+                    )
+                    return@OneGalleryTheme
+                }
                 OneGalleryApp(
                     authManager = app.authManager,
                     localMediaRepository = app.localMediaRepository,
