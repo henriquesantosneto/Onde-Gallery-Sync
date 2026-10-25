@@ -261,16 +261,15 @@ fun SyncStatusScreen(
             item {
                 val visibleQueueCount = activeItems.size + queueWaiting.size
                 val indexPending = coordinatorState.runQueueGlobalPending
-                val queueTotal = indexPending ?: visibleQueueCount
-                if (showLiveActivity && (queueTotal > 0 || visibleQueueCount > 0)) {
+                if (showLiveActivity && (visibleQueueCount > 0 || (indexPending ?: 0) > 0)) {
                     val title = if (coordinatorState.prefetchingThumbnails) {
                         if (indexPending != null && indexPending > visibleQueueCount) {
-                            "Miniaturas pendentes ($queueTotal no índice · $visibleQueueCount na lista)"
+                            "Miniaturas pendentes ($visibleQueueCount na fila · ~$indexPending no índice)"
                         } else {
-                            "Miniaturas pendentes no índice ($queueTotal)"
+                            "Miniaturas pendentes ($visibleQueueCount na fila)"
                         }
                     } else {
-                        "Fila de sincronismo ($queueTotal pendente(s))"
+                        "Fila de sincronismo ($visibleQueueCount pendente(s))"
                     }
                     SectionTitle(title)
                 }

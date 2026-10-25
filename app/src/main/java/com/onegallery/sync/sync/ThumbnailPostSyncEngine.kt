@@ -136,9 +136,6 @@ internal class ThumbnailPostSyncEngine(
                     remainingEstimate = host.countIndexedMissingThumbnails()
                 }
                 if (remainingEstimate == 0) break
-                if (host.isRunQueueEmpty() && host.countIndexedMissingThumbnails() > 0) {
-                    host.publishFullPendingThumbnailQueueToUi()
-                }
                 var rows = host.buildMissingThumbnailBatch(batchSize)
                 if (rows.isEmpty() && host.countIndexedMissingThumbnails() > 0) {
                     val gaveUp = host.giveUpStubbornThumbnailsBatch(THUMB_STUBBORN_PLACEHOLDER_CAP)

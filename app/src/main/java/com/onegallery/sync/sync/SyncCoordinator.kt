@@ -1029,6 +1029,7 @@ class SyncCoordinator(
         entities: List<SyncMetadataEntity>,
         thumbnailQueue: Boolean = false,
         gpsQueue: Boolean = false,
+        runQueueGlobalPending: Int? = null,
     ) {
         if (!shouldPublishSyncActivityUi()) return
         val rows = entities.map { entity ->
@@ -1046,7 +1047,14 @@ class SyncCoordinator(
                 else -> SyncQueueDisplayRow.fromEntity(entity)
             }
         }
-        val apply = { _state.value = _state.value.copy(runQueue = rows) }
+        val apply = {
+            _state.update { state ->
+                state.copy(
+                    runQueue = rows,
+                    runQueueGlobalPending = runQueueGlobalPending ?: state.runQueueGlobalPending,
+                )
+            }
+        }
         if (Looper.myLooper() == Looper.getMainLooper()) apply() else mainHandler.post(apply)
     }
 
@@ -1508,6 +1516,7 @@ class SyncCoordinator(
                     for (row in rowsProcessingOrder) {
                         ensureSyncMayContinue()
                         localPassIndex++
+                        var keepInRunQueue = false
                         markSyncProcessingItem(row, "Comparando com a nuvem…")
                         try {
                         if (localPassIndex == 1 || localPassIndex % 96 == 0 || localPassIndex == localPassTotal) {
@@ -1550,6 +1559,7 @@ class SyncCoordinator(
                                 }
                                 if (syncedByHash == null) {
                                     uploadQueue.add(workRow)
+                                    keepInRunQueue = true
                                 }
                             }
                             else -> {
@@ -1561,6 +1571,7 @@ class SyncCoordinator(
                                         val skip = markSyncedIfContentMatchesRemote(merged, remote)
                                         if (skip == null) {
                                             uploadQueue.add(merged)
+                                            keepInRunQueue = true
                                         }
                                     }
                                     CloudSyncState.PENDING_DOWNLOAD -> pendingDownloadPlaceholders++
@@ -1573,6 +1584,9 @@ class SyncCoordinator(
                         }
                         } finally {
                             removeActiveSyncItem(row.canonicalPath)
+                            if (!keepInRunQueue) {
+                                removeFromRunQueue(row.canonicalPath)
+                            }
                         }
                     }
                     flushReconcileUpserts()
@@ -1589,6 +1603,14 @@ class SyncCoordinator(
                         alsoUpdateLastMessage = false,
                     )
                     val uploadBatchSize = uploadQueue.size
+                    if (uploadBatchSize > 0) {
+                        setRunQueueFromEntities(
+                            uploadQueue.sortedWith(syncQueueEntityComparator),
+                            runQueueGlobalPending = uploadBatchSize,
+                        )
+                    } else {
+                        clearRunQueueOnly()
+                    }
                     uploaded += runParallelUploads(uploadQueue)
                     uploaded += applyPendingUploadRetries(remoteByPath)
                     healStalePendingUploads(remoteByPath)
@@ -2986,15 +3008,7 @@ class SyncCoordinator(
                     allPending.take(cap)
                 }
             }
-            ThumbnailRunQueueUiMode.BATCH_AT_FRONT -> {
-                if (batch.isEmpty()) {
-                    allPending.take(cap)
-                } else {
-                    val batchPaths = batch.map { it.canonicalPath }.toHashSet()
-                    val rest = allPending.filter { it.canonicalPath !in batchPaths }
-                    (batch + rest).take(cap)
-                }
-            }
+            ThumbnailRunQueueUiMode.BATCH_AT_FRONT -> batch.take(cap)
         }
         setRunQueueFromEntities(entities, thumbnailQueue = true)
         val applyGlobal = {
