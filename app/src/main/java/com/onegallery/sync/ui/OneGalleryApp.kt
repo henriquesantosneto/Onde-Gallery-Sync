@@ -355,9 +355,7 @@ fun OneGalleryApp(
                                     MainTab.Settings -> Unit
                                 }
                                 navController.openMainTab(tab) {
-                                    if (tab != MainTab.Gallery) {
-                                        galleryViewModel.clearBrowseFilters()
-                                    }
+                                    galleryViewModel.clearBrowseFilters()
                                 }
                             },
                             icon = {

@@ -41,6 +41,27 @@ class GalleryBrowseGridItemsTest {
     )
 
     @Test
+    fun photosTab_showsWholeLibraryEvenIfAlbumFilterIsStillInState() {
+        val library = listOf(
+            item("a", "Camera"),
+            item("b", "DMSO"),
+            item("c", "WhatsApp"),
+        )
+        val albumOnly = listOf(item("b", "DMSO"))
+        val result = resolveBrowseGridItems(
+            requiresActiveBrowseFilter = false,
+            libraryItems = library,
+            browseItemsFromState = albumOnly,
+            sortOrder = GallerySortOrder.DATE_NEWEST,
+            routeAlbumFolderKey = null,
+            routePlaceMatchKey = null,
+            routePlaceTitle = null,
+            mediaCacheRepository = repo,
+        )
+        assertEquals(listOf("a", "b", "c"), result.map { it.canonicalPath })
+    }
+
+    @Test
     fun albumRoute_ignoresStaleFullLibraryInState() {
         val library = listOf(
             item("a", "Camera"),

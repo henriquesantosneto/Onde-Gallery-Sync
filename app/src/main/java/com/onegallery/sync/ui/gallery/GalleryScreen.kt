@@ -157,17 +157,25 @@ fun GalleryScreen(
         }
     }
 
+    LaunchedEffect(requiresActiveBrowseFilter, state.albumFilter, state.locationFilter) {
+        if (requiresActiveBrowseFilter) return@LaunchedEffect
+        if (state.albumFilter != null || state.locationFilter != null) {
+            viewModel.clearBrowseFilters()
+        }
+    }
     val title = when {
         state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
-        routePlaceTitle != null -> routePlaceTitle
-        routeAlbumFolderKey != null ->
+        requiresActiveBrowseFilter && routePlaceTitle != null -> routePlaceTitle
+        requiresActiveBrowseFilter && routeAlbumFolderKey != null ->
             SyncPaths.albumListDisplayName(routeAlbumFolderKey)
-        state.locationFilter != null -> state.locationFilter ?: "Local"
-        state.albumFilter != null ->
+        requiresActiveBrowseFilter && state.locationFilter != null -> state.locationFilter ?: "Local"
+        requiresActiveBrowseFilter && state.albumFilter != null ->
             SyncPaths.albumListDisplayName(state.albumFilter ?: "Álbum")
         else -> "Fotos"
     }
-    val filteredBrowse = state.locationFilter != null || state.albumFilter != null
+    val filteredBrowse = requiresActiveBrowseFilter &&
+        (state.locationFilter != null || state.albumFilter != null ||
+            routeAlbumFolderKey != null || routePlaceMatchKey != null)
     val browseMediaCountLine = if (filteredBrowse && !state.selectionMode) {
         val photos = fullBrowseGridItems.count { it.kind == MediaKind.IMAGE }
         val videos = fullBrowseGridItems.count { it.kind == MediaKind.VIDEO }

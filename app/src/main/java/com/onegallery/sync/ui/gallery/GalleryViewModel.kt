@@ -546,10 +546,9 @@ class GalleryViewModel(
         viewModelScope.launch {
             combine(
                 effectiveLibrarySnapshot.map { it.fingerprint },
-                browseFilter,
                 sortOrder,
-            ) { fingerprint, filter, order ->
-                Triple(fingerprint, filter, order)
+            ) { fingerprint, order ->
+                fingerprint to order
             }
                 .distinctUntilChanged()
                 .collect {
@@ -1273,6 +1272,13 @@ class GalleryViewModel(
         clearSelection()
     }
 
+    private fun applyBrowseFilter(next: GalleryBrowseFilter) {
+        if (browseFilter.value != next && next != GalleryBrowseFilter.All) {
+            gridWindowLimit.value = GalleryGridPagination.initialLimit
+        }
+        browseFilter.value = next
+    }
+
     /** Aba Fotos já aberta — barra inferior tocada de novo. */
     fun requestGalleryScrollToTop() {
         _galleryScrollToTopRequests.update { it + 1 }
@@ -1295,7 +1301,9 @@ class GalleryViewModel(
     }
 
     fun setAlbumFilter(album: String?) {
-        browseFilter.value = if (album == null) GalleryBrowseFilter.All else GalleryBrowseFilter.AlbumFolder(album)
+        applyBrowseFilter(
+            if (album == null) GalleryBrowseFilter.All else GalleryBrowseFilter.AlbumFolder(album),
+        )
         clearSelection()
         if (album != null) {
             viewModelScope.launch(Dispatchers.IO) {
@@ -1306,11 +1314,13 @@ class GalleryViewModel(
 
     fun setPlaceFilter(displayName: String?, matchKey: String? = null) {
         val placeKey = displayName?.let { matchKey ?: PlaceMatchKey.legacyLabel(it).encode() }
-        browseFilter.value = if (displayName == null || placeKey == null) {
-            GalleryBrowseFilter.All
-        } else {
-            GalleryBrowseFilter.Place(displayName = displayName, matchKey = placeKey)
-        }
+        applyBrowseFilter(
+            if (displayName == null || placeKey == null) {
+                GalleryBrowseFilter.All
+            } else {
+                GalleryBrowseFilter.Place(displayName = displayName, matchKey = placeKey)
+            },
+        )
         clearSelection()
         if (placeKey != null) {
             viewModelScope.launch(Dispatchers.IO) {
