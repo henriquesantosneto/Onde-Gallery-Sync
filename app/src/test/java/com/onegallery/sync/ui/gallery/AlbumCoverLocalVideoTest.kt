@@ -82,6 +82,25 @@ class AlbumCoverLocalVideoTest {
     }
 
     @Test
+    fun gridPaintFile_usesJpegNamedAsClipWithoutDecodingVideo() {
+        val jpeg = galleryTestJpeg()
+        val dest = repo.thumbFile("Camera/poster.mp4")
+        dest.parentFile?.mkdirs()
+        jpeg.copyTo(dest, overwrite = true)
+        val item = syncedLocalVideo("Camera/poster.mp4")
+        assertEquals(dest.absolutePath, gridPaintFile(item, repo)?.absolutePath)
+        val videoBytes = ByteArray(256)
+        videoBytes[4] = 'f'.code.toByte()
+        videoBytes[5] = 't'.code.toByte()
+        videoBytes[6] = 'y'.code.toByte()
+        videoBytes[7] = 'p'.code.toByte()
+        dest.writeBytes(videoBytes)
+        assertNull(gridPaintFile(item, repo))
+        dest.delete()
+        jpeg.delete()
+    }
+
+    @Test
     fun videoFileIsNotLoadedAsImageBytes() {
         val video = File.createTempFile("clip", ".mp4")
         video.writeBytes(byteArrayOf(0, 0, 0, 0x18, 'f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte()))

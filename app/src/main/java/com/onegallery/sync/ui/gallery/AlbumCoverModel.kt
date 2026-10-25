@@ -78,7 +78,7 @@ fun hasCachedThumbnailFile(
     mediaCacheRepository: MediaCacheRepository,
 ): Boolean {
     if (item.kind == MediaKind.VIDEO) {
-        return item.resolvedGridVideoThumbFile(mediaCacheRepository) != null
+        return gridPaintFile(item, mediaCacheRepository) != null
     }
     val cached = mediaCacheRepository.displayableThumbnailIfCached(
         item.canonicalPath,

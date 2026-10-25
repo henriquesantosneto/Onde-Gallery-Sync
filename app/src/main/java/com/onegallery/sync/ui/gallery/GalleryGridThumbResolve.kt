@@ -4,7 +4,6 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
-import com.onegallery.sync.data.local.VideoThumbnailHelper
 import java.io.File
 
 internal fun GalleryDisplayItem.resolvedGalleryGridThumbFile(
@@ -22,7 +21,27 @@ internal fun GalleryDisplayItem.resolvedGalleryGridThumbFile(
     }
 }
 
-private const val MAX_INLINE_IMAGE_BYTES = 2_500_000L
+private const val MAX_GRID_PAINT_BYTES = 8_000_000L
+
+/** Arquivo de miniatura para pintar a célula: só stat e cabeçalho. Sem decode na rolagem. */
+internal fun gridPaintFile(
+    item: GalleryDisplayItem,
+    mediaCache: MediaCacheRepository,
+): File? {
+    mediaCache.thumbFile(item.canonicalPath).takeIf { it.isSafeGridImageFile() }?.let { return it }
+    val remoteId = item.oneDriveItemId
+    if (!remoteId.isNullOrBlank()) {
+        mediaCache.thumbFileByRemoteItemId(remoteId).takeIf { it.isSafeGridImageFile() }?.let { return it }
+    }
+    return item.cachedPlaceholderThumb?.takeIf { it.isSafeGridImageFile() }
+}
+
+internal fun File.isSafeGridImageFile(): Boolean {
+    if (!isFile || length() !in 128L..MAX_GRID_PAINT_BYTES) return false
+    val ext = extension.lowercase()
+    if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif") return true
+    return looksLikeImageHeader()
+}
 
 /**
  * Coil ignora arquivo cuja extensão não é de imagem (miniatura de vídeo salva
@@ -35,7 +54,7 @@ internal fun File.asGalleryImageModel(): Any? {
     if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif") {
         return this
     }
-    if (length() > MAX_INLINE_IMAGE_BYTES) return null
+    if (length() > MAX_GRID_PAINT_BYTES) return null
     if (!looksLikeImageHeader()) return null
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(absolutePath, bounds)
@@ -47,17 +66,7 @@ private fun File.looksLikeImageHeader(): Boolean {
     val header = ByteArray(12)
     val read = runCatching { inputStream().use { it.read(header) } }.getOrDefault(-1)
     if (read < 3) return false
-    if (header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte()) return true
-    if (read >= 8 && header[0] == 0x89.toByte() && header[1] == 0x50.toByte()) return true
-    if (read >= 6 && header[0] == 'G'.code.toByte() && header[1] == 'I'.code.toByte()) return true
-    if (read >= 12 &&
-        header[0] == 'R'.code.toByte() &&
-        header[1] == 'I'.code.toByte() &&
-        header[8] == 'W'.code.toByte()
-    ) {
-        return true
-    }
-    return false
+    return header.copyOf(read).hasImageMagic()
 }
 
 internal fun Uri.isVideoContentUri(): Boolean {

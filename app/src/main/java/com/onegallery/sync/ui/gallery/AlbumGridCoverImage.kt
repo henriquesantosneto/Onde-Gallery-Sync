@@ -164,7 +164,7 @@ fun AlbumGridCoverImage(
 private fun coverCoilModel(model: Any?): Any? {
     if (model.asDeviceVideoCover() != null) return null
     return when (model) {
-        is java.io.File -> model.asGalleryImageModel()
+        is java.io.File -> model.takeIf { it.isSafeGridImageFile() }
         else -> model
     }
 }

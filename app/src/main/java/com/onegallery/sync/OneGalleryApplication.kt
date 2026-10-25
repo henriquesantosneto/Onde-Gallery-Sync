@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
+import com.onegallery.sync.ui.gallery.CachedThumbImageDecoderFactory
 import com.onegallery.sync.ui.gallery.OneDriveCloudThumbnailFetcher
 import com.onegallery.sync.sync.GalleryThumbnailCache
 import com.onegallery.sync.sync.MediaLibraryChangeWatcher
@@ -118,6 +119,7 @@ class OneGalleryApplication : Application() {
         Coil.setImageLoader(
             ImageLoader.Builder(this)
                 .components {
+                    add(CachedThumbImageDecoderFactory())
                     add(VideoFrameDecoder.Factory())
                     add(OneDriveCloudThumbnailFetcher.Factory(this@OneGalleryApplication))
                 }

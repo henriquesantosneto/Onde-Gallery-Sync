@@ -53,7 +53,6 @@ fun ProvideGalleryGridScrollState(
                 }
         } finally {
             GalleryGridScrollGate.isUserScrollingGrid = false
-            onScrollEnd()
         }
     }
     CompositionLocalProvider(LocalZeroDecodeGridScroll provides zeroDecodeWhileScrolling) {

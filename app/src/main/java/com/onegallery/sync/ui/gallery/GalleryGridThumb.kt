@@ -2,11 +2,8 @@ package com.onegallery.sync.ui.gallery
 
 import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -14,9 +11,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
-import kotlinx.coroutines.delay
 
-/** Grade: JPEG do sync, foto local, ou poster do MediaStore. Sem rede e sem vídeo no Coil. */
+/**
+ * Grade: só o JPEG já gravado, ou a foto que está no aparelho.
+ * Não lê o arquivo inteiro nem abre vídeo enquanto a lista rola.
+ */
 @Composable
 fun GalleryGridThumb(
     item: GalleryDisplayItem,
@@ -34,47 +33,19 @@ fun GalleryGridThumb(
         GalleryThumbRevisionBus.revisionFor(item.canonicalPath)
     }
     val thumbFile = remember(item.canonicalPath, item.oneDriveItemId, revision) {
-        GalleryThumbStore.displayFile(item, mediaCache)
+        gridPaintFile(item, mediaCache)
     }
     val localPhotoUri = if (thumbFile == null && item.isLocalPhotoOnDevice()) item.localUri else null
-    var devicePoster by remember(item.canonicalPath) { mutableStateOf<Bitmap?>(null) }
-    val wantsDevicePoster = thumbFile == null &&
-        localPhotoUri == null &&
-        item.hasLocalVideoCoverOnDevice()
+    val paintModel = thumbFile ?: localPhotoUri ?: return
+    val cacheStamp = thumbFile?.lastModified() ?: 0L
 
-    LaunchedEffect(item.canonicalPath, item.localUri, wantsDevicePoster, sizePx) {
-        if (!wantsDevicePoster) {
-            devicePoster = null
-            return@LaunchedEffect
-        }
-        val uri = item.localUri ?: return@LaunchedEffect
-        while (GalleryGridScrollGate.isUserScrollingGrid) {
-            delay(64)
-        }
-        devicePoster = GalleryThumbnailModels.loadDeviceVideoPoster(
-            context,
-            uri,
-            item.localMediaId,
-            sizePx,
-        )
-    }
-
-    val fileModel = remember(
-        thumbFile?.absolutePath,
-        thumbFile?.lastModified(),
-        thumbFile?.length(),
-    ) {
-        thumbFile?.asGalleryImageModel()
-    }
-    val paintModel = fileModel ?: devicePoster ?: localPhotoUri ?: return
-    val cacheStamp = thumbFile?.lastModified() ?: revision.toLong()
-
-    val request = remember(paintModel, sizePx, item.canonicalPath, cacheStamp) {
+    val request = remember(paintModel, sizePx, item.canonicalPath, cacheStamp, revision) {
         ImageRequest.Builder(context)
             .data(paintModel)
             .size(sizePx)
+            .bitmapConfig(Bitmap.Config.RGB_565)
             .allowHardware(false)
-            .memoryCacheKey("${item.canonicalPath}:grid:disk:$sizePx:$cacheStamp")
+            .memoryCacheKey("${item.canonicalPath}:grid:$sizePx:$cacheStamp:$revision")
             .build()
     }
     AsyncImage(
