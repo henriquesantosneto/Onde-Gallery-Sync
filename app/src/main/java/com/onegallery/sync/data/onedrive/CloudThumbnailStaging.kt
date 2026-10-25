@@ -114,7 +114,12 @@ object CloudThumbnailStaging {
                 return null
             }
         }
-        if (!VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)) {
+        val acceptable = if (fromGraphPoster) {
+            VideoThumbnailHelper.isCloudPosterThumbnailFile(staging)
+        } else {
+            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
+        }
+        if (!acceptable) {
             staging.delete()
             return null
         }

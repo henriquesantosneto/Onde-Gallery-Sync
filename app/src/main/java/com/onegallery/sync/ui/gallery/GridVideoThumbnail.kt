@@ -20,7 +20,6 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
-import com.onegallery.sync.data.local.VideoThumbnailHelper
 import com.onegallery.sync.sync.CloudSyncState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,8 +42,6 @@ fun GridVideoThumbnail(
     val app = remember(context) { context.applicationContext as OneGalleryApplication }
     val mediaCache = remember(app) { app.mediaCacheRepository }
     val thumbCache = remember(app) { app.galleryThumbnailCache }
-    val syncCoordinator = remember(app) { app.syncCoordinator }
-
     var coilRetry by remember(item.canonicalPath) { mutableIntStateOf(0) }
     var cacheRevision by remember(item.canonicalPath) { mutableIntStateOf(0) }
 
@@ -54,20 +51,7 @@ fun GridVideoThumbnail(
         item.cachedPlaceholderThumb?.absolutePath,
         cacheRevision,
     ) {
-        fun validVideoThumb(file: java.io.File?): java.io.File? =
-            file?.takeIf { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
-
-        validVideoThumb(
-            item.cachedPlaceholderThumb?.takeIf {
-                VideoThumbnailHelper.isGalleryVideoThumbnailFile(it)
-            },
-        ) ?: validVideoThumb(
-            mediaCache.galleryThumbnailResolved(
-                item.canonicalPath,
-                item.oneDriveItemId,
-                requireVideoAcceptable = true,
-            ),
-        )
+        item.resolvedGridVideoThumbFile(mediaCache)
     }
 
     val cloudKey = remember(item.canonicalPath, item.oneDriveItemId, item.localUri) {
@@ -89,14 +73,10 @@ fun GridVideoThumbnail(
 
     LaunchedEffect(item.canonicalPath, item.localUri, item.oneDriveItemId) {
         withContext(Dispatchers.IO) {
-            val invalid = mediaCache.galleryThumbnailResolved(
-                item.canonicalPath,
-                item.oneDriveItemId,
-                requireVideoAcceptable = true,
-            )?.takeIf { !VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) }
-            if (invalid != null) {
+            val allowCloudPoster = item.isCloudOnlyVideoThumb()
+            val onDisk = mediaCache.thumbnailIfCached(item.canonicalPath, item.oneDriveItemId)
+            if (onDisk != null && isInvalidCommittedVideoThumb(onDisk, allowCloudPoster)) {
                 mediaCache.invalidateCommittedThumbnail(item.canonicalPath, item.oneDriveItemId)
-                syncCoordinator.notifyGalleryDisplayRefresh()
             }
             thumbCache.ensureThumbnailCached(
                 item.canonicalPath,
@@ -104,15 +84,6 @@ fun GridVideoThumbnail(
                 cloudVideoAggressive = true,
                 lightweightPrefetch = item.localUri != null,
             )
-            if (
-                mediaCache.galleryThumbnailResolved(
-                    item.canonicalPath,
-                    item.oneDriveItemId,
-                    requireVideoAcceptable = true,
-                )?.let { VideoThumbnailHelper.isDisplayableVideoThumbnailFile(it) } == true
-            ) {
-                cacheRevision++
-            }
         }
     }
 
@@ -215,7 +186,10 @@ fun GridVideoThumbnail(
                     onState = { state ->
                         when (state) {
                             is AsyncImagePainter.State.Success -> {
-                                cloudPosterVisible = true
+                                if (!cloudPosterVisible) {
+                                    cloudPosterVisible = true
+                                    cacheRevision++
+                                }
                             }
                             is AsyncImagePainter.State.Error -> {
                                 cloudPosterVisible = false

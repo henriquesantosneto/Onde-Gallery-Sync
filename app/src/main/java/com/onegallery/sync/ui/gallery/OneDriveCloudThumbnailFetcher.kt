@@ -48,20 +48,26 @@ class OneDriveCloudThumbnailFetcher(
             aggressive = true,
             onProgress = null,
         )
+        val fromGraphPoster = loaded == CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
         val stagingOk = loaded != CloudVideoThumbnailLoader.Outcome.NONE &&
-            VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
+            when {
+                fromGraphPoster -> VideoThumbnailHelper.isCloudPosterThumbnailFile(staging)
+                else -> VideoThumbnailHelper.isDisplayableVideoThumbnailFile(staging)
+            }
         if (!stagingOk) {
             staging.delete()
             error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
         }
-        val fromGraphPoster = loaded == CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
         val displayFile = CloudThumbnailStaging.commitGalleryVideoThumbnailIfValid(
             staging,
             app.mediaCacheRepository,
             key.canonicalPath,
             key.oneDriveItemId,
             fromGraphPoster,
-        ) ?: staging
+        ) ?: run {
+            staging.delete()
+            error("Miniatura Graph/vídeo indisponível para ${key.oneDriveItemId}")
+        }
         return SourceResult(
             source = ImageSource(file = displayFile.toOkioPath()),
             mimeType = "image/jpeg",

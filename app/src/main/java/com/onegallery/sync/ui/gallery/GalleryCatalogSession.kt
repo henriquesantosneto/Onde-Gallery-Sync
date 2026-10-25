@@ -110,6 +110,8 @@ class GalleryCatalogSession {
                     item.canonicalPath,
                     item.oneDriveItemId,
                     requireVideoAcceptable = true,
+                    allowCloudVideoPoster = item.localUri == null &&
+                        !item.oneDriveItemId.isNullOrBlank(),
                 )
             } else {
                 mediaCacheRepository.displayableThumbnailIfCached(
