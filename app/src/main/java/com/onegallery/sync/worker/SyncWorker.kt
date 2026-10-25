@@ -8,6 +8,7 @@ import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.R
 import com.onegallery.sync.sync.SyncForegroundNotifications
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 
 class SyncWorker(
     appContext: Context,
@@ -24,7 +25,12 @@ class SyncWorker(
             return runThumbnailContinuation(app)
         }
         val userInitiated = inputData.getBoolean(KEY_USER_INITIATED, false)
+        if (!userInitiated && app.syncCoordinator.syncWorkProtected()) {
+            // setForeground aqui usaria o mesmo id da notificação e, ao sair, apagaria o sync.
+            return Result.success()
+        }
         app.syncCoordinator.setWorkerForegroundSession(true)
+        app.syncCoordinator.noteWorkerForegroundJob(coroutineContext[Job])
         return try {
             runCatching {
                 setForeground(
@@ -99,13 +105,25 @@ class SyncWorker(
         if (!app.syncCoordinator.shouldPersistThumbnailContinuation()) {
             return Result.success()
         }
-        app.syncCoordinator.setWorkerForegroundSession(true)
+        if (!ThumbnailContinuationPolicy.shouldPromoteThumbnailForeground(
+                app.syncCoordinator.syncWorkProtected(),
+            )
+        ) {
+            BackgroundSyncScheduler.enqueueThumbnailContinuation(
+                context = app,
+                prefs = prefs,
+                delaySeconds = ThumbnailContinuationPolicy.BUSY_DELAY_SECONDS,
+                runningSlot = slot,
+            )
+            return Result.success()
+        }
         return try {
             runCatching {
                 setForeground(
                     SyncForegroundNotifications.foregroundInfo(
                         applicationContext,
                         applicationContext.getString(R.string.sync_notification_thumbnails_message),
+                        SyncForegroundNotifications.THUMBNAIL_NOTIFICATION_ID,
                     ),
                 )
             }.onFailure { error ->
@@ -122,8 +140,6 @@ class SyncWorker(
                 )
             }
             Result.success()
-        } finally {
-            app.syncCoordinator.setWorkerForegroundSession(false)
         }
     }
 

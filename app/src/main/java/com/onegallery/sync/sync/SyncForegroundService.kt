@@ -8,7 +8,9 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.R
+import com.onegallery.sync.worker.BackgroundSyncScheduler
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -44,19 +46,26 @@ class SyncForegroundService : Service() {
                 actionStop = intent?.action == ACTION_STOP,
             )
         ) {
-            shutdown()
+            val detach = intent?.getBooleanExtra(EXTRA_DETACH, false) == true
+            shutdown(removeNotification = !detach)
             return START_NOT_STICKY
         }
         return START_STICKY
     }
 
     override fun onTimeout(startId: Int) {
-        shutdown()
+        val app = applicationContext as? OneGalleryApplication
+        val running = app?.syncCoordinator?.state?.value?.isRunning == true
+        if (app != null && running) {
+            BackgroundSyncScheduler.enqueueRunningSyncHandoff(app, app.syncPreferences)
+        }
+        shutdown(removeNotification = !running)
     }
 
     override fun onDestroy() {
-        foregroundReady.set(false)
-        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        if (foregroundReady.getAndSet(false)) {
+            runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
+        }
         super.onDestroy()
     }
 
@@ -81,9 +90,13 @@ class SyncForegroundService : Service() {
         }
     }
 
-    private fun shutdown() {
+    private fun shutdown(removeNotification: Boolean) {
         foregroundReady.set(false)
-        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        if (removeNotification) {
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        } else {
+            runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
+        }
         stopSelf()
     }
 
@@ -92,6 +105,7 @@ class SyncForegroundService : Service() {
         private const val EXTRA_MESSAGE = "message"
         private const val EXTRA_GENERATION = "generation"
         private const val ACTION_STOP = "com.onegallery.sync.sync.STOP_FOREGROUND"
+        private const val EXTRA_DETACH = "detach_notification"
 
         private val generation = AtomicInteger(0)
         private val stopAtGeneration = AtomicInteger(0)
@@ -110,7 +124,11 @@ class SyncForegroundService : Service() {
             }
         }
 
-        fun stop(context: Context, stillIdle: () -> Boolean = { true }) {
+        fun stop(
+            context: Context,
+            detachNotification: Boolean = false,
+            stillIdle: () -> Boolean = { true },
+        ) {
             if (!stillIdle()) return
             val gen = generation.get()
             if (gen == 0 || !stillIdle()) return
@@ -120,6 +138,7 @@ class SyncForegroundService : Service() {
             val intent = Intent(context, SyncForegroundService::class.java).apply {
                 action = ACTION_STOP
                 putExtra(EXTRA_GENERATION, gen)
+                putExtra(EXTRA_DETACH, detachNotification)
             }
             try {
                 context.startService(intent)

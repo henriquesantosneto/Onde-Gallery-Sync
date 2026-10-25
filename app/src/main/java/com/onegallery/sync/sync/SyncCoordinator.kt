@@ -213,6 +213,7 @@ class SyncCoordinator(
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
     private val workerForegroundSession = AtomicBoolean(false)
+    private val foregroundWorkerJob = AtomicReference<Job?>(null)
     private var albumCoverRevisionJob: Job? = null
     private var bulkGalleryDisplayRefreshJob: Job? = null
     private var backgroundThumbPrefetchJob: Job? = null
@@ -783,13 +784,34 @@ class SyncCoordinator(
     /** WorkManager já promoveu [androidx.work.CoroutineWorker.setForeground] — evita 2º serviço (falha em background). */
     fun setWorkerForegroundSession(active: Boolean) {
         workerForegroundSession.set(active)
+        if (!active) {
+            foregroundWorkerJob.set(null)
+        }
     }
 
+    fun noteWorkerForegroundJob(job: Job?) {
+        foregroundWorkerJob.set(job)
+    }
+
+    fun syncWorkProtected(): Boolean =
+        _state.value.isRunning ||
+            workerForegroundSession.get() ||
+            foregroundGuard.holdsForeground()
+
     private suspend inline fun <T> withSyncForeground(crossinline block: suspend () -> T): T {
-        if (workerForegroundSession.get()) {
+        val onSyncWorker = workerForegroundSession.get() &&
+            coroutineContext[Job] != null &&
+            coroutineContext[Job] == foregroundWorkerJob.get()
+        if (onSyncWorker) {
             return block()
         }
-        return foregroundGuard.runWithForeground { block() }
+        foregroundGuard.enter()
+        return try {
+            block()
+        } finally {
+            // WorkManager segue com a mesma notificação; não apagar ao soltar este serviço.
+            foregroundGuard.leave(detachNotification = workerForegroundSession.get())
+        }
     }
 
     private val galleryMetadataSource = syncMetadataDao.observeGalleryIndex()
@@ -883,8 +905,13 @@ class SyncCoordinator(
         if (inForeground) {
             kickThumbnailPrefetchIfIdle()
         } else {
+            if (_state.value.isRunning || foregroundGuard.holdsForeground()) {
+                BackgroundSyncScheduler.enqueueRunningSyncHandoff(appContext, syncPreferences)
+            }
             resumeBackgroundThumbnailPrefetchIfNeeded()
-            enqueueDurableThumbnailContinuation()
+            if (!_state.value.isRunning) {
+                enqueueDurableThumbnailContinuation()
+            }
         }
     }
 
@@ -1463,8 +1490,14 @@ class SyncCoordinator(
             return Result.failure(IllegalStateException(WIFI_POLICY_MESSAGE))
         }
 
-        return longTaskMutex.withLock {
-            withSyncForeground {
+        if (!longTaskMutex.tryLock()) {
+            // Outra execução já está no sync. Esperar o fim sem começar de novo
+            // mantém o worker em primeiro plano até o app poder ficar minimizado.
+            longTaskMutex.withLock { }
+            return Result.success(SyncSummary(0, 0, 0))
+        }
+        try {
+            return withSyncForeground {
                 try {
                     prepareSyncSession(userInitiated)
                 } catch (cancelled: CancellationException) {
@@ -1870,6 +1903,8 @@ class SyncCoordinator(
                     }
                 }
             }
+        } finally {
+            longTaskMutex.unlock()
         }
     }
 

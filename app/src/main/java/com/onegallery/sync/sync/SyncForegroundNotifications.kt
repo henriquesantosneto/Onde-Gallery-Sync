@@ -18,6 +18,8 @@ object SyncForegroundNotifications {
     /** v2: IMPORTANCE_DEFAULT para aparecer na barra de status (v1 era LOW). */
     const val CHANNEL_ID = "onegallery_sync_v2"
     const val NOTIFICATION_ID = 4101
+    /** Outro id: o worker de miniaturas não pode apagar a notificação do sync ao terminar. */
+    const val THUMBNAIL_NOTIFICATION_ID = 4102
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -55,17 +57,21 @@ object SyncForegroundNotifications {
             .build()
     }
 
-    fun foregroundInfo(context: Context, message: String): ForegroundInfo {
+    fun foregroundInfo(
+        context: Context,
+        message: String,
+        notificationId: Int = NOTIFICATION_ID,
+    ): ForegroundInfo {
         ensureChannel(context)
         val notification = buildNotification(context, message)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
-                NOTIFICATION_ID,
+                notificationId,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(notificationId, notification)
         }
     }
 }

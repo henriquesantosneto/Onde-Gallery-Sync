@@ -21,6 +21,8 @@ object BackgroundSyncScheduler {
 
     const val IMMEDIATE_UNIQUE = "onegallery_bidirectional_sync_now"
     const val DEFERRED_UNIQUE = "onegallery_bidirectional_sync_deferred"
+    /** Segura o sync já iniciado quando a activity some. KEEP não cancela a execução atual. */
+    const val HANDOFF_UNIQUE = "onegallery_sync_background_handoff"
 
     fun syncConstraints(prefs: SyncPreferences): Constraints {
         val networkType = if (prefs.wifiOnly) {
@@ -162,6 +164,26 @@ object BackgroundSyncScheduler {
         )
     }
 
+    /**
+     * O sync tocado na tela roda no processo. Este worker fica em primeiro plano
+     * até essa execução soltar o mutex — minimizar não derruba a notificação.
+     * Se o processo morrer, o WorkManager refaz o sync.
+     */
+    fun enqueueRunningSyncHandoff(context: Context, prefs: SyncPreferences) {
+        if (!prefs.hasCompletedSetup) return
+        val builder = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInputData(SyncWorker.input(userInitiated = true))
+            .setConstraints(syncConstraints(prefs))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        }
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            HANDOFF_UNIQUE,
+            ExistingWorkPolicy.KEEP,
+            builder.build(),
+        )
+    }
+
     fun cancelThumbnailContinuation(context: Context) {
         val workManager = WorkManager.getInstance(context.applicationContext)
         workManager.cancelUniqueWork(ThumbnailContinuationPolicy.PRIMARY_UNIQUE)
@@ -172,6 +194,7 @@ object BackgroundSyncScheduler {
     fun cancelPendingSyncWork(context: Context) {
         val workManager = WorkManager.getInstance(context.applicationContext)
         workManager.cancelUniqueWork(IMMEDIATE_UNIQUE)
+        workManager.cancelUniqueWork(HANDOFF_UNIQUE)
         cancelThumbnailContinuation(context)
     }
 

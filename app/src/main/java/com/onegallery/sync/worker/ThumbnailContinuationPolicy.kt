@@ -28,6 +28,9 @@ object ThumbnailContinuationPolicy {
         else -> SLOT_PRIMARY
     }
 
+    /** Worker de miniatura não pode chamar setForeground enquanto o sync segura a notificação. */
+    fun shouldPromoteThumbnailForeground(syncActive: Boolean): Boolean = !syncActive
+
     fun shouldScheduleAnother(
         moreRemain: Boolean,
         setupComplete: Boolean,

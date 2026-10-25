@@ -24,6 +24,9 @@ class SyncTaskLauncher(
         if (coordinator.state.value.isSyncBusy) return
         val prefs = app.syncPreferences
         if (userInitiated && app.appForegroundState.isInForeground()) {
+            // WorkManager segura a notificação quando a activity para. O processo
+            // começa na hora para a tela Sync não esperar a fila do sistema.
+            BackgroundSyncScheduler.enqueueRunningSyncHandoff(app, prefs)
             launchManaged { coordinator.runBidirectionalSync(userInitiated = true) }
             return
         }

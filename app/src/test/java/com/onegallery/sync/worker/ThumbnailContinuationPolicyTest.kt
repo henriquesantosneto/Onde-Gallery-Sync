@@ -8,6 +8,12 @@ import org.junit.Test
 class ThumbnailContinuationPolicyTest {
 
     @Test
+    fun thumbnailForegroundWaitsUntilSyncReleasesTheNotification() {
+        assertFalse(ThumbnailContinuationPolicy.shouldPromoteThumbnailForeground(syncActive = true))
+        assertTrue(ThumbnailContinuationPolicy.shouldPromoteThumbnailForeground(syncActive = false))
+    }
+
+    @Test
     fun schedulesWhileItemsRemain() {
         assertTrue(
             ThumbnailContinuationPolicy.shouldScheduleAnother(
