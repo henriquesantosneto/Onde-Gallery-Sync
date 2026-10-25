@@ -36,7 +36,7 @@ fun GalleryGridThumb(
         gridPaintFile(item, mediaCache)
     }
     val localPhotoUri = if (thumbFile == null && item.isLocalPhotoOnDevice()) item.localUri else null
-    val paintModel = thumbFile ?: localPhotoUri ?: return
+    val paintModel = thumbFile?.let(::DiskThumb) ?: localPhotoUri ?: return
     val cacheStamp = thumbFile?.lastModified() ?: 0L
 
     val request = remember(paintModel, sizePx, item.canonicalPath, cacheStamp, revision) {

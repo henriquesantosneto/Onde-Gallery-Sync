@@ -164,7 +164,15 @@ fun AlbumGridCoverImage(
 private fun coverCoilModel(model: Any?): Any? {
     if (model.asDeviceVideoCover() != null) return null
     return when (model) {
-        is java.io.File -> model.takeIf { it.isSafeGridImageFile() }
+        is java.io.File -> {
+            if (!model.isSafeGridImageFile()) return null
+            val ext = model.extension.lowercase()
+            if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif") {
+                model
+            } else {
+                DiskThumb(model)
+            }
+        }
         else -> model
     }
 }

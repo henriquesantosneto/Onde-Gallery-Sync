@@ -2,10 +2,44 @@ package com.onegallery.sync.ui.gallery
 
 import coil.ImageLoader
 import coil.decode.BitmapFactoryDecoder
+import coil.decode.DataSource
 import coil.decode.Decoder
+import coil.decode.ImageSource
+import coil.fetch.FetchResult
+import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.request.Options
+import java.io.File
 import okio.BufferedSource
+import okio.Path.Companion.toOkioPath
+
+/** JPEG de miniatura no disco, mesmo quando o nome termina em `.mp4`. */
+internal data class DiskThumb(val file: File)
+
+/**
+ * O FileFetcher do Coil trata `.mp4` como vídeo. Este fetcher força imagem,
+ * para a rolagem não abrir o clipe nem derrubar o processo.
+ */
+internal class DiskThumbFetcher(
+    private val file: File,
+) : Fetcher {
+    override suspend fun fetch(): FetchResult {
+        if (!file.isSafeGridImageFile()) error("miniatura indisponível")
+        return SourceResult(
+            source = ImageSource(file = file.toOkioPath()),
+            mimeType = "image/jpeg",
+            dataSource = DataSource.DISK,
+        )
+    }
+
+    class Factory : Fetcher.Factory<DiskThumb> {
+        override fun create(
+            data: DiskThumb,
+            options: Options,
+            imageLoader: ImageLoader,
+        ): Fetcher = DiskThumbFetcher(data.file)
+    }
+}
 
 /**
  * Miniatura de vídeo é JPEG gravado com o nome do clipe (`.mp4`).
