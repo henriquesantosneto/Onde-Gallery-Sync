@@ -199,6 +199,8 @@ class GalleryViewModel(
 
     private val deferredAlbumLists = MutableStateFlow(restoreDeferredAlbumListsFromSession())
     private var albumListsBuildJob: Job? = null
+    /** Evita remontar 19k linhas toda vez; fica falso enquanto nenhuma capa real foi gravada. */
+    private var albumCoverResolveCompleted = false
 
     private val gridWindowLimit = MutableStateFlow(GalleryGridPagination.initialLimit)
 
@@ -772,7 +774,8 @@ class GalleryViewModel(
                 pending.albums.isNotEmpty() &&
                 pending.catalogFingerprint?.matchesIndex(fingerprint) == true &&
                 pending.albumSort == albumSort &&
-                pending.localRevision == localRevision
+                pending.localRevision == localRevision &&
+                !albumListsNeedCoverPass(pending.albums, pending.placeAlbums)
             ) {
                 return@launch
             }
@@ -825,7 +828,6 @@ class GalleryViewModel(
             if (deferCovers) {
                 publish(skeletonAlbums, skeletonPlaces)
             }
-            val resolveCovers = !deferCovers
             publish(
                 buildAlbums(
                     albumItems,
@@ -833,18 +835,19 @@ class GalleryViewModel(
                     albumSort,
                     albumCoverLocalIndex,
                     mediaCacheRepository,
-                    resolveCoverModels = resolveCovers,
+                    resolveCoverModels = true,
                 ),
                 sortPlaceAlbums(
                     buildPlaceAlbums(
                         placeItems,
                         albumCoverLocalIndex,
                         mediaCacheRepository,
-                        resolveCoverModels = resolveCovers,
+                        resolveCoverModels = true,
                     ),
                     albumSort,
                 ),
             )
+            albumCoverResolveCompleted = true
         }
     }
 
@@ -931,10 +934,11 @@ class GalleryViewModel(
             catalogFingerprint = fingerprint,
         )?.let { entry ->
             applySessionAlbumListsFromEntry(entry, fingerprint, metadata.size, userAlbums, albumSort)
-            return
+            if (!albumListsNeedCoverPass(entry.albums, entry.placeAlbums)) return
         }
         if (applySessionAlbumListsIfCurrent(fingerprint, metadata.size, userAlbums, albumSort)) {
-            return
+            val restored = deferredAlbumLists.value
+            if (!albumListsNeedCoverPass(restored.albums, restored.placeAlbums)) return
         }
         val pending = deferredAlbumLists.value
         val sessionLocalRevision = catalogSession.lastBundle?.localRevision
@@ -943,7 +947,8 @@ class GalleryViewModel(
             pending.metadataRowCount == metadata.size &&
             pending.albumSort == albumSort &&
             pending.localRevision == sessionLocalRevision &&
-            pending.albums.isNotEmpty()
+            pending.albums.isNotEmpty() &&
+            !albumListsNeedCoverPass(pending.albums, pending.placeAlbums)
         ) {
             return
         }
@@ -1029,7 +1034,19 @@ class GalleryViewModel(
                 resolveCoverModels = true,
             )
             publishLists(withCovers, placesWithCovers, coverRevisionStamp)
+            albumCoverResolveCompleted = true
         }
+    }
+
+    /** Lista em cache sem nenhuma foto de capa ainda precisa do passe que escolhe a miniatura. */
+    private fun albumListsNeedCoverPass(
+        albums: List<MediaAlbum>,
+        placeAlbums: List<MediaAlbum>,
+    ): Boolean {
+        if (albumCoverResolveCompleted) return false
+        if (albums.any { it.coverModel.isPaintableAlbumCoverModel() }) return false
+        if (placeAlbums.any { it.coverModel.isPaintableAlbumCoverModel() }) return false
+        return true
     }
 
     private fun albumListsForUi(

@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import com.onegallery.sync.TestApplication
+import java.io.File
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
@@ -59,6 +60,51 @@ class GalleryBrowseGridItemsTest {
             mediaCacheRepository = repo,
         )
         assertEquals(listOf("a", "b", "c"), result.map { it.canonicalPath })
+    }
+
+    @Test
+    fun photosTab_listsLocalPhotoAndCachedCloudThumbWithoutStattingDisk() {
+        val cloudWithoutThumb = GalleryDisplayItem(
+            canonicalPath = "cloud-empty",
+            displayName = "empty.jpg",
+            albumName = "Camera",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "remote-empty",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            cachedPlaceholderThumb = null,
+            sortTimestamp = 2L,
+            showInBrowseGrid = false,
+        )
+        val cloudWithThumb = GalleryDisplayItem(
+            canonicalPath = "cloud-thumb",
+            displayName = "thumb.jpg",
+            albumName = "Camera",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "remote-thumb",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            cachedPlaceholderThumb = File("missing-on-purpose.jpg"),
+            sortTimestamp = 3L,
+            showInBrowseGrid = true,
+        )
+        val result = resolveBrowseGridItems(
+            requiresActiveBrowseFilter = false,
+            libraryItems = listOf(item("local", "Camera"), cloudWithoutThumb, cloudWithThumb),
+            browseItemsFromState = emptyList(),
+            sortOrder = GallerySortOrder.DATE_NEWEST,
+            routeAlbumFolderKey = null,
+            routePlaceMatchKey = null,
+            routePlaceTitle = null,
+            mediaCacheRepository = repo,
+        )
+        assertEquals(listOf("local", "cloud-thumb"), result.map { it.canonicalPath })
     }
 
     @Test

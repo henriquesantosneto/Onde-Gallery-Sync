@@ -13,10 +13,10 @@ fun resolveBrowseGridItems(
     routeAlbumFolderKey: String?,
     routePlaceMatchKey: String?,
     routePlaceTitle: String?,
-    mediaCacheRepository: MediaCacheRepository,
+    @Suppress("UNUSED_PARAMETER") mediaCacheRepository: MediaCacheRepository,
 ): List<GalleryDisplayItem> {
     fun browsable(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> =
-        items.filter { it.hasBrowsableThumbnail(mediaCacheRepository) }
+        items.filter { it.belongsOnBrowseGridWithoutDisk() }
 
     if (!requiresActiveBrowseFilter) {
         return browsable(libraryItems)

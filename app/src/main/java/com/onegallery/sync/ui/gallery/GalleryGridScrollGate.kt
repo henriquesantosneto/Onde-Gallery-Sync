@@ -19,9 +19,15 @@ object GalleryGridScrollGate {
 
     fun shouldDeferBulkThumbnailPrefetch(): Boolean = isUserScrollingGrid
 
-    suspend fun awaitIdleIfZeroDecodeEnabled(enabled: Boolean) {
+    suspend fun awaitIdleIfZeroDecodeEnabled(enabled: Boolean, maxWaitMs: Long = Long.MAX_VALUE) {
         if (!enabled) return
+        val started = android.os.SystemClock.uptimeMillis()
         while (isUserScrollingGrid) {
+            if (maxWaitMs != Long.MAX_VALUE &&
+                android.os.SystemClock.uptimeMillis() - started >= maxWaitMs
+            ) {
+                return
+            }
             delay(16)
         }
     }

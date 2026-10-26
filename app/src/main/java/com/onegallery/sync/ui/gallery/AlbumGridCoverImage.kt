@@ -83,9 +83,9 @@ fun AlbumGridCoverImage(
             }
             return@LaunchedEffect
         }
-        GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true)
+        GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true, maxWaitMs = 2_500L)
         val outcome = albumCoverResolveSlots.withPermit {
-            GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true)
+            GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true, maxWaitMs = 2_500L)
             withContext(Dispatchers.IO) {
                 val live = resolveLiveCover(album)
                 val raw = live.sourceItem?.let { item ->

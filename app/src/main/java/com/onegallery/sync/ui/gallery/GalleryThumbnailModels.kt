@@ -118,9 +118,12 @@ object GalleryThumbnailModels {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
                 context.contentResolver.loadThumbnail(uri, Size(sizePx, sizePx), null)
-            }.getOrNull()?.takeIf { it.width > 0 && it.height > 0 }?.let { bmp ->
+            }.getOrNull()?.takeIf { it.width > 0 && it.height > 0 }?.let { raw ->
+                val bmp = raw.ownedSoftwareBitmap() ?: return@let
                 if (kind == MediaKind.VIDEO) return bmp
-                if (VideoThumbnailHelper.isAcceptableFrame(bmp)) return bmp
+                val acceptable = runCatching { VideoThumbnailHelper.isAcceptableFrame(bmp) }
+                    .getOrDefault(true)
+                if (acceptable) return bmp
                 bmp.recycle()
             }
         }
