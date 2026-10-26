@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -377,18 +378,26 @@ fun MediaDetailScreen(
                                         tint = Color.White,
                                     )
                                 }
-                                MediaGalleryOverflowMenuButton(
-                                    expanded = showOverflowMenu,
-                                    onExpandedChange = { showOverflowMenu = it },
-                                    showDetails = detailPaths.isNotEmpty(),
-                                    onDetails = { openDetailsToSimple() },
-                                    onShare = {
+                                IconButton(
+                                    onClick = {
                                         shareGalleryMedia(
                                             context,
                                             state.selectedPaths,
                                             listOf(liveItems),
                                         )?.let(viewModel::showMessage)
                                     },
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Share,
+                                        contentDescription = "Compartilhar",
+                                        tint = Color.White,
+                                    )
+                                }
+                                MediaGalleryOverflowMenuButton(
+                                    expanded = showOverflowMenu,
+                                    onExpandedChange = { showOverflowMenu = it },
+                                    showDetails = detailPaths.isNotEmpty(),
+                                    onDetails = { openDetailsToSimple() },
                                     onFreeSpace = {
                                         val paths = state.selectedPaths.toList()
                                         if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
@@ -440,18 +449,26 @@ fun MediaDetailScreen(
                                     )
                                 }
                             }
-                            MediaGalleryOverflowMenuButton(
-                                expanded = showOverflowMenu,
-                                onExpandedChange = { showOverflowMenu = it },
-                                showDetails = detailPaths.isNotEmpty(),
-                                onDetails = { openDetailsToSimple() },
-                                onShare = {
+                            IconButton(
+                                onClick = {
                                     shareGalleryMedia(
                                         context,
                                         listOf(currentPath),
                                         listOf(liveItems),
                                     )?.let(viewModel::showMessage)
                                 },
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Share,
+                                    contentDescription = "Compartilhar",
+                                    tint = Color.White,
+                                )
+                            }
+                            MediaGalleryOverflowMenuButton(
+                                expanded = showOverflowMenu,
+                                onExpandedChange = { showOverflowMenu = it },
+                                showDetails = detailPaths.isNotEmpty(),
+                                onDetails = { openDetailsToSimple() },
                                 onFreeSpace = {
                                     if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                         viewModel.releaseSingle(currentPath)

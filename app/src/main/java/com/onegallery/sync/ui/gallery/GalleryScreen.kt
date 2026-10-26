@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.CircularProgressIndicator
@@ -224,18 +225,22 @@ fun GalleryScreen(
                             IconButton(onClick = { showDeleteConfirm = true }) {
                                 Icon(Icons.Outlined.Delete, contentDescription = "Excluir")
                             }
-                            MediaGalleryOverflowMenuButton(
-                                expanded = showSelectionOverflow,
-                                onExpandedChange = { showSelectionOverflow = it },
-                                showDetails = true,
-                                onDetails = { showMediaDetails = true },
-                                onShare = {
+                            IconButton(
+                                onClick = {
                                     shareGalleryMedia(
                                         context,
                                         state.selectedPaths,
                                         listOf(state.libraryItems, state.items),
                                     )?.let(viewModel::showMessage)
                                 },
+                            ) {
+                                Icon(Icons.Outlined.Share, contentDescription = "Compartilhar")
+                            }
+                            MediaGalleryOverflowMenuButton(
+                                expanded = showSelectionOverflow,
+                                onExpandedChange = { showSelectionOverflow = it },
+                                showDetails = true,
+                                onDetails = { showMediaDetails = true },
                                 onFreeSpace = {
                                     if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                         viewModel.releaseLocalSpaceSelected()
