@@ -29,6 +29,8 @@ data class GalleryGridPinchZoom(
     val gridModifier: Modifier,
     /** Enquanto true, cliques e long-press nos thumbnails ficam desligados. */
     val blockItemGestures: Boolean,
+    val applyPinch: (Float) -> Unit,
+    val setMultiTouch: (Boolean) -> Unit,
 )
 
 @Composable
@@ -50,23 +52,27 @@ fun rememberGalleryGridZoom(initial: Float, onPersist: (Float) -> Unit): Gallery
             }
         }
     }
+    val applyPinch: (Float) -> Unit = { zoom ->
+        val damped = 1f + (zoom - 1f) * GridPinchZoom.PINCH_SENSITIVITY
+        val next = (scale * damped).coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
+        if (next != scale) {
+            scale = next
+            onPersist(next)
+        }
+    }
+    val setMultiTouch: (Boolean) -> Unit = { active -> multiTouch = active }
     val gridModifier = Modifier
         .nestedScroll(nestedScrollConnection)
         .gridPinchZoomDetector(
-            onMultiTouchActive = { active -> multiTouch = active },
-            onPinchZoom = { zoom ->
-                val damped = 1f + (zoom - 1f) * GridPinchZoom.PINCH_SENSITIVITY
-                val next = (scale * damped).coerceIn(GridPinchZoom.MIN_SCALE, GridPinchZoom.MAX_SCALE)
-                if (next != scale) {
-                    scale = next
-                    onPersist(next)
-                }
-            },
+            onMultiTouchActive = setMultiTouch,
+            onPinchZoom = applyPinch,
         )
     return GalleryGridPinchZoom(
         scale = scale,
         gridModifier = gridModifier,
         blockItemGestures = multiTouch,
+        applyPinch = applyPinch,
+        setMultiTouch = setMultiTouch,
     )
 }
 

@@ -152,12 +152,14 @@ fun GalleryTimelineFastScrollRail(
 
 @Composable
 fun GridFastScrollRail(
-    gridState: LazyGridState,
+    gridState: LazyGridState? = null,
     itemCount: Int,
     lastIndex: Int,
     markers: List<FastScrollMarker>,
     labelForScrollIndex: (Int) -> String?,
     modifier: Modifier = Modifier,
+    externalFraction: Float? = null,
+    onScrollToIndex: ((Int) -> Unit)? = null,
 ) {
     if (itemCount < 4 || markers.isEmpty()) return
 
@@ -182,11 +184,14 @@ fun GridFastScrollRail(
         label = "fastScrollTrackWidth",
     )
 
-    val scrollThumbFraction by remember(gridState, itemCount) {
+    val scrollThumbFraction by remember(gridState, itemCount, externalFraction) {
         derivedStateOf {
-            if (!gridState.canScrollForward) return@derivedStateOf 1f
-            if (!gridState.canScrollBackward) return@derivedStateOf 0f
-            val info = gridState.layoutInfo
+            val override = externalFraction
+            if (override != null) return@derivedStateOf override
+            val state = gridState ?: return@derivedStateOf 0f
+            if (!state.canScrollForward) return@derivedStateOf 1f
+            if (!state.canScrollBackward) return@derivedStateOf 0f
+            val info = state.layoutInfo
             val total = info.totalItemsCount
             if (total <= 1) return@derivedStateOf 0f
             var anchor = 0
@@ -259,8 +264,13 @@ fun GridFastScrollRail(
                             dragLabel = labelResolver.value(scrollIndex)
                                 ?: fastScrollLabelFromMarkers(markersState.value, scrollIndex)
                             scrollJob?.cancel()
-                            scrollJob = scope.launch {
-                                gridState.scrollToItem(scrollIndex)
+                            val jump = onScrollToIndex
+                            if (jump != null) {
+                                jump(scrollIndex)
+                            } else {
+                                scrollJob = scope.launch {
+                                    gridState?.scrollToItem(scrollIndex)
+                                }
                             }
                         }
                         scrubAtY(down.position.y)

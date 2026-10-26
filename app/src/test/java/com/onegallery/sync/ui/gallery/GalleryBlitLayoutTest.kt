@@ -1,0 +1,59 @@
+package com.onegallery.sync.ui.gallery
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class GalleryBlitLayoutTest {
+
+    @Test
+    fun headersSpanTheRowAndPhotosFillColumns() {
+        val kinds = listOf("year", "a", "b", "c", "d")
+        val layout = buildBlitLayout(
+            count = kinds.size,
+            isHeader = { kinds[it] == "year" },
+            isYear = { kinds[it] == "year" },
+            pathAt = { if (kinds[it] == "year") null else kinds[it] },
+            titleAt = { if (kinds[it] == "year") "2024" else null },
+            width = 340,
+            cellMin = 100,
+            gap = 4,
+            padStart = 0,
+            padEnd = 0,
+            padTop = 0,
+            padBottom = 0,
+            headerHeight = 40,
+            yearHeaderHeight = 50,
+        )
+        assertEquals(3, layout.columns)
+        assertEquals(110, layout.cellSize)
+        assertEquals("2024", layout.slots[0].title)
+        assertEquals(50, layout.slots[0].height)
+        assertEquals("a", blitPathAt(layout.slots, 10, 60))
+        assertEquals("b", blitPathAt(layout.slots, 120, 60))
+        assertEquals("d", blitPathAt(layout.slots, 10, 50 + 110 + 4 + 10))
+        assertNull(blitPathAt(layout.slots, 10, 10))
+    }
+
+    @Test
+    fun firstVisibleSkipsSlotsAboveTheScroll() {
+        val layout = buildBlitLayout(
+            count = 4,
+            isHeader = { false },
+            isYear = { false },
+            pathAt = { "p$it" },
+            titleAt = { null },
+            width = 100,
+            cellMin = 100,
+            gap = 0,
+            padStart = 0,
+            padEnd = 0,
+            padTop = 0,
+            padBottom = 0,
+            headerHeight = 10,
+            yearHeaderHeight = 10,
+        )
+        assertEquals(0, blitFirstVisibleIndex(layout.slots, 0))
+        assertEquals(2, blitFirstVisibleIndex(layout.slots, layout.slots[2].top + 1))
+    }
+}

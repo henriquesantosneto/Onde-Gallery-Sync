@@ -127,11 +127,6 @@ fun GalleryScreen(
     }
     val mediaCellMin = gridAdaptiveMinSize(baseMinDp = 120f, zoomScale = gridPinch.scale)
     val density = LocalDensity.current
-    val gridThumbPx = remember(mediaCellMin, density) {
-        with(density) {
-            GalleryThumbnailModels.gridPixelSize(mediaCellMin.roundToPx())
-        }
-    }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
     var showMediaDetails by remember { mutableStateOf(false) }
@@ -328,19 +323,7 @@ fun GalleryScreen(
             else -> {
                 val dateTimeline = isDateTimelineSort(gridFrame.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
-                val gridState = rememberSaveable(saver = LazyGridState.Saver) {
-                    LazyGridState()
-                }
                 val galleryScrollToTop by viewModel.galleryScrollToTopRequests.collectAsStateWithLifecycle()
-                var lastGalleryScrollToTopHandled by remember {
-                    mutableIntStateOf(galleryScrollToTop)
-                }
-                LaunchedEffect(galleryScrollToTop) {
-                    if (galleryScrollToTop > lastGalleryScrollToTopHandled) {
-                        lastGalleryScrollToTopHandled = galleryScrollToTop
-                        gridState.scrollToItem(0)
-                    }
-                }
                 val timelinePresorted = isDateTimelineSort(gridFrame.sortOrder)
                 val gridEntries = remember(gridItems, gridFrame.sortOrder, timelineGrouping, timelinePresorted) {
                     buildGalleryGridEntries(
@@ -350,146 +333,33 @@ fun GalleryScreen(
                         itemsAlreadySortedForTimeline = timelinePresorted,
                     )
                 }
-                val stickyBarHeightPx = remember(density) {
-                    with(density) { GalleryStickyTimelineBarHeight.roundToPx() }
-                }
-                val gridTopPadding = if (dateTimeline) GalleryStickyTimelineBarHeight else 4.dp
-                val timelineSticky = rememberTimelineStickyUiState(
-                    gridState = gridState,
-                    entries = if (dateTimeline) gridEntries else emptyList(),
+                GalleryBlitPhotoGrid(
+                    entries = gridEntries,
+                    dateTimeline = dateTimeline,
                     gridScale = gridPinch.scale,
-                    enabled = dateTimeline,
-                    stickyBarHeightPx = stickyBarHeightPx,
-                )
-                LaunchedEffect(gridState, gridEntries, gridThumbPx) {
-                    snapshotFlow { gridState.isScrollInProgress }
-                        .distinctUntilChanged()
-                        .collect { scrolling ->
-                            if (scrolling) return@collect
-                            delay(120)
-                            if (gridState.isScrollInProgress) return@collect
-                            val visible = gridState.layoutInfo.visibleItemsInfo
-                            if (visible.isEmpty()) return@collect
-                            var first = Int.MAX_VALUE
-                            var last = -1
-                            for (item in visible) {
-                                if (item.index < first) first = item.index
-                                if (item.index > last) last = item.index
-                            }
-                            prefetchGalleryGridThumbs(
-                                context = context,
-                                mediaCache = mediaCacheRepository,
-                                entries = gridEntries,
-                                firstVisible = first,
-                                lastVisible = last,
-                                sizePx = gridThumbPx,
-                            )
-                        }
-                }
-                LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
-                    if (!browseGridHasMore) return@LaunchedEffect
-                    snapshotFlow {
-                        val scrolling = gridState.isScrollInProgress
-                        val visible = gridState.layoutInfo.visibleItemsInfo
-                        val nearEnd = if (visible.isEmpty()) {
-                            false
-                        } else {
-                            visible.last().index >= gridEntries.lastIndex -
-                                GalleryGridPagination.loadMoreVisibleTailMargin
-                        }
-                        scrolling to nearEnd
-                    }
-                        .distinctUntilChanged()
-                        .collect { (scrolling, nearEnd) ->
-                            if (!scrolling && nearEnd) {
-                                viewModel.loadMoreGridItems()
-                            }
-                        }
-                }
-                val gridFlingBehavior = rememberGalleryGridFlingBehavior()
-                val hitTester = remember { PhotoGridHitTester() }
-                hitTester.gridState = gridState
-                hitTester.entries = gridEntries
-                ProvideGalleryGridScrollState(
-                    gridState = gridState,
-                    zeroDecodeWhileScrolling = galleryPreferences.zeroDecodeWhileScrolling,
+                    cellMinPx = with(density) { mediaCellMin.roundToPx() },
+                    selectionMode = selectionMode,
+                    selectedPaths = selectedPaths,
+                    mediaCache = mediaCacheRepository,
+                    scrollToTopToken = galleryScrollToTop,
+                    onOpen = { path ->
+                        onOpenItem(URLEncoder.encode(path, StandardCharsets.UTF_8.name()))
+                    },
+                    onToggle = { path -> viewModel.toggleSelection(path) },
+                    onLongPress = { path -> viewModel.enterSelectionMode(path) },
+                    onDragSelect = { path -> viewModel.enterSelectionMode(path) },
+                    onPinch = gridPinch.applyPinch,
+                    onMultiTouch = gridPinch.setMultiTouch,
+                    onNearEnd = {
+                        if (browseGridHasMore) viewModel.loadMoreGridItems()
+                    },
                     onScrollEnd = {
                         syncCoordinator.flushPendingGalleryDisplayRefreshIfAny()
                     },
-                ) {
-                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
-                        .then(gridPinch.gridModifier),
-                ) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = mediaCellMin),
-                        state = gridState,
-                        flingBehavior = gridFlingBehavior,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
-                            start = 8.dp,
-                            end = 8.dp + if (dateTimeline) GalleryFastScrollRailReservedWidth else 0.dp,
-                            top = gridTopPadding,
-                            bottom = 4.dp,
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        items(
-                            items = gridEntries,
-                            key = { it.key },
-                            contentType = { entry ->
-                                when (entry) {
-                                    is GalleryGridEntry.Header -> "header"
-                                    is GalleryGridEntry.Photo -> "photo"
-                                }
-                            },
-                            span = { entry ->
-                                when (entry) {
-                                    is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
-                                    is GalleryGridEntry.Photo -> GridItemSpan(1)
-                                }
-                            },
-                        ) { entry ->
-                            when (entry) {
-                                is GalleryGridEntry.Header -> {
-                                    TimelineSectionHeader(
-                                        title = entry.header.title,
-                                        kind = entry.header.kind,
-                                    )
-                                }
-                                is GalleryGridEntry.Photo -> {
-                                    TimelinePhotoCell(
-                                        item = entry.item,
-                                        selectionMode = selectionMode,
-                                        selected = entry.item.canonicalPath in selectedPaths,
-                                        gridPinch = gridPinch,
-                                        gridThumbPx = gridThumbPx,
-                                        viewModel = viewModel,
-                                        hitTester = hitTester,
-                                        onOpenItem = onOpenItem,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    if (dateTimeline) {
-                        GalleryStickyTimelineBar(
-                            title = timelineSticky.label,
-                            modifier = Modifier.align(Alignment.TopCenter),
-                        )
-                        GalleryTimelineFastScrollRail(
-                            gridState = gridState,
-                            entries = gridEntries,
-                            gridScale = gridPinch.scale,
-                            timelineGrouping = timelineGrouping,
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                        )
-                    }
-                }
-                }
+                        .padding(padding),
+                )
             }
         }
     }
@@ -580,135 +450,5 @@ fun GalleryScreen(
         )
     }
 
-}
-
-@Composable
-private fun TimelinePhotoCell(
-    item: GalleryDisplayItem,
-    selectionMode: Boolean,
-    selected: Boolean,
-    gridPinch: GalleryGridPinchZoom,
-    gridThumbPx: Int,
-    viewModel: GalleryViewModel,
-    hitTester: PhotoGridHitTester,
-    onOpenItem: (String) -> Unit,
-) {
-    val haptics = LocalHapticFeedback.current
-    MediaThumbnail(
-        item = item,
-        selectionMode = selectionMode,
-        selected = selected,
-        gridZoomScale = gridPinch.scale,
-        gridThumbPx = gridThumbPx,
-        gesturesBlocked = { gridPinch.blockItemGestures },
-        onOpen = {
-            val encoded = URLEncoder.encode(
-                item.canonicalPath,
-                StandardCharsets.UTF_8.name(),
-            )
-            onOpenItem(encoded)
-        },
-        onToggle = { viewModel.toggleSelection(item.canonicalPath) },
-        onLongPress = {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            viewModel.enterSelectionMode(item.canonicalPath)
-        },
-        onDrag = { local ->
-            val path = hitTester.pathAt(item.canonicalPath, local) ?: return@MediaThumbnail
-            viewModel.enterSelectionMode(path)
-        },
-    )
-}
-
-@Composable
-private fun TimelineSectionHeader(
-    title: String,
-    kind: TimelineHeaderKind,
-    hiddenInStickyZone: Boolean = false,
-) {
-    if (hiddenInStickyZone) {
-        Box(Modifier.fillMaxWidth().height(0.dp))
-        return
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = if (kind == TimelineHeaderKind.YEAR) 12.dp else 6.dp)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Text(
-            text = title,
-            style = when (kind) {
-                TimelineHeaderKind.YEAR -> MaterialTheme.typography.headlineSmall
-                TimelineHeaderKind.MONTH, TimelineHeaderKind.DAY -> MaterialTheme.typography.titleMedium
-            },
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-        )
-    }
-}
-
-@Composable
-private fun MediaThumbnail(
-    item: GalleryDisplayItem,
-    selectionMode: Boolean,
-    selected: Boolean,
-    gridZoomScale: Float,
-    gridThumbPx: Int,
-    gesturesBlocked: () -> Boolean,
-    onOpen: () -> Unit,
-    onToggle: () -> Unit,
-    onLongPress: () -> Unit,
-    onDrag: (Offset) -> Unit,
-) {
-    val overlayPad = gridOverlayPadding(gridZoomScale)
-    val overlayIconSize = gridOverlayIconSize(gridZoomScale)
-    Box(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .photoMultiSelectGesture(
-                gesturesBlocked = gesturesBlocked,
-                selectionMode = { selectionMode },
-                onOpen = onOpen,
-                onToggle = onToggle,
-                onLongPress = onLongPress,
-                onDrag = onDrag,
-            ),
-    ) {
-        GalleryThumbnailImage(
-            item = item,
-            contentDescription = item.displayName,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            style = GalleryThumbnailStyle.Grid,
-            sizePx = gridThumbPx,
-        )
-        if (selectionMode) {
-            Icon(
-                imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                contentDescription = null,
-                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(overlayPad)
-                    .size(overlayIconSize),
-            )
-        }
-        galleryGridCloudBadge(item)?.let { cloudState ->
-            GalleryCloudBadge(
-                state = cloudState,
-                iconSize = overlayIconSize,
-                modifier = Modifier.align(Alignment.TopEnd).padding(overlayPad),
-            )
-        }
-        if (item.kind == MediaKind.VIDEO) {
-            VideoDurationOverlay(
-                durationMs = item.videoDurationMs,
-                gridZoomScale = gridZoomScale,
-                modifier = Modifier.align(Alignment.BottomStart).padding(overlayPad),
-            )
-        }
-    }
 }
 
