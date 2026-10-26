@@ -551,12 +551,13 @@ fun OneGalleryApp(
 
     // Na foto, o MediaDetailScreen trata voltar (seleção/detalhes/sair). Aqui só grade e álbuns.
     val galleryUi by galleryViewModel.state.collectAsStateWithLifecycle()
+    val photoSelectionMode by galleryViewModel.photoSelectionMode.collectAsStateWithLifecycle()
     val onMediaDetail = currentRoute?.startsWith("media/") == true
     val interceptBackForSelection = !onMediaDetail &&
-        (galleryUi.selectionMode || galleryUi.albumSelectionMode)
+        (photoSelectionMode || galleryUi.albumSelectionMode)
     BackHandler(enabled = interceptBackForSelection) {
         when {
-            galleryUi.selectionMode -> galleryViewModel.clearSelection()
+            photoSelectionMode -> galleryViewModel.clearSelection()
             galleryUi.albumSelectionMode -> galleryViewModel.clearAlbumSelection()
         }
     }

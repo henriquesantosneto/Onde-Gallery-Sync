@@ -1,7 +1,5 @@
 package com.onegallery.sync.ui.gallery
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -47,7 +45,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.Dp
@@ -85,6 +88,8 @@ fun GalleryScreen(
     routePlaceTitle: String? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val selectionMode by viewModel.photoSelectionMode.collectAsStateWithLifecycle()
+    val selectedPaths by viewModel.photoSelectedPaths.collectAsStateWithLifecycle()
     LaunchedEffect(routeAlbumFolderKey) {
         routeAlbumFolderKey?.let { viewModel.setAlbumFilter(it) }
     }
@@ -165,7 +170,7 @@ fun GalleryScreen(
         }
     }
     val title = when {
-        state.selectionMode -> "${state.selectedPaths.size} selecionado(s)"
+        selectionMode -> "${selectedPaths.size} selecionado(s)"
         requiresActiveBrowseFilter && routePlaceTitle != null -> routePlaceTitle
         requiresActiveBrowseFilter && routeAlbumFolderKey != null ->
             SyncPaths.albumListDisplayName(routeAlbumFolderKey)
@@ -177,7 +182,7 @@ fun GalleryScreen(
     val filteredBrowse = requiresActiveBrowseFilter &&
         (state.locationFilter != null || state.albumFilter != null ||
             routeAlbumFolderKey != null || routePlaceMatchKey != null)
-    val browseMediaCountLine = if (filteredBrowse && !state.selectionMode) {
+    val browseMediaCountLine = if (filteredBrowse && !selectionMode) {
         val photos = fullBrowseGridItems.count { it.kind == MediaKind.IMAGE }
         val videos = fullBrowseGridItems.count { it.kind == MediaKind.VIDEO }
         formatMediaCount(photos, videos)
@@ -202,7 +207,7 @@ fun GalleryScreen(
                     }
                 },
                 navigationIcon = {
-                    if (!state.selectionMode && filteredBrowse) {
+                    if (!selectionMode && filteredBrowse) {
                         IconButton(
                             onClick = {
                                 viewModel.clearBrowseFilters()
@@ -217,11 +222,11 @@ fun GalleryScreen(
                     }
                 },
                 actions = {
-                    if (state.selectionMode) {
+                    if (selectionMode) {
                         IconButton(onClick = { showMoveDialog = true }) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                         }
-                        if (state.selectedPaths.isNotEmpty()) {
+                        if (selectedPaths.isNotEmpty()) {
                             IconButton(onClick = { showDeleteConfirm = true }) {
                                 Icon(Icons.Outlined.Delete, contentDescription = "Excluir")
                             }
@@ -229,7 +234,7 @@ fun GalleryScreen(
                                 onClick = {
                                     shareGalleryMedia(
                                         context,
-                                        state.selectedPaths,
+                                        selectedPaths,
                                         listOf(state.libraryItems, state.items),
                                     )?.let(viewModel::showMessage)
                                 },
@@ -377,6 +382,9 @@ fun GalleryScreen(
                         }
                 }
                 val gridFlingBehavior = rememberGalleryGridFlingBehavior()
+                val hitTester = remember { PhotoGridHitTester() }
+                hitTester.gridState = gridState
+                hitTester.entries = gridEntries
                 ProvideGalleryGridScrollState(
                     gridState = gridState,
                     zeroDecodeWhileScrolling = galleryPreferences.zeroDecodeWhileScrolling,
@@ -394,7 +402,9 @@ fun GalleryScreen(
                         columns = GridCells.Adaptive(minSize = mediaCellMin),
                         state = gridState,
                         flingBehavior = gridFlingBehavior,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned { hitTester.gridCoordinates = it },
                         contentPadding = PaddingValues(
                             start = 8.dp,
                             end = 8.dp + if (dateTimeline) GalleryFastScrollRailReservedWidth else 0.dp,
@@ -425,11 +435,12 @@ fun GalleryScreen(
                                 is GalleryGridEntry.Photo -> {
                                     TimelinePhotoCell(
                                         item = entry.item,
-                                        selectionMode = state.selectionMode,
-                                        selected = entry.item.canonicalPath in state.selectedPaths,
+                                        selectionMode = selectionMode,
+                                        selected = entry.item.canonicalPath in selectedPaths,
                                         gridPinch = gridPinch,
                                         gridThumbPx = gridThumbPx,
                                         viewModel = viewModel,
+                                        hitTester = hitTester,
                                         onOpenItem = onOpenItem,
                                     )
                                 }
@@ -455,9 +466,9 @@ fun GalleryScreen(
         }
     }
 
-    if (showMediaDetails && state.selectedPaths.isNotEmpty()) {
+    if (showMediaDetails && selectedPaths.isNotEmpty()) {
         MediaDetailsBottomSheet(
-            canonicalPaths = state.selectedPaths.toList(),
+            canonicalPaths = selectedPaths.toList(),
             displayItems = gridItems,
             syncCoordinator = syncCoordinator,
             mediaCacheRepository = mediaCacheRepository,
@@ -465,8 +476,8 @@ fun GalleryScreen(
         )
     }
 
-    if (showDeleteConfirm && state.selectedPaths.isNotEmpty()) {
-        val selectedCount = state.selectedPaths.size
+    if (showDeleteConfirm && selectedPaths.isNotEmpty()) {
+        val selectedCount = selectedPaths.size
         DeleteSelectionDialog(
             count = selectedCount,
             onDismiss = { showDeleteConfirm = false },
@@ -481,8 +492,8 @@ fun GalleryScreen(
         )
     }
 
-    if (showAllFilesForDelete && state.selectedPaths.isNotEmpty()) {
-        val paths = state.selectedPaths.toList()
+    if (showAllFilesForDelete && selectedPaths.isNotEmpty()) {
+        val paths = selectedPaths.toList()
         AllFilesAccessForLocalRemovalDialog(
             count = paths.size,
             purpose = LocalMediaRemovalPrompt.DELETE,
@@ -503,8 +514,8 @@ fun GalleryScreen(
         )
     }
 
-    if (showAllFilesForRelease && state.selectedPaths.isNotEmpty()) {
-        val paths = state.selectedPaths.toList()
+    if (showAllFilesForRelease && selectedPaths.isNotEmpty()) {
+        val paths = selectedPaths.toList()
         AllFilesAccessForLocalRemovalDialog(
             count = paths.size,
             purpose = LocalMediaRemovalPrompt.RELEASE_SPACE,
@@ -551,28 +562,32 @@ private fun TimelinePhotoCell(
     gridPinch: GalleryGridPinchZoom,
     gridThumbPx: Int,
     viewModel: GalleryViewModel,
+    hitTester: PhotoGridHitTester,
     onOpenItem: (String) -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     MediaThumbnail(
         item = item,
         selectionMode = selectionMode,
         selected = selected,
         gridZoomScale = gridPinch.scale,
         gridThumbPx = gridThumbPx,
-        gesturesEnabled = !gridPinch.blockItemGestures,
-        onClick = {
-            if (selectionMode) {
-                viewModel.toggleSelection(item.canonicalPath)
-            } else {
-                val encoded = URLEncoder.encode(
-                    item.canonicalPath,
-                    StandardCharsets.UTF_8.name(),
-                )
-                onOpenItem(encoded)
-            }
+        gesturesBlocked = { gridPinch.blockItemGestures },
+        onOpen = {
+            val encoded = URLEncoder.encode(
+                item.canonicalPath,
+                StandardCharsets.UTF_8.name(),
+            )
+            onOpenItem(encoded)
         },
-        onLongClick = {
+        onToggle = { viewModel.toggleSelection(item.canonicalPath) },
+        onLongPress = { _, _ ->
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             viewModel.enterSelectionMode(item.canonicalPath)
+        },
+        onDrag = { cell, local ->
+            val path = hitTester.pathAt(cell, local) ?: return@MediaThumbnail
+            viewModel.enterSelectionMode(path)
         },
     )
 }
@@ -606,7 +621,6 @@ private fun TimelineSectionHeader(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaThumbnail(
     item: GalleryDisplayItem,
@@ -614,9 +628,11 @@ private fun MediaThumbnail(
     selected: Boolean,
     gridZoomScale: Float,
     gridThumbPx: Int,
-    gesturesEnabled: Boolean = true,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    gesturesBlocked: () -> Boolean,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    onLongPress: (LayoutCoordinates, Offset) -> Unit,
+    onDrag: (LayoutCoordinates, Offset) -> Unit,
 ) {
     val context = LocalContext.current
     val overlayPad = gridOverlayPadding(gridZoomScale)
@@ -624,12 +640,13 @@ private fun MediaThumbnail(
     Box(
         modifier = Modifier
             .aspectRatio(1f)
-            .then(
-                if (gesturesEnabled) {
-                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                } else {
-                    Modifier
-                },
+            .photoMultiSelectGesture(
+                gesturesBlocked = gesturesBlocked,
+                selectionMode = { selectionMode },
+                onOpen = onOpen,
+                onToggle = onToggle,
+                onLongPress = onLongPress,
+                onDrag = onDrag,
             ),
     ) {
         GalleryThumbnailImage(

@@ -95,11 +95,9 @@ private data class SelectionSlice(
     val browseFilter: GalleryBrowseFilter,
     val isLoading: Boolean,
     val error: String?,
-    val selecting: Boolean,
 )
 
 private data class SortSlice(
-    val selected: Set<String>,
     val order: GallerySortOrder,
     val albumSort: AlbumListSort,
 )
@@ -108,8 +106,6 @@ private data class UiControls(
     val browseFilter: GalleryBrowseFilter,
     val isLoading: Boolean,
     val error: String?,
-    val selecting: Boolean,
-    val selected: Set<String>,
     val order: GallerySortOrder,
     val albumSort: AlbumListSort,
     val albumSelecting: Boolean,
@@ -139,6 +135,10 @@ class GalleryViewModel(
     private val errorState = MutableStateFlow<String?>(null)
     private val selectionMode = MutableStateFlow(false)
     private val selectedPaths = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Fora da montagem pesada da grade — o check da seleção aparece no mesmo toque. */
+    val photoSelectionMode: StateFlow<Boolean> = selectionMode
+    val photoSelectedPaths: StateFlow<Set<String>> = selectedPaths
     private val sortOrder = MutableStateFlow(galleryPreferences.sortOrder)
     private val albumListSort = MutableStateFlow(galleryPreferences.albumListSort)
     private val albumSelectionMode = MutableStateFlow(false)
@@ -676,11 +676,11 @@ class GalleryViewModel(
     }
 
     private val uiControls = combine(
-        combine(browseFilter, loading, errorState, selectionMode) { filter, isLoading, error, selecting ->
-            SelectionSlice(filter, isLoading, error, selecting)
+        combine(browseFilter, loading, errorState) { filter, isLoading, error ->
+            SelectionSlice(filter, isLoading, error)
         },
-        combine(selectedPaths, sortOrder, albumListSort) { selected, order, albumSort ->
-            SortSlice(selected, order, albumSort)
+        combine(sortOrder, albumListSort) { order, albumSort ->
+            SortSlice(order, albumSort)
         },
         combine(albumSelectionMode, selectedAlbumTitles) { selecting, titles ->
             selecting to titles
@@ -690,8 +690,6 @@ class GalleryViewModel(
             browseFilter = selection.browseFilter,
             isLoading = selection.isLoading,
             error = selection.error,
-            selecting = selection.selecting,
-            selected = sort.selected,
             order = sort.order,
             albumSort = sort.albumSort,
             albumSelecting = albumSelection.first,
@@ -1255,8 +1253,8 @@ class GalleryViewModel(
             placeBrowseMatchKey = placeBrowseMatchKey,
             sortOrder = controls.order,
             albumListSort = controls.albumSort,
-            selectionMode = controls.selecting,
-            selectedPaths = controls.selected,
+            selectionMode = selectionMode.value,
+            selectedPaths = selectedPaths.value,
             albumSelectionMode = controls.albumSelecting,
             selectedAlbumTitles = controls.selectedAlbums,
             error = controls.error,

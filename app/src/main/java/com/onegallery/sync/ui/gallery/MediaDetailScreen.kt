@@ -65,6 +65,8 @@ fun MediaDetailScreen(
     onOpenPlacesMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val selectionMode by viewModel.photoSelectionMode.collectAsStateWithLifecycle()
+    val selectedPaths by viewModel.photoSelectedPaths.collectAsStateWithLifecycle()
     val liveItems = state.libraryItems
     val context = LocalContext.current
     val galleryPreferences = remember(context) {
@@ -132,7 +134,7 @@ fun MediaDetailScreen(
             context,
         )
     }
-    val currentSelected = currentPath != null && currentPath in state.selectedPaths
+    val currentSelected = currentPath != null && currentPath in selectedPaths
     val barTitle = currentItem?.displayName ?: "Mídia"
     val barSubtitle = if (pagerPaths.size > 1) {
         "${pagerState.currentPage + 1} / ${pagerPaths.size}"
@@ -219,7 +221,7 @@ fun MediaDetailScreen(
             showAllFilesForDelete -> showAllFilesForDelete = false
             showDeleteConfirm -> showDeleteConfirm = false
             showMoveDialog -> showMoveDialog = false
-            state.selectionMode -> viewModel.clearSelection()
+            selectionMode -> viewModel.clearSelection()
             immersive -> immersive = false
             detailsPanelOpen -> {
                 detailsSettleFraction = 0f
@@ -357,7 +359,7 @@ fun MediaDetailScreen(
                                         detailsDragFraction = 0f
                                         detailsDragging = false
                                     }
-                                    state.selectionMode -> viewModel.clearSelection()
+                                    selectionMode -> viewModel.clearSelection()
                                     else -> leaveDetail()
                                 }
                             },
@@ -366,11 +368,11 @@ fun MediaDetailScreen(
                         }
                     },
                     actions = {
-                        if (state.selectionMode) {
+                        if (selectionMode) {
                             IconButton(onClick = { showMoveDialog = true }) {
                                 Icon(Icons.Outlined.DriveFileMove, contentDescription = "Mover")
                             }
-                            if (state.selectedPaths.isNotEmpty()) {
+                            if (selectedPaths.isNotEmpty()) {
                                 IconButton(onClick = { showDeleteConfirm = true }) {
                                     Icon(
                                         Icons.Outlined.Delete,
@@ -382,7 +384,7 @@ fun MediaDetailScreen(
                                     onClick = {
                                         shareGalleryMedia(
                                             context,
-                                            state.selectedPaths,
+                                            selectedPaths,
                                             listOf(liveItems),
                                         )?.let(viewModel::showMessage)
                                     },
@@ -399,7 +401,7 @@ fun MediaDetailScreen(
                                     showDetails = detailPaths.isNotEmpty(),
                                     onDetails = { openDetailsToSimple() },
                                     onFreeSpace = {
-                                        val paths = state.selectedPaths.toList()
+                                        val paths = selectedPaths.toList()
                                         if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                             viewModel.releaseLocalSpaceSelected()
                                         } else {
@@ -416,8 +418,8 @@ fun MediaDetailScreen(
                         } else if (currentPath != null) {
                             IconButton(
                                 onClick = {
-                                    if (state.selectionMode) {
-                                        if (currentSelected && state.selectedPaths.size == 1) {
+                                    if (selectionMode) {
+                                        if (currentSelected && selectedPaths.size == 1) {
                                             viewModel.clearSelection()
                                         } else {
                                             viewModel.toggleSelection(currentPath)
@@ -534,8 +536,8 @@ fun MediaDetailScreen(
     }
 
     if (showDeleteConfirm) {
-        val deleteCount = if (state.selectionMode && state.selectedPaths.isNotEmpty()) {
-            state.selectedPaths.size
+        val deleteCount = if (selectionMode && selectedPaths.isNotEmpty()) {
+            selectedPaths.size
         } else if (currentPath != null) {
             1
         } else {
@@ -548,8 +550,8 @@ fun MediaDetailScreen(
                 onConfirm = {
                     showDeleteConfirm = false
                     val paths = when {
-                        state.selectionMode && state.selectedPaths.isNotEmpty() ->
-                            state.selectedPaths.toList()
+                        selectionMode && selectedPaths.isNotEmpty() ->
+                            selectedPaths.toList()
                         currentPath != null -> listOf(currentPath)
                         else -> emptyList()
                     }

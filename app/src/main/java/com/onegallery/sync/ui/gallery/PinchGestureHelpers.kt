@@ -55,10 +55,9 @@ fun Modifier.gridPinchZoomDetector(
                 pressed.forEach { it.consume() }
             } else {
                 previousDistance = 0f
-                if (!pressed.any { it.pressed }) {
+                // Um dedo só não pode deixar o toque longo sem clique até soltar.
+                if (hadTwoPointers || pressed.isEmpty()) {
                     hadTwoPointers = false
-                    onMultiTouchActive(false)
-                } else if (!hadTwoPointers) {
                     onMultiTouchActive(false)
                 }
             }
