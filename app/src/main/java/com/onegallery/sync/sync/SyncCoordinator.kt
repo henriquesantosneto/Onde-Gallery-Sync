@@ -568,10 +568,13 @@ class SyncCoordinator(
         refreshExtraCancellableWork()
     }
 
-    private fun prepareSyncSession(userInitiated: Boolean) {
+    private suspend fun prepareSyncSession(userInitiated: Boolean) {
         if (userInitiated) {
             resetSyncCancel()
             syncPreferences.clearAllThumbnailFailureCounts()
+            withContext(Dispatchers.IO) {
+                mediaCacheRepository.discardSyncFailurePlaceholders()
+            }
         } else {
             ensureNotCancelled()
         }

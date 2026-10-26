@@ -88,9 +88,18 @@ class GalleryThumbnailService(
         ) != null
     }
 
-    fun needsThumbnailPrefetch(row: SyncMetadataEntity): Boolean {
-        if (!canBuildThumbnail(row)) return false
-        return !rowHasGalleryThumbnail(row)
+    fun needsThumbnailPrefetch(row: SyncMetadataEntity): Boolean =
+        thumbnailStillNeedsPrefetch(
+            canBuild = canBuildThumbnail(row),
+            hasDisplayableThumb = rowHasGalleryThumbnail(row),
+            hasGiveUpPlaceholder = hasGiveUpThumbnail(row),
+        )
+
+    /** Cinza 96px: a tentativa acabou. Não entra de novo na fila automática. */
+    fun hasGiveUpThumbnail(row: SyncMetadataEntity): Boolean {
+        val cached = mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId)
+            ?: return false
+        return mediaCacheRepository.isSyncFailurePlaceholderThumbnail(cached)
     }
 
     fun localContentUri(row: SyncMetadataEntity): Uri? {
@@ -157,18 +166,13 @@ class GalleryThumbnailService(
             persistMinimalPlaceholderThumbnail(row)?.let { return Result.success(it) }
             return Result.success(null)
         }
+        if (hasGiveUpThumbnail(row)) {
+            return Result.success(
+                mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId),
+            )
+        }
         val isVideo = GalleryMapper.isVideoFileName(row.displayName)
         val hasLocalSource = localContentUri(row) != null
-        if (hasLocalSource) {
-            mediaCacheRepository.committedThumbnailIncludingGiveUp(
-                row.canonicalPath,
-                row.oneDriveItemId,
-            )?.let { cached ->
-                if (mediaCacheRepository.isSyncFailurePlaceholderThumbnail(cached)) {
-                    mediaCacheRepository.invalidateCommittedThumbnail(row.canonicalPath, row.oneDriveItemId)
-                }
-            }
-        }
         val syncedOnGraph = !row.oneDriveItemId.isNullOrBlank() &&
             syncPreferences.syncMode == SyncMode.ONEDRIVE_GRAPH
         val cloudEligible = syncedOnGraph && networkMonitor.isOnline()
@@ -377,10 +381,6 @@ class GalleryThumbnailService(
 
         val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
         if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
-            if (!isVideo && hasLocalSource) {
-                syncPreferences.clearThumbnailFailure(canonicalPath)
-                return Result.success(null)
-            }
             persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
                 syncPreferences.clearThumbnailFailure(canonicalPath)
                 return Result.success(placeholder)
@@ -497,4 +497,15 @@ class GalleryThumbnailService(
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
         const val CLOUD_VIDEO_ON_DEMAND_FETCH_TIMEOUT_MS = 180_000L
     }
+}
+
+/** Fila automática: miniatura real ou cinza de desistência tira o item da pendência. */
+internal fun thumbnailStillNeedsPrefetch(
+    canBuild: Boolean,
+    hasDisplayableThumb: Boolean,
+    hasGiveUpPlaceholder: Boolean,
+): Boolean {
+    if (!canBuild) return false
+    if (hasGiveUpPlaceholder || hasDisplayableThumb) return false
+    return true
 }

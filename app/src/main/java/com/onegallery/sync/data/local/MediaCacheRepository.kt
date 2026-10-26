@@ -84,6 +84,26 @@ class MediaCacheRepository(context: Context) {
         return committed
     }
 
+    /**
+     * Sync manual: apaga o cinza 96px para tentar de novo.
+     * O sync automático não chama isto — senão os mesmos itens nunca saem da fila.
+     */
+    fun discardSyncFailurePlaceholders(): Int {
+        val files = thumbsDir.listFiles() ?: return 0
+        var removed = 0
+        for (file in files) {
+            if (!file.isFile || file.name.endsWith(".new")) continue
+            if (file.length() <= 0L || file.length() > 8_192L) continue
+            if (!isSyncFailurePlaceholderThumbnail(file)) continue
+            if (file.delete()) {
+                thumbOnDiskBySafeName.remove(file.name)
+                removed++
+            }
+        }
+        if (removed > 0) thumbExistsCache.clear()
+        return removed
+    }
+
     /** Varre `thumbs/` uma vez (IO barato) para acelerar filtros com biblioteca grande. */
     fun warmThumbnailExistsCache() {
         val files = thumbsDir.listFiles() ?: return
