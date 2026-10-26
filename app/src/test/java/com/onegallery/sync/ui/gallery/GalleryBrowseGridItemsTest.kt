@@ -177,4 +177,39 @@ class GalleryBrowseGridItemsTest {
         assertEquals(1, result.size)
         assertEquals("p", result.single().canonicalPath)
     }
+
+    @Test
+    fun albumRoute_listsCloudPhotoWhenThumbArrivesAfterTheRowWasBuilt() {
+        val path = "remote/photo.jpg"
+        galleryTestJpeg().copyTo(repo.thumbFile(path), overwrite = true)
+        val stale = GalleryDisplayItem(
+            canonicalPath = path,
+            displayName = "photo.jpg",
+            albumName = "Camera",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            oneDriveItemId = "remote-photo",
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = null,
+            cachedOriginal = null,
+            cachedPlaceholderThumb = null,
+            sortTimestamp = 4L,
+            showInBrowseGrid = false,
+        )
+        val visible = filterOneDriveGalleryBrowse(listOf(stale), repo)
+        assertEquals(listOf(path), visible.map { it.canonicalPath })
+        assertTrue(visible.single().belongsOnBrowseGridWithoutDisk())
+        val result = resolveBrowseGridItems(
+            requiresActiveBrowseFilter = true,
+            libraryItems = visible,
+            browseItemsFromState = emptyList(),
+            sortOrder = GallerySortOrder.DATE_NEWEST,
+            routeAlbumFolderKey = "Camera",
+            routePlaceMatchKey = null,
+            routePlaceTitle = null,
+            mediaCacheRepository = repo,
+        )
+        assertEquals(listOf(path), result.map { it.canonicalPath })
+    }
 }

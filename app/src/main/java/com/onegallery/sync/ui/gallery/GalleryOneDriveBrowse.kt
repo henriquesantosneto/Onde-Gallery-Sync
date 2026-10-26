@@ -36,7 +36,25 @@ fun filterOneDriveGalleryBrowse(
     onlyItemsWithThumbnail: Boolean = false,
 ): List<GalleryDisplayItem> {
     if (items.isEmpty()) return items
-    return items.filter { it.appearsInOneDriveGalleryBrowse(mediaCacheRepository) }
+    return items.mapNotNull { it.preparedForBrowseGrid(mediaCacheRepository) }
+}
+
+/**
+ * A contagem do álbum olha o JPEG no disco. A linha do índice pode ter sido montada
+ * antes desse arquivo existir (`showInBrowseGrid` falso). Gruda o arquivo aqui,
+ * fora da rolagem, para a lista de dentro usar o mesmo conjunto da contagem.
+ */
+fun GalleryDisplayItem.preparedForBrowseGrid(
+    mediaCacheRepository: MediaCacheRepository,
+): GalleryDisplayItem? {
+    if (GalleryMapper.isAudioFileName(displayName)) return null
+    if (kind != MediaKind.IMAGE && kind != MediaKind.VIDEO) return null
+    if (isLocalPhotoOnDevice() || hasLocalVideoCoverOnDevice()) {
+        return if (showInBrowseGrid) this else copy(showInBrowseGrid = true)
+    }
+    val file = cachedBrowseThumbFile(this, mediaCacheRepository) ?: return null
+    if (showInBrowseGrid && cachedPlaceholderThumb == file) return this
+    return copy(showInBrowseGrid = true, cachedPlaceholderThumb = file)
 }
 
 fun recomputeOneDriveShowInBrowseGrid(item: GalleryDisplayItem): Boolean =

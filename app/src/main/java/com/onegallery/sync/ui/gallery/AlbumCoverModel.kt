@@ -100,23 +100,27 @@ private fun albumCoverThumbFileAccept(
     return mediaCacheRepository.isDisplayableGalleryThumbFile(file)
 }
 
-fun hasCachedThumbnailFile(
+fun cachedBrowseThumbFile(
     item: GalleryDisplayItem,
     mediaCacheRepository: MediaCacheRepository,
-): Boolean {
+): File? {
     if (item.kind == MediaKind.VIDEO) {
-        return gridPaintFile(item, mediaCacheRepository) != null
+        return gridPaintFile(item, mediaCacheRepository)
     }
     val cached = mediaCacheRepository.displayableThumbnailIfCached(
         item.canonicalPath,
         item.oneDriveItemId,
     )
-    if (cached != null) return true
+    if (cached != null) return cached
     val stub = item.cachedPlaceholderThumb
-    return stub != null &&
-        !mediaCacheRepository.isSyncFailurePlaceholderThumbnail(stub) &&
-        mediaCacheRepository.isDisplayableGalleryThumbFile(stub)
+    if (stub == null || mediaCacheRepository.isSyncFailurePlaceholderThumbnail(stub)) return null
+    return stub.takeIf { mediaCacheRepository.isDisplayableGalleryThumbFile(it) }
 }
+
+fun hasCachedThumbnailFile(
+    item: GalleryDisplayItem,
+    mediaCacheRepository: MediaCacheRepository,
+): Boolean = cachedBrowseThumbFile(item, mediaCacheRepository) != null
 
 fun resolveAlbumCoverModel(
     items: List<GalleryDisplayItem>,

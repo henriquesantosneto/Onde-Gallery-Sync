@@ -345,7 +345,9 @@ class GalleryViewModel(
     }
 
     fun loadMoreGridItems() {
-        if (GalleryGridScrollGate.isUserScrollingGrid) return
+        // A grade só pede a próxima página com a rolagem parada. O flag global
+        // ainda está true nesse instante (a coleta da grade roda antes) e
+        // descartava o restante: o número do álbum ficava certo e a lista, curta.
         gridWindowLimit.update { current ->
             current + GalleryGridPagination.pageSize
         }
