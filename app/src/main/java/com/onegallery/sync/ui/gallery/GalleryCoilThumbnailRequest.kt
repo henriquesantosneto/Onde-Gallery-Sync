@@ -40,8 +40,8 @@ internal fun Modifier.galleryGridThumbnailLayer(style: GalleryThumbnailStyle): M
 }
 
 /**
- * Miniatura da grade: JPEG pequeno em RGB_565, já no cache de memória.
- * A rolagem só copia esse bitmap. Textura de hardware por célula ficou mais lenta.
+ * Miniatura da grade: textura já na GPU, do tamanho da célula, sem camada extra.
+ * Se ainda não está na memória, o [GridScrollImageInterceptor] espera a rolagem parar.
  */
 internal fun galleryGridImageRequest(
     context: Context,
@@ -54,10 +54,11 @@ internal fun galleryGridImageRequest(
         .size(sizePx)
         .precision(Precision.INEXACT)
         .crossfade(false)
-        .allowHardware(false)
-        .allowRgb565(true)
-        .bitmapConfig(Bitmap.Config.RGB_565)
+        .allowHardware(true)
+        .allowRgb565(false)
+        .bitmapConfig(Bitmap.Config.HARDWARE)
         .memoryCacheKey(cacheKey)
+        .setParameter(GRID_SCROLL_DEFER_KEY, true, null)
         .build()
 }
 

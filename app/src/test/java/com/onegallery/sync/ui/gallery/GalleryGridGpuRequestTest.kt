@@ -25,9 +25,10 @@ class GalleryGridGpuRequestTest {
             sizePx = 240,
             cacheKey = "camera/a.jpg:grid",
         )
-        assertFalse(request.allowHardware)
-        assertTrue(request.allowRgb565)
-        assertEquals(Bitmap.Config.RGB_565, request.bitmapConfig)
+        assertTrue(request.allowHardware)
+        assertFalse(request.allowRgb565)
+        assertEquals(Bitmap.Config.HARDWARE, request.bitmapConfig)
         assertEquals(Precision.INEXACT, request.precision)
+        assertEquals(true, request.parameters.value(GRID_SCROLL_DEFER_KEY))
     }
 }

@@ -187,9 +187,19 @@ fun GridFastScrollRail(
             if (!gridState.canScrollForward) return@derivedStateOf 1f
             if (!gridState.canScrollBackward) return@derivedStateOf 0f
             val info = gridState.layoutInfo
-            if (info.totalItemsCount <= 1) return@derivedStateOf 0f
-            val anchor = info.visibleItemsInfo.minByOrNull { it.offset.y }?.index ?: 0
-            anchor.toFloat() / (info.totalItemsCount - 1).coerceAtLeast(1)
+            val total = info.totalItemsCount
+            if (total <= 1) return@derivedStateOf 0f
+            var anchor = 0
+            var bestTop = Int.MAX_VALUE
+            val visible = info.visibleItemsInfo
+            for (index in visible.indices) {
+                val item = visible[index]
+                if (item.offset.y < bestTop) {
+                    bestTop = item.offset.y
+                    anchor = item.index
+                }
+            }
+            anchor.toFloat() / (total - 1)
         }
     }
     val thumbFraction = if (dragging) dragThumbFraction else scrollThumbFraction

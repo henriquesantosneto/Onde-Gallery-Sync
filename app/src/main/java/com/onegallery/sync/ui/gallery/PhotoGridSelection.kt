@@ -4,15 +4,12 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
 
 internal data class GridSelectionHit(
     val left: Int,
@@ -39,33 +36,38 @@ internal fun canonicalPathAtGridPoint(
 
 /** Converte o dedo na célula para a foto visível embaixo dele. */
 internal class PhotoGridHitTester {
-    var gridCoordinates: LayoutCoordinates? = null
     var entries: List<GalleryGridEntry> = emptyList()
     var gridState: LazyGridState? = null
 
-    fun pathAt(cell: LayoutCoordinates, local: Offset): String? {
-        val grid = gridCoordinates ?: return null
+    fun pathAt(anchorPath: String, local: Offset): String? {
         val state = gridState ?: return null
-        if (!cell.isAttached || !grid.isAttached) return null
-        val inGrid = runCatching { grid.localPositionOf(cell, local) }.getOrNull() ?: return null
-        val hits = state.layoutInfo.visibleItemsInfo.map { info ->
+        val visible = state.layoutInfo.visibleItemsInfo
+        val hits = ArrayList<GridSelectionHit>(visible.size)
+        var left = 0
+        var top = 0
+        var found = false
+        for (info in visible) {
             val path = (entries.getOrNull(info.index) as? GalleryGridEntry.Photo)
                 ?.item
                 ?.canonicalPath
-            GridSelectionHit(
-                left = info.offset.x,
-                top = info.offset.y,
-                width = info.size.width,
-                height = info.size.height,
-                canonicalPath = path,
+            hits.add(
+                GridSelectionHit(
+                    left = info.offset.x,
+                    top = info.offset.y,
+                    width = info.size.width,
+                    height = info.size.height,
+                    canonicalPath = path,
+                ),
             )
+            if (path == anchorPath) {
+                left = info.offset.x
+                top = info.offset.y
+                found = true
+            }
         }
-        return canonicalPathAtGridPoint(hits, inGrid.x, inGrid.y)
+        if (!found) return null
+        return canonicalPathAtGridPoint(hits, left + local.x, top + local.y)
     }
-}
-
-private class CellCoordinates {
-    var value: LayoutCoordinates? = null
 }
 
 /**
@@ -78,8 +80,8 @@ fun Modifier.photoMultiSelectGesture(
     selectionMode: () -> Boolean,
     onOpen: () -> Unit,
     onToggle: () -> Unit,
-    onLongPress: (LayoutCoordinates, Offset) -> Unit,
-    onDrag: (LayoutCoordinates, Offset) -> Unit,
+    onLongPress: () -> Unit,
+    onDrag: (Offset) -> Unit,
 ): Modifier {
     val blockedState = rememberUpdatedState(gesturesBlocked)
     val selectionState = rememberUpdatedState(selectionMode)
@@ -87,9 +89,7 @@ fun Modifier.photoMultiSelectGesture(
     val toggleState = rememberUpdatedState(onToggle)
     val longPressState = rememberUpdatedState(onLongPress)
     val dragState = rememberUpdatedState(onDrag)
-    val coordinates = remember { CellCoordinates() }
     return this
-        .onGloballyPositioned { coordinates.value = it }
         .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(
@@ -121,19 +121,13 @@ fun Modifier.photoMultiSelectGesture(
                     }
                     false -> Unit
                     null -> {
-                        val cell = coordinates.value
-                        if (cell != null && cell.isAttached) {
-                            longPressState.value(cell, origin)
-                        }
+                        longPressState.value()
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) break
                             change.consume()
-                            val current = coordinates.value
-                            if (current != null && current.isAttached) {
-                                dragState.value(current, change.position)
-                            }
+                            dragState.value(change.position)
                         }
                     }
                 }

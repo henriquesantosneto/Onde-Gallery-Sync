@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 object GalleryThumbnailModels {
     private val devicePosterSlots = Semaphore(2)
 
-    fun gridPixelSize(cellMinPx: Int): Int = (cellMinPx * 1.35f).toInt().coerceIn(128, 512)
+    fun gridPixelSize(cellMinPx: Int): Int = cellMinPx.coerceIn(96, 384)
 
     /**
      * Poster já existente no MediaStore. Não decodifica o vídeo no Coil

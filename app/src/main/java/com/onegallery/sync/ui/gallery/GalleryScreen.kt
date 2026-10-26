@@ -47,8 +47,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +67,7 @@ import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncPaths
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -362,6 +361,31 @@ fun GalleryScreen(
                     enabled = dateTimeline,
                     stickyBarHeightPx = stickyBarHeightPx,
                 )
+                LaunchedEffect(gridState, gridEntries, gridThumbPx) {
+                    snapshotFlow { gridState.isScrollInProgress }
+                        .distinctUntilChanged()
+                        .collect { scrolling ->
+                            if (scrolling) return@collect
+                            delay(120)
+                            if (gridState.isScrollInProgress) return@collect
+                            val visible = gridState.layoutInfo.visibleItemsInfo
+                            if (visible.isEmpty()) return@collect
+                            var first = Int.MAX_VALUE
+                            var last = -1
+                            for (item in visible) {
+                                if (item.index < first) first = item.index
+                                if (item.index > last) last = item.index
+                            }
+                            prefetchGalleryGridThumbs(
+                                context = context,
+                                mediaCache = mediaCacheRepository,
+                                entries = gridEntries,
+                                firstVisible = first,
+                                lastVisible = last,
+                                sizePx = gridThumbPx,
+                            )
+                        }
+                }
                 LaunchedEffect(gridState, gridEntries, browseGridHasMore) {
                     if (!browseGridHasMore) return@LaunchedEffect
                     snapshotFlow {
@@ -403,9 +427,7 @@ fun GalleryScreen(
                         columns = GridCells.Adaptive(minSize = mediaCellMin),
                         state = gridState,
                         flingBehavior = gridFlingBehavior,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .onGloballyPositioned { hitTester.gridCoordinates = it },
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 8.dp,
                             end = 8.dp + if (dateTimeline) GalleryFastScrollRailReservedWidth else 0.dp,
@@ -436,7 +458,6 @@ fun GalleryScreen(
                                     TimelineSectionHeader(
                                         title = entry.header.title,
                                         kind = entry.header.kind,
-                                        hiddenInStickyZone = entry.header.id in timelineSticky.hiddenHeaderIds,
                                     )
                                 }
                                 is GalleryGridEntry.Photo -> {
@@ -588,12 +609,12 @@ private fun TimelinePhotoCell(
             onOpenItem(encoded)
         },
         onToggle = { viewModel.toggleSelection(item.canonicalPath) },
-        onLongPress = { _, _ ->
+        onLongPress = {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             viewModel.enterSelectionMode(item.canonicalPath)
         },
-        onDrag = { cell, local ->
-            val path = hitTester.pathAt(cell, local) ?: return@MediaThumbnail
+        onDrag = { local ->
+            val path = hitTester.pathAt(item.canonicalPath, local) ?: return@MediaThumbnail
             viewModel.enterSelectionMode(path)
         },
     )
@@ -638,10 +659,9 @@ private fun MediaThumbnail(
     gesturesBlocked: () -> Boolean,
     onOpen: () -> Unit,
     onToggle: () -> Unit,
-    onLongPress: (LayoutCoordinates, Offset) -> Unit,
-    onDrag: (LayoutCoordinates, Offset) -> Unit,
+    onLongPress: () -> Unit,
+    onDrag: (Offset) -> Unit,
 ) {
-    val context = LocalContext.current
     val overlayPad = gridOverlayPadding(gridZoomScale)
     val overlayIconSize = gridOverlayIconSize(gridZoomScale)
     Box(
@@ -675,7 +695,7 @@ private fun MediaThumbnail(
                     .size(overlayIconSize),
             )
         }
-        galleryCloudOverlayState(item, context)?.let { cloudState ->
+        galleryGridCloudBadge(item)?.let { cloudState ->
             GalleryCloudBadge(
                 state = cloudState,
                 iconSize = overlayIconSize,

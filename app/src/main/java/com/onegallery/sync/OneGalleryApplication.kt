@@ -121,6 +121,7 @@ class OneGalleryApplication : Application() {
         Coil.setImageLoader(
             ImageLoader.Builder(this)
                 .components {
+                    add(com.onegallery.sync.ui.gallery.GridScrollImageInterceptor())
                     add(DiskThumbFetcher.Factory())
                     add(CachedThumbImageDecoderFactory())
                     add(VideoFrameDecoder.Factory())

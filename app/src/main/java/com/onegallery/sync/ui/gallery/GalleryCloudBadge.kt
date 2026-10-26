@@ -32,6 +32,32 @@ fun cloudBadgeState(item: GalleryDisplayItem, context: Context? = null): CloudSy
     return item.cloudState
 }
 
+/**
+ * Ícone da grade. Usa só o item já montado — a rolagem não consulta o MediaStore.
+ * O detalhe continua em [galleryCloudOverlayState].
+ */
+fun galleryGridCloudBadge(item: GalleryDisplayItem): CloudSyncState? {
+    if (item.oneDriveItemId != null) {
+        val onDevice = item.localUri != null || item.cachedOriginal != null
+        if (!onDevice && item.localReleasedForSpace) return CloudSyncState.CLOUD_ONLY
+        if (onDevice || (item.localMediaId != null && !item.localReleasedForSpace)) {
+            return CloudSyncState.SYNCED
+        }
+        return when (item.cloudState) {
+            CloudSyncState.PENDING_UPLOAD -> CloudSyncState.LOCAL_ONLY
+            else -> CloudSyncState.CLOUD_ONLY
+        }
+    }
+    if (item.localReleasedForSpace) return null
+    val onDevice = item.localUri != null || item.cachedOriginal != null || item.localMediaId != null
+    return when (item.cloudState) {
+        CloudSyncState.LOCAL_ONLY,
+        CloudSyncState.PENDING_UPLOAD,
+        -> if (onDevice) CloudSyncState.LOCAL_ONLY else null
+        else -> null
+    }
+}
+
 /** Ícone no canto da grade / detalhe: celular (só local), nuvem ou nuvem com ✓. */
 fun galleryCloudOverlayState(item: GalleryDisplayItem, context: Context): CloudSyncState? {
     if (item.oneDriveItemId != null) {

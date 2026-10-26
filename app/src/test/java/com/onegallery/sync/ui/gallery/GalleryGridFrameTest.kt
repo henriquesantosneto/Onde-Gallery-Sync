@@ -3,6 +3,7 @@ package com.onegallery.sync.ui.gallery
 import com.onegallery.sync.TestApplication
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
+import org.junit.Assert.assertEquals
 import com.onegallery.sync.sync.PendingDeleteTarget
 import java.io.File
 import org.junit.Assert.assertFalse
@@ -27,6 +28,25 @@ class GalleryGridFrameTest {
         val current = frame(listOf(photo("a.jpg", null)))
         val next = frame(listOf(photo("a.jpg", File("/cache/a.jpg"))))
         assertFalse(samePhotoGridFrame(current, next))
+    }
+
+    @Test
+    fun gridBadgeUsesTheItemWithoutAskingMediaStore() {
+        val synced = photo("a.jpg", null).copy(
+            oneDriveItemId = "remote",
+            cloudState = CloudSyncState.SYNCED,
+            localMediaId = 7L,
+        )
+        val cloud = photo("b.jpg", null).copy(
+            oneDriveItemId = "remote",
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            localUri = null,
+        )
+        val local = photo("c.jpg", null).copy(cloudState = CloudSyncState.LOCAL_ONLY)
+        assertEquals(CloudSyncState.SYNCED, galleryGridCloudBadge(synced))
+        assertEquals(CloudSyncState.CLOUD_ONLY, galleryGridCloudBadge(cloud))
+        assertEquals(CloudSyncState.LOCAL_ONLY, galleryGridCloudBadge(local))
     }
 
     @Test

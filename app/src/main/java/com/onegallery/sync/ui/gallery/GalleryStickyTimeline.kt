@@ -7,13 +7,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** Altura reservada no topo da grade + overlay da barra de data. */
 val GalleryStickyTimelineBarHeight: Dp = 48.dp
@@ -52,28 +56,34 @@ fun rememberTimelineStickyUiState(
     enabled: Boolean,
     stickyBarHeightPx: Int,
 ): TimelineStickyUiState {
-    val state by remember(gridState, entries, gridScale, enabled, stickyBarHeightPx) {
-        derivedStateOf {
-            if (!enabled || entries.isEmpty() || stickyBarHeightPx <= 0) {
-                return@derivedStateOf TimelineStickyUiState(null, emptySet())
-            }
-            val visible = gridState.layoutInfo.visibleItemsInfo
-                .filter { info -> info.index in entries.indices }
-            val anchor = visible.minByOrNull { it.offset.y }
-                ?: return@derivedStateOf TimelineStickyUiState(null, emptySet())
-            val label = stickyLabelForGridIndex(entries, anchor.index, gridScale)
-            val hiddenHeaderIds = visible.mapNotNull { info ->
-                when (val entry = entries[info.index]) {
-                    is GalleryGridEntry.Header -> {
-                        if (info.offset.y < stickyBarHeightPx) entry.header.id else null
-                    }
-                    is GalleryGridEntry.Photo -> null
-                }
-            }.toSet()
-            TimelineStickyUiState(label, hiddenHeaderIds)
-        }
+    var label by remember(gridState, entries, gridScale, enabled) {
+        mutableStateOf<String?>(null)
     }
-    return state
+    LaunchedEffect(gridState, entries, gridScale, enabled, stickyBarHeightPx) {
+        if (!enabled || entries.isEmpty() || stickyBarHeightPx <= 0) {
+            label = null
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            var bestIndex = -1
+            var bestTop = Int.MAX_VALUE
+            val visible = gridState.layoutInfo.visibleItemsInfo
+            for (index in visible.indices) {
+                val info = visible[index]
+                if (info.index !in entries.indices) continue
+                if (info.offset.y < bestTop) {
+                    bestTop = info.offset.y
+                    bestIndex = info.index
+                }
+            }
+            bestIndex
+        }
+            .distinctUntilChanged()
+            .collect { index ->
+                label = if (index < 0) null else stickyLabelForGridIndex(entries, index, gridScale)
+            }
+    }
+    return TimelineStickyUiState(label, emptySet())
 }
 
 @Composable
