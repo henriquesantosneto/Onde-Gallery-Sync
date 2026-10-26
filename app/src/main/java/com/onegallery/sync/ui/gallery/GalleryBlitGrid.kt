@@ -15,8 +15,14 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.widget.OverScroller
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -25,12 +31,24 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.VectorGroup
+import androidx.compose.ui.graphics.vector.VectorPath
+import androidx.compose.ui.graphics.vector.toPath
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
+import com.onegallery.sync.ui.theme.OneDriveBlue
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -44,6 +62,57 @@ private class DecodeJob(
     val file: File?,
     val uri: Uri?,
 )
+
+/**
+ * O dedo que chega no meio do embalo trava o offset atual.
+ * [onFingerDown] devolve true só quando o OverScroller precisa de forceFinished —
+ * abortAnimation pularia para o fim do fling.
+ */
+internal class BlitCoast {
+    var fingerDown: Boolean = false
+        private set
+    var flinging: Boolean = false
+        private set
+    var ignoreTapAfterCoast: Boolean = false
+        private set
+    private var lastHaltTime: Long = Long.MIN_VALUE
+
+    fun onFlingStarted() {
+        flinging = true
+    }
+
+    fun onFlingSettled() {
+        flinging = false
+    }
+
+    fun onFingerDown(eventTimeMs: Long, scrollerActive: Boolean): Boolean {
+        fingerDown = true
+        val moving = flinging || scrollerActive
+        if (moving) {
+            flinging = false
+            ignoreTapAfterCoast = true
+            lastHaltTime = eventTimeMs
+            return true
+        }
+        val justHalted = ignoreTapAfterCoast &&
+            eventTimeMs != lastHaltTime &&
+            eventTimeMs - lastHaltTime in 0..48
+        if (eventTimeMs != lastHaltTime && !justHalted) {
+            ignoreTapAfterCoast = false
+        }
+        lastHaltTime = eventTimeMs
+        return false
+    }
+
+    fun onFingerUp() {
+        fingerDown = false
+    }
+}
+
+/** Enquanto o dedo está na tela o offset não acompanha o scroller. */
+internal fun blitContentOffset(fingerDown: Boolean, offset: Int, scrollerY: Int): Int {
+    return if (fingerDown) offset else scrollerY
+}
 
 /**
  * A grade inteira é uma view. O dedo só move o scroll e o [onDraw] copia
@@ -91,9 +160,12 @@ internal class GalleryBlitGridView(
     private var selectionMode: Boolean = false
     private var selectedPaths: Set<String> = emptySet()
     private var scrollActive: Boolean = false
-    private var flinging: Boolean = false
+    private val coast = BlitCoast()
     private var selecting: Boolean = false
     private var lastDragPath: String? = null
+    private var iconCloud: Bitmap? = null
+    private var iconSynced: Bitmap? = null
+    private var iconLocal: Bitmap? = null
     private var pinchDistance: Float = 0f
 
     private val scroller = OverScroller(context)
@@ -116,24 +188,37 @@ internal class GalleryBlitGridView(
     }
     private val decodeThread = HandlerThread("gallery-blit").apply { start() }
     private val decodeHandler = Handler(decodeThread.looper)
+    private val badgeThread = HandlerThread(
+        "gallery-badge",
+        android.os.Process.THREAD_PRIORITY_BACKGROUND,
+    ).apply { start() }
+    private val badgeHandler = Handler(badgeThread.looper)
+    private val badgeState = HashMap<String, CloudSyncState?>()
+    private val badgeReady = HashSet<String>()
+    private val badgeSignature = HashMap<String, String>()
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var decodeGeneration: Int = 0
+    @Volatile private var badgeGeneration: Int = 0
     private val decodeRunnable = Runnable { enqueueVisible() }
     private val scrubEnd = Runnable { finishScroll() }
 
     private val gestures = GestureDetector(
         context,
         object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onDown(e: MotionEvent): Boolean {
+                haltCoast(e.eventTime)
+                return true
+            }
 
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (selecting) return true
+                if (selecting || coast.ignoreTapAfterCoast) return true
                 val path = hit(e.x, e.y) ?: return true
                 if (selectionMode) onTogglePath(path) else onOpenPath(path)
                 return true
             }
 
             override fun onLongPress(e: MotionEvent) {
+                if (coast.ignoreTapAfterCoast) return
                 val path = hit(e.x, e.y) ?: return
                 selecting = true
                 lastDragPath = path
@@ -168,7 +253,7 @@ internal class GalleryBlitGridView(
             ): Boolean {
                 if (selecting) return true
                 beginScroll()
-                flinging = true
+                coast.onFlingStarted()
                 scroller.forceFinished(true)
                 scroller.fling(
                     0,
@@ -190,11 +275,20 @@ internal class GalleryBlitGridView(
         if (next === entries && slots.isNotEmpty()) return
         val offset = contentOffset
         entries = next
+        val live = HashSet<String>()
+        for (entry in next) {
+            val path = (entry as? GalleryGridEntry.Photo)?.item?.canonicalPath ?: continue
+            live.add(path)
+        }
+        badgeReady.retainAll(live)
+        badgeState.keys.retainAll(live)
+        badgeSignature.keys.retainAll(live)
         rebuild()
         contentOffset = offset.coerceIn(0, maxScroll())
         updateFirstIndex()
         invalidate()
         scheduleDecode()
+        scheduleBadgeResolve()
     }
 
     fun bindMetrics(
@@ -240,9 +334,27 @@ internal class GalleryBlitGridView(
         invalidate()
     }
 
+    fun bindIcons(cloud: Bitmap, synced: Bitmap, local: Bitmap) {
+        if (cloud === iconCloud && synced === iconSynced && local === iconLocal) return
+        iconCloud = cloud
+        iconSynced = synced
+        iconLocal = local
+        invalidate()
+    }
+
+    /**
+     * Para o embalo no lugar. O mesmo toque não abre a foto nem inicia seleção.
+     * Vários despachos do mesmo ACTION_DOWN (Compose e a view) compartilham o tempo.
+     */
+    fun haltCoast(eventTimeMs: Long) {
+        if (!coast.onFingerDown(eventTimeMs, !scroller.isFinished)) return
+        scroller.forceFinished(true)
+        invalidate()
+    }
+
     fun scrollToEntry(index: Int) {
         scroller.forceFinished(true)
-        flinging = false
+        coast.onFlingSettled()
         if (slots.isEmpty()) return
         val slot = slots[index.coerceIn(0, slots.lastIndex)]
         contentOffset = slot.top.coerceIn(0, maxScroll())
@@ -255,9 +367,12 @@ internal class GalleryBlitGridView(
 
     fun release() {
         decodeGeneration++
+        badgeGeneration++
         mainHandler.removeCallbacks(decodeRunnable)
         decodeHandler.removeCallbacksAndMessages(null)
+        badgeHandler.removeCallbacksAndMessages(null)
         decodeThread.quitSafely()
+        badgeThread.quitSafely()
         synchronized(cacheLock) { memory.evictAll() }
     }
 
@@ -271,8 +386,24 @@ internal class GalleryBlitGridView(
         scheduleDecode()
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+            haltCoast(event.eventTime)
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> haltCoast(event.eventTime)
+            MotionEvent.ACTION_MOVE -> {
+                if (coast.flinging || !scroller.isFinished) haltCoast(event.eventTime)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> coast.onFingerUp()
+        }
         if (event.pointerCount >= 2 || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            haltCoast(event.eventTime)
             pinch(event)
             return true
         }
@@ -282,6 +413,7 @@ internal class GalleryBlitGridView(
         }
         gestures.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            coast.onFingerUp()
             selecting = false
             lastDragPath = null
             pinchDistance = 0f
@@ -291,14 +423,25 @@ internal class GalleryBlitGridView(
     }
 
     override fun computeScroll() {
-        if (scroller.computeScrollOffset()) {
-            contentOffset = scroller.currY.coerceIn(0, maxScroll())
-            updateFirstIndex()
-            postInvalidateOnAnimation()
-        } else if (flinging) {
-            flinging = false
-            finishScroll()
+        if (coast.fingerDown) {
+            if (!scroller.isFinished) scroller.forceFinished(true)
+            coast.onFlingSettled()
+            return
         }
+        if (!scroller.computeScrollOffset()) {
+            if (coast.flinging) {
+                coast.onFlingSettled()
+                finishScroll()
+            }
+            return
+        }
+        contentOffset = blitContentOffset(
+            fingerDown = false,
+            offset = contentOffset,
+            scrollerY = scroller.currY,
+        ).coerceIn(0, maxScroll())
+        updateFirstIndex()
+        postInvalidateOnAnimation()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -396,20 +539,20 @@ internal class GalleryBlitGridView(
     }
 
     private fun drawBadge(canvas: Canvas, slot: BlitSlot, item: GalleryDisplayItem) {
-        val state = galleryGridCloudBadge(item) ?: return
-        val radius = (slot.width * 0.065f).coerceIn(10f, 18f)
-        val cx = slot.left + slot.width - radius - 8f
-        val cy = slot.top + radius + 8f
-        badgeFill.style = Paint.Style.FILL
-        badgeFill.color = if (state == CloudSyncState.LOCAL_ONLY) 0xEEFFFFFF.toInt() else 0xFF0078D4.toInt()
-        canvas.drawCircle(cx, cy, radius, badgeFill)
-        badgeText.textAlign = Paint.Align.CENTER
-        badgeText.color = if (state == CloudSyncState.LOCAL_ONLY) 0xFF202020.toInt() else 0xFFFFFFFF.toInt()
-        badgeText.textSize = radius
-        val mark = if (state == CloudSyncState.SYNCED) "✓" else ""
-        if (mark.isNotEmpty()) {
-            canvas.drawText(mark, cx, cy - (badgeText.ascent() + badgeText.descent()) / 2f, badgeText)
-        }
+        val state = badgeForDraw(item) ?: return
+        val icon = when (state) {
+            CloudSyncState.LOCAL_ONLY -> iconLocal
+            CloudSyncState.SYNCED -> iconSynced
+            else -> iconCloud
+        } ?: return
+        val density = resources.displayMetrics.density
+        val preferred = 22f * density
+        val iconPx = preferred.coerceAtMost(slot.width * 0.34f).coerceAtLeast(12f)
+        val pad = 6f * density
+        val left = slot.left + slot.width - iconPx - pad
+        val top = slot.top + pad
+        dst.set(left.toInt(), top.toInt(), (left + iconPx).toInt(), (top + iconPx).toInt())
+        canvas.drawBitmap(icon, null, dst, bitmapPaint)
     }
 
     private fun drawDuration(canvas: Canvas, slot: BlitSlot, durationMs: Long?) {
@@ -475,21 +618,25 @@ internal class GalleryBlitGridView(
         if (scrollActive) return
         scrollActive = true
         decodeGeneration++
+        badgeGeneration++
         decodeHandler.removeCallbacksAndMessages(null)
+        badgeHandler.removeCallbacksAndMessages(null)
         GalleryGridScrollGate.isUserScrollingGrid = true
     }
 
     private fun finishScroll() {
-        if (!scrollActive && !flinging) {
+        if (!scrollActive && !coast.flinging) {
             scheduleDecode()
+            scheduleBadgeResolve()
             maybeLoadMore()
             return
         }
         scrollActive = false
-        flinging = false
+        coast.onFlingSettled()
         GalleryGridScrollGate.isUserScrollingGrid = false
         onScrollEnd()
         scheduleDecode()
+        scheduleBadgeResolve()
         maybeLoadMore()
     }
 
@@ -523,6 +670,7 @@ internal class GalleryBlitGridView(
     private fun pinch(event: MotionEvent) {
         if (event.pointerCount < 2) return
         scroller.forceFinished(true)
+        coast.onFlingSettled()
         selecting = false
         val dx = event.getX(0) - event.getX(1)
         val dy = event.getY(0) - event.getY(1)
@@ -544,6 +692,57 @@ internal class GalleryBlitGridView(
             MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 pinchDistance = 0f
                 onMultiTouch(false)
+            }
+        }
+    }
+
+    private fun badgeForDraw(item: GalleryDisplayItem): CloudSyncState? {
+        val path = item.canonicalPath
+        if (path in badgeReady) return badgeState[path]
+        return galleryGridCloudBadge(item)
+    }
+
+    private fun scheduleBadgeResolve() {
+        if (scrollActive || slots.isEmpty() || width == 0) return
+        val generation = ++badgeGeneration
+        val first = blitFirstVisibleIndex(slots, contentOffset)
+        val bottom = contentOffset + height
+        var last = first
+        while (last < slots.lastIndex && slots[last].top < bottom) last++
+        val from = (first - 24).coerceAtLeast(0)
+        val to = (last + 36).coerceAtMost(slots.lastIndex)
+        val jobs = ArrayList<GalleryDisplayItem>()
+        val signatures = ArrayList<String>()
+        for (index in from..to) {
+            val item = (entries.getOrNull(slots[index].entryIndex) as? GalleryGridEntry.Photo)?.item ?: continue
+            val signature = badgeSignatureOf(item)
+            if (badgeReady.contains(item.canonicalPath) && badgeSignature[item.canonicalPath] == signature) {
+                continue
+            }
+            jobs.add(item)
+            signatures.add(signature)
+        }
+        if (jobs.isEmpty()) return
+        badgeHandler.post badgeResolve@{
+            val resolved = ArrayList<Triple<String, String, CloudSyncState?>>(jobs.size)
+            for (index in jobs.indices) {
+                if (generation != badgeGeneration || GalleryGridScrollGate.isUserScrollingGrid) return@badgeResolve
+                val item = jobs[index]
+                val state = try {
+                    galleryCloudOverlayState(item, context)
+                } catch (_: Exception) {
+                    continue
+                }
+                resolved.add(Triple(item.canonicalPath, signatures[index], state))
+            }
+            mainHandler.post {
+                if (generation != badgeGeneration) return@post
+                for ((path, signature, state) in resolved) {
+                    badgeSignature[path] = signature
+                    badgeState[path] = state
+                    badgeReady.add(path)
+                }
+                if (!scrollActive) invalidate()
             }
         }
     }
@@ -673,6 +872,10 @@ internal fun GalleryBlitPhotoGrid(
     val headerBackground = MaterialTheme.colorScheme.surfaceContainerLow.toArgb()
     val headerText = MaterialTheme.colorScheme.onSurface.toArgb()
     val selection = MaterialTheme.colorScheme.primary.toArgb()
+    val localTint = MaterialTheme.colorScheme.onSurfaceVariant
+    val cloudIcon = rememberBadgeIcon(Icons.Outlined.Cloud, OneDriveBlue)
+    val syncedIcon = rememberBadgeIcon(Icons.Outlined.CloudDone, OneDriveBlue)
+    val localIcon = rememberBadgeIcon(Icons.Outlined.Smartphone, localTint)
     val density = androidx.compose.ui.platform.LocalDensity.current
     val gapPx = with(density) { 4.dp.roundToPx() }
     val padStart = with(density) { 8.dp.roundToPx() }
@@ -682,7 +885,17 @@ internal fun GalleryBlitPhotoGrid(
     val padTop = with(density) { GalleryStickyTimelineBarHeight.roundToPx() }
     val headerHeight = with(density) { 44.dp.roundToPx() }
     val yearHeader = with(density) { 56.dp.roundToPx() }
-    Box(modifier) {
+    Box(
+        modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(
+                    requireUnconsumed = false,
+                    pass = PointerEventPass.Initial,
+                )
+                viewRef[0]?.haltCoast(down.uptimeMillis)
+            }
+        },
+    ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -702,6 +915,7 @@ internal fun GalleryBlitPhotoGrid(
                 view.headerBackground = headerBackground
                 view.headerTextColor = headerText
                 view.selectionColor = selection
+                view.bindIcons(cloudIcon, syncedIcon, localIcon)
                 view.onOpenPath = onOpen
                 view.onTogglePath = onToggle
                 view.onLongPressPath = onLongPress
@@ -744,6 +958,89 @@ internal fun GalleryBlitPhotoGrid(
             viewRef[0]?.scrollToEntry(0)
         }
     }
+}
+
+@Composable
+private fun rememberBadgeIcon(icon: ImageVector, tint: Color): Bitmap {
+    val argb = tint.toArgb()
+    return remember(icon, argb) { rasterizeBadgeIcon(icon, argb) }
+}
+
+/** Mesmo traço de [GalleryCloudBadge]: nuvem, nuvem com visto, ou celular. */
+internal fun rasterizeBadgeIcon(icon: ImageVector, argb: Int): Bitmap {
+    val sizePx = 128
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.scale(sizePx / icon.viewportWidth, sizePx / icon.viewportHeight)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = argb }
+    drawBadgeGroup(canvas, icon.root, paint)
+    if (!bitmap.isMutable) return bitmap
+    val frozen = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return bitmap
+    bitmap.recycle()
+    return frozen
+}
+
+private fun drawBadgeGroup(canvas: Canvas, group: VectorGroup, paint: Paint) {
+    canvas.save()
+    canvas.translate(group.translationX + group.pivotX, group.translationY + group.pivotY)
+    canvas.rotate(group.rotation)
+    canvas.scale(group.scaleX, group.scaleY)
+    canvas.translate(-group.pivotX, -group.pivotY)
+    if (group.clipPathData.isNotEmpty()) {
+        canvas.clipPath(group.clipPathData.toPath().asAndroidPath())
+    }
+    for (index in 0 until group.size) {
+        when (val node = group[index]) {
+            is VectorPath -> drawBadgePath(canvas, node, paint)
+            is VectorGroup -> drawBadgeGroup(canvas, node, paint)
+        }
+    }
+    canvas.restore()
+}
+
+private fun drawBadgePath(canvas: Canvas, path: VectorPath, paint: Paint) {
+    if (path.pathData.isEmpty()) return
+    val androidPath = path.pathData.toPath().asAndroidPath()
+    androidPath.fillType = if (path.pathFillType == PathFillType.EvenOdd) {
+        android.graphics.Path.FillType.EVEN_ODD
+    } else {
+        android.graphics.Path.FillType.WINDING
+    }
+    val base = paint.color
+    if (path.fill != null && path.fillAlpha > 0f) {
+        paint.style = Paint.Style.FILL
+        paint.color = base
+        paint.alpha = (path.fillAlpha * 255f).roundToInt().coerceIn(0, 255)
+        canvas.drawPath(androidPath, paint)
+    }
+    if (path.stroke != null && path.strokeLineWidth > 0f && path.strokeAlpha > 0f) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = path.strokeLineWidth
+        paint.strokeCap = when (path.strokeLineCap) {
+            StrokeCap.Round -> Paint.Cap.ROUND
+            StrokeCap.Square -> Paint.Cap.SQUARE
+            else -> Paint.Cap.BUTT
+        }
+        paint.strokeJoin = when (path.strokeLineJoin) {
+            StrokeJoin.Round -> Paint.Join.ROUND
+            StrokeJoin.Bevel -> Paint.Join.BEVEL
+            else -> Paint.Join.MITER
+        }
+        paint.strokeMiter = path.strokeLineMiter
+        paint.color = base
+        paint.alpha = (path.strokeAlpha * 255f).roundToInt().coerceIn(0, 255)
+        canvas.drawPath(androidPath, paint)
+    }
+    paint.color = base
+}
+
+private fun badgeSignatureOf(item: GalleryDisplayItem): String {
+    return item.cloudState.ordinal.toString() + '|' +
+        item.oneDriveItemId + '|' +
+        item.localUri + '|' +
+        item.localMediaId + '|' +
+        item.localReleasedForSpace + '|' +
+        item.cachedOriginal?.path
 }
 
 private class BlitScrollBridge {

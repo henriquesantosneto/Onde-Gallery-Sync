@@ -1,7 +1,9 @@
 package com.onegallery.sync.ui.gallery
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GalleryBlitLayoutTest {
@@ -55,5 +57,27 @@ class GalleryBlitLayoutTest {
         )
         assertEquals(0, blitFirstVisibleIndex(layout.slots, 0))
         assertEquals(2, blitFirstVisibleIndex(layout.slots, layout.slots[2].top + 1))
+    }
+
+    @Test
+    fun fingerDownStopsCoastWithoutJumpingAndIgnoresThatTap() {
+        val coast = BlitCoast()
+        coast.onFlingStarted()
+        assertTrue(coast.onFingerDown(eventTimeMs = 1_000L, scrollerActive = true))
+        assertTrue(coast.ignoreTapAfterCoast)
+        assertTrue(coast.fingerDown)
+        assertFalse(coast.flinging)
+        assertEquals(40, blitContentOffset(fingerDown = true, offset = 40, scrollerY = 900))
+
+        assertFalse(coast.onFingerDown(eventTimeMs = 1_000L, scrollerActive = false))
+        assertTrue(coast.ignoreTapAfterCoast)
+        assertFalse(coast.onFingerDown(eventTimeMs = 1_020L, scrollerActive = false))
+        assertTrue(coast.ignoreTapAfterCoast)
+
+        coast.onFingerUp()
+        assertFalse(coast.fingerDown)
+        assertFalse(coast.onFingerDown(eventTimeMs = 1_400L, scrollerActive = false))
+        assertFalse(coast.ignoreTapAfterCoast)
+        assertEquals(900, blitContentOffset(fingerDown = false, offset = 40, scrollerY = 900))
     }
 }
