@@ -7,7 +7,7 @@ import com.onegallery.sync.data.local.MediaDeleteRequestRouter
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
 
-private val uriExistsRouter = MediaDeleteRequestRouter()
+internal val uriExistsRouter = MediaDeleteRequestRouter()
 
 /** Original completo realmente abrível (Galeria, cache do app), alinhado ao [SyncCoordinator.needsOriginalRecall]. */
 fun GalleryDisplayItem.hasViewableLocalOriginal(context: Context): Boolean {

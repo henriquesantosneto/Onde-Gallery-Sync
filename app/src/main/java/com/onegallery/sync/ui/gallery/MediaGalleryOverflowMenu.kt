@@ -17,6 +17,7 @@ fun MediaGalleryOverflowMenuButton(
     onExpandedChange: (Boolean) -> Unit,
     showDetails: Boolean,
     onDetails: () -> Unit,
+    onShare: () -> Unit,
     onFreeSpace: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -28,6 +29,13 @@ fun MediaGalleryOverflowMenuButton(
             expanded = expanded,
             onDismissRequest = { onExpandedChange(false) },
         ) {
+            DropdownMenuItem(
+                text = { Text("Compartilhar") },
+                onClick = {
+                    onExpandedChange(false)
+                    onShare()
+                },
+            )
             if (showDetails) {
                 DropdownMenuItem(
                     text = { Text("Detalhes") },

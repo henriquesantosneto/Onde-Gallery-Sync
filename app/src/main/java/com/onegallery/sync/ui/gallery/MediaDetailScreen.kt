@@ -382,6 +382,13 @@ fun MediaDetailScreen(
                                     onExpandedChange = { showOverflowMenu = it },
                                     showDetails = detailPaths.isNotEmpty(),
                                     onDetails = { openDetailsToSimple() },
+                                    onShare = {
+                                        shareGalleryMedia(
+                                            context,
+                                            state.selectedPaths,
+                                            listOf(liveItems),
+                                        )?.let(viewModel::showMessage)
+                                    },
                                     onFreeSpace = {
                                         val paths = state.selectedPaths.toList()
                                         if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
@@ -438,6 +445,13 @@ fun MediaDetailScreen(
                                 onExpandedChange = { showOverflowMenu = it },
                                 showDetails = detailPaths.isNotEmpty(),
                                 onDetails = { openDetailsToSimple() },
+                                onShare = {
+                                    shareGalleryMedia(
+                                        context,
+                                        listOf(currentPath),
+                                        listOf(liveItems),
+                                    )?.let(viewModel::showMessage)
+                                },
                                 onFreeSpace = {
                                     if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                         viewModel.releaseSingle(currentPath)

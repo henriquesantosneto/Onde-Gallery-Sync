@@ -229,6 +229,13 @@ fun GalleryScreen(
                                 onExpandedChange = { showSelectionOverflow = it },
                                 showDetails = true,
                                 onDetails = { showMediaDetails = true },
+                                onShare = {
+                                    shareGalleryMedia(
+                                        context,
+                                        state.selectedPaths,
+                                        listOf(state.libraryItems, state.items),
+                                    )?.let(viewModel::showMessage)
+                                },
                                 onFreeSpace = {
                                     if (viewModel.canDeleteLocallyWithoutSystemPrompt()) {
                                         viewModel.releaseLocalSpaceSelected()
