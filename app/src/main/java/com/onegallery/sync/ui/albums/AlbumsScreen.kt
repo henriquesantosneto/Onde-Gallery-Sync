@@ -239,6 +239,7 @@ fun AlbumsScreen(
                 AlbumsBrowseTab.PLACES -> buildPlaceGridEntries(state.placeAlbums)
             }
         }
+        val gridKeys = remember(gridEntries) { albumGridEntryKeys(gridEntries) }
         val awaitingLocalAlbumIndex = state.indexHydrated &&
             gridEntries.isEmpty() &&
             state.libraryItems.isNotEmpty()
@@ -320,11 +321,11 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                     items(
-                        items = gridEntries,
-                        key = { it.key },
+                        count = gridEntries.size,
+                        key = { index -> gridKeys[index] },
                         span = { GridItemSpan(1) },
-                    ) { entry ->
-                        when (entry) {
+                    ) { index ->
+                        when (val entry = gridEntries[index]) {
                             is AlbumsGridEntry.Album -> {
                                 val isPlace = entry.isPlace
                                 val selected = !isPlace && entry.album.filterKey in state.selectedAlbumTitles

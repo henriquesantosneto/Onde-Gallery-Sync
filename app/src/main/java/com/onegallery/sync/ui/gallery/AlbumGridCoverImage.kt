@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -18,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import android.graphics.Bitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,11 +27,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.debug.DebugCrashLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -66,13 +67,9 @@ fun AlbumGridCoverImage(
     var coverCacheKey by remember(album.bucketId) {
         mutableStateOf(cachedCover?.cacheKey ?: album.bucketId)
     }
-    var allowHardwareBitmap by remember(album.bucketId) { mutableStateOf(true) }
-
-    LaunchedEffect(displayModel) {
-        allowHardwareBitmap = true
-    }
 
     LaunchedEffect(album.bucketId, coverRevision) {
+        try {
         val hit = AlbumCoverBitmapCache.get(album.bucketId)
         if (hit != null &&
             !hit.empty &&
@@ -157,6 +154,11 @@ fun AlbumGridCoverImage(
         coverIsVideo = false
         coverCacheKey = album.bucketId
         AlbumCoverBitmapCache.put(album.bucketId, fallback, false, album.bucketId, coverRevision)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            DebugCrashLog.mark("capa ${album.bucketId} ${error.javaClass.simpleName}")
+        }
     }
     val coilModel = remember(displayModel, coverCacheKey) { coverCoilModel(displayModel) }
     val paintModel = coilModel
@@ -176,49 +178,53 @@ fun AlbumGridCoverImage(
             }
             paintModel != null -> {
                 val coverSizePx = 480
-                val request = remember(paintModel, coverCacheKey, allowHardwareBitmap, coverRevision) {
+                val request = remember(paintModel, coverCacheKey, coverRevision) {
                     ImageRequest.Builder(context)
                         .data(paintModel)
                         .size(coverSizePx)
                         .applyGalleryThumbnailLoading(
                             GalleryThumbnailStyle.Grid,
-                            allowHardwareBitmap && paintModel !is Bitmap,
+                            allowHardwareBitmap = false,
                         )
                         .memoryCacheKey(
                             galleryThumbnailMemoryCacheKey(
                                 "album-cover:$coverCacheKey",
                                 coverSizePx,
                                 GalleryThumbnailStyle.Grid,
-                                allowHardwareBitmap,
+                                allowHardwareBitmap = false,
                             ),
                         )
                         .diskCacheKey("album-cover:$coverCacheKey")
                         .listener(
                             onSuccess = { _, result ->
-                                val raw = (result.drawable as? BitmapDrawable)?.bitmap ?: return@listener
-                                if (raw.isRecycled) return@listener
-                                val software = raw.toSoftwareBitmap() ?: return@listener
-                                val stored = if (software === raw) {
-                                    software.copy(software.config ?: Bitmap.Config.ARGB_8888, false) ?: software
-                                } else {
-                                    software
+                                // O bitmap do Coil continua na AsyncImage até a próxima
+                                // composição. Reciclar aqui fecha o app ao trocar de aba.
+                                try {
+                                    val raw = (result.drawable as? BitmapDrawable)?.bitmap
+                                        ?: return@listener
+                                    val stored = raw.copyOwnedSoftwareBitmap() ?: return@listener
+                                    if (stored === raw) return@listener
+                                    val existing = AlbumCoverBitmapCache.get(album.bucketId)
+                                    if (existing != null &&
+                                        existing.revision > coverRevision &&
+                                        existing.model.isPaintableAlbumCoverModel()
+                                    ) {
+                                        stored.recycle()
+                                        return@listener
+                                    }
+                                    AlbumCoverBitmapCache.put(
+                                        album.bucketId,
+                                        stored,
+                                        coverIsVideo,
+                                        coverCacheKey,
+                                        coverRevision,
+                                    )
+                                    displayModel = stored
+                                } catch (error: Exception) {
+                                    DebugCrashLog.mark(
+                                        "capa-bitmap ${album.bucketId} ${error.javaClass.simpleName}",
+                                    )
                                 }
-                                val existing = AlbumCoverBitmapCache.get(album.bucketId)
-                                if (existing != null &&
-                                    existing.revision > coverRevision &&
-                                    existing.model.isPaintableAlbumCoverModel()
-                                ) {
-                                    if (stored !== raw) stored.recycle()
-                                    return@listener
-                                }
-                                AlbumCoverBitmapCache.put(
-                                    album.bucketId,
-                                    stored,
-                                    coverIsVideo,
-                                    coverCacheKey,
-                                    coverRevision,
-                                )
-                                displayModel = stored
                             },
                         )
                         .build()
@@ -230,11 +236,6 @@ fun AlbumGridCoverImage(
                         .fillMaxSize()
                         .galleryGridThumbnailLayer(GalleryThumbnailStyle.Grid),
                     contentScale = ContentScale.Crop,
-                    onState = { state ->
-                        if (state is AsyncImagePainter.State.Error && allowHardwareBitmap) {
-                            allowHardwareBitmap = false
-                        }
-                    },
                 )
             }
             else -> {

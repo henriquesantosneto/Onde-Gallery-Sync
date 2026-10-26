@@ -37,7 +37,7 @@ object GalleryThumbnailModels {
                     mediaId,
                     MediaKind.IMAGE,
                     sizePx.coerceIn(64, 512),
-                )?.toSoftwareBitmap()
+                )?.ownedSoftwareBitmap()
             }.getOrNull()
         }
     }
@@ -56,7 +56,7 @@ object GalleryThumbnailModels {
                     mediaId,
                     MediaKind.VIDEO,
                     sizePx.coerceIn(64, 512),
-                )?.toSoftwareBitmap()
+                )?.ownedSoftwareBitmap()
             }.getOrNull()
         }
     }
@@ -163,8 +163,27 @@ object GalleryThumbnailModels {
 }
 
 internal fun Bitmap.toSoftwareBitmap(): Bitmap? {
+    if (isRecycled) return null
     if (config != Bitmap.Config.HARDWARE) return this
-    val software = copy(Bitmap.Config.ARGB_8888, false)
-    recycle()
+    return copy(Bitmap.Config.ARGB_8888, false) ?: this
+}
+
+/**
+ * Bitmap que só este código criou (MediaStore). A cópia de hardware pode
+ * substituir o original; o original do Coil não passa por aqui.
+ */
+internal fun Bitmap.ownedSoftwareBitmap(): Bitmap? {
+    val software = toSoftwareBitmap() ?: return null
+    if (software !== this) recycle()
     return software
+}
+
+/** Cópia independente. O bitmap de origem (Coil ou cache) continua válido. */
+internal fun Bitmap.copyOwnedSoftwareBitmap(): Bitmap? {
+    if (isRecycled || width <= 0 || height <= 0) return null
+    val target = when (config) {
+        null, Bitmap.Config.HARDWARE -> Bitmap.Config.ARGB_8888
+        else -> config
+    }
+    return copy(target, false)
 }

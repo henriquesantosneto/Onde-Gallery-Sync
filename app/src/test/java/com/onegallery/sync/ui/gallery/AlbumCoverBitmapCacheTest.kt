@@ -90,6 +90,25 @@ class AlbumCoverBitmapCacheTest {
     }
 
     @Test
+    fun softwareBitmap_copyLeavesTheSourceDrawableAlive() {
+        val source = Bitmap.createBitmap(8, 8, Bitmap.Config.RGB_565)
+        val same = source.toSoftwareBitmap()
+        assertTrue(same === source)
+        assertFalse(source.isRecycled)
+        val owned = source.ownedSoftwareBitmap()
+        assertTrue(owned === source)
+        assertFalse(source.isRecycled)
+        val copy = source.copyOwnedSoftwareBitmap()
+        assertTrue(copy != null && copy !== source)
+        assertFalse(source.isRecycled)
+        copy!!.recycle()
+        assertFalse(source.isRecycled)
+        source.recycle()
+        assertNull(source.copyOwnedSoftwareBitmap())
+        assertNull(source.toSoftwareBitmap())
+    }
+
+    @Test
     fun bitmapCover_isKeptUntilTheByteBudgetDropsIt() {
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
         AlbumCoverBitmapCache.put("album:bmp", bitmap, isVideo = true, cacheKey = "clip", revision = 8L)

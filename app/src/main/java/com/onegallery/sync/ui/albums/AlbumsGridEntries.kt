@@ -27,3 +27,19 @@ fun buildAlbumGridEntries(folderAlbums: List<MediaAlbum>): List<AlbumsGridEntry>
 fun buildPlaceGridEntries(placeAlbums: List<MediaAlbum>): List<AlbumsGridEntry> {
     return placeAlbums.map { AlbumsGridEntry.Album(it, isPlace = true) }
 }
+
+/** Chave da LazyGrid. Bucket repetido não pode derrubar a troca Fotos/Álbuns. */
+fun albumGridEntryKeys(entries: List<AlbumsGridEntry>): List<String> {
+    val used = HashSet<String>(entries.size * 2)
+    return entries.map { entry -> claimAlbumGridKey(entry.key, used) }
+}
+
+private fun claimAlbumGridKey(preferred: String, used: MutableSet<String>): String {
+    if (used.add(preferred)) return preferred
+    var suffix = 2
+    while (true) {
+        val candidate = "$preferred#$suffix"
+        if (used.add(candidate)) return candidate
+        suffix++
+    }
+}
