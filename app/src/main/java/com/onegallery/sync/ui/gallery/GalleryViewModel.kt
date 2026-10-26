@@ -32,7 +32,10 @@ import com.onegallery.sync.ui.AppUserMessages
 import com.onegallery.sync.util.GalleryPerfLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -1138,6 +1141,21 @@ class GalleryViewModel(
         initialGalleryUiState(),
     )
 
+    /**
+     * Grade de fotos. O [state] continua alimentando álbuns, mapa e detalhe.
+     * Esta publicação só troca quando a lista parou, num único passo.
+     */
+    private val publishedPhotoGridBacking = MutableStateFlow(state.value.toGridPublication())
+    val publishedPhotoGrid: StateFlow<GalleryGridPublication> = publishedPhotoGridBacking.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            state.collectLatest { ui ->
+                publishPhotoGridFrame(ui.toGridPublication())
+            }
+        }
+    }
+
     private fun initialGalleryUiState(): GalleryUiState {
         val snap = galleryBootstrap.value ?: return GalleryUiState(isLoading = true)
         val libraryItems = catalogSession.sortedLibraryItems(
@@ -1263,6 +1281,20 @@ class GalleryViewModel(
             albumCoverRevisions = coverRevisions,
             gridWindowLimit = gridLimit,
         )
+    }
+
+    private suspend fun publishPhotoGridFrame(candidate: GalleryGridPublication) {
+        val current = publishedPhotoGridBacking.value
+        if (samePhotoGridFrame(current, candidate)) return
+        if (!candidate.replacesPhotoGridImmediately(current)) {
+            while (GalleryGridScrollGate.isUserScrollingGrid) {
+                delay(48)
+            }
+        }
+        val latest = state.value.toGridPublication()
+        if (!samePhotoGridFrame(publishedPhotoGridBacking.value, latest)) {
+            publishedPhotoGridBacking.value = latest
+        }
     }
 
     fun clearBrowseFilters() {

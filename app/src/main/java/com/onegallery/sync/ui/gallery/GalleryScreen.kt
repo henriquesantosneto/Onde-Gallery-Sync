@@ -88,6 +88,7 @@ fun GalleryScreen(
     routePlaceTitle: String? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val gridFrame by viewModel.publishedPhotoGrid.collectAsStateWithLifecycle()
     val selectionMode by viewModel.photoSelectionMode.collectAsStateWithLifecycle()
     val selectedPaths by viewModel.photoSelectedPaths.collectAsStateWithLifecycle()
     LaunchedEffect(routeAlbumFolderKey) {
@@ -100,18 +101,18 @@ fun GalleryScreen(
     }
     val fullBrowseGridItems = remember(
         requiresActiveBrowseFilter,
-        state.libraryItems,
-        state.items,
-        state.sortOrder,
+        gridFrame.libraryItems,
+        gridFrame.items,
+        gridFrame.sortOrder,
         routeAlbumFolderKey,
         routePlaceMatchKey,
         routePlaceTitle,
     ) {
         resolveBrowseGridItems(
             requiresActiveBrowseFilter = requiresActiveBrowseFilter,
-            libraryItems = state.libraryItems,
-            browseItemsFromState = state.items,
-            sortOrder = state.sortOrder,
+            libraryItems = gridFrame.libraryItems,
+            browseItemsFromState = gridFrame.items,
+            sortOrder = gridFrame.sortOrder,
             routeAlbumFolderKey = routeAlbumFolderKey,
             routePlaceMatchKey = routePlaceMatchKey,
             routePlaceTitle = routePlaceTitle,
@@ -293,13 +294,13 @@ fun GalleryScreen(
         },
     ) { padding ->
         when {
-            gridItems.isEmpty() && state.libraryItems.isEmpty() && !state.indexHydrated -> {
+            gridItems.isEmpty() && gridFrame.libraryItems.isEmpty() && !state.indexHydrated -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
             }
-            state.isLoading && gridItems.isEmpty() && state.libraryItems.isEmpty() -> {
+            state.isLoading && gridItems.isEmpty() && gridFrame.libraryItems.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
@@ -326,7 +327,7 @@ fun GalleryScreen(
                 }
             }
             else -> {
-                val dateTimeline = isDateTimelineSort(state.sortOrder)
+                val dateTimeline = isDateTimelineSort(gridFrame.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val gridState = rememberSaveable(saver = LazyGridState.Saver) {
                     LazyGridState()
@@ -341,11 +342,11 @@ fun GalleryScreen(
                         gridState.scrollToItem(0)
                     }
                 }
-                val timelinePresorted = isDateTimelineSort(state.sortOrder)
-                val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping, timelinePresorted) {
+                val timelinePresorted = isDateTimelineSort(gridFrame.sortOrder)
+                val gridEntries = remember(gridItems, gridFrame.sortOrder, timelineGrouping, timelinePresorted) {
                     buildGalleryGridEntries(
                         gridItems,
-                        state.sortOrder,
+                        gridFrame.sortOrder,
                         timelineGrouping,
                         itemsAlreadySortedForTimeline = timelinePresorted,
                     )

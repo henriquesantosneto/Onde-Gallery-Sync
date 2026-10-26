@@ -8,8 +8,8 @@ import coil.request.ImageRequest
 import coil.size.Precision
 
 /**
- * Coil: na grade usamos hardware bitmap (GPU) quando possível; detalhe/zoom/filmstrip
- * mantêm software bitmap por transformações e compatibilidade.
+ * Coil fora da grade de fotos. A grade usa [galleryGridImageRequest] (RGB_565).
+ * Filmstrip pode ir para a GPU; detalhe e zoom ficam em software.
  */
 internal fun ImageRequest.Builder.applyGalleryThumbnailLoading(
     style: GalleryThumbnailStyle,
@@ -27,44 +27,36 @@ internal fun ImageRequest.Builder.applyGalleryThumbnailLoading(
 }
 
 /**
- * Célula da grade: textura de GPU. A rolagem só compõe a camada, sem redesenhar o JPEG.
- * Não copie esse bitmap para um canvas de software — isso derruba o processo.
+ * A grade de fotos desenha o bitmap direto. Uma camada por célula deixa a rolagem mais pesada.
+ * Filmstrip e detalhe continuam com a camada de antes.
  */
 internal fun Modifier.galleryGridThumbnailLayer(style: GalleryThumbnailStyle): Modifier {
+    if (style == GalleryThumbnailStyle.Grid) return this
     when (style) {
-        GalleryThumbnailStyle.Grid,
-        GalleryThumbnailStyle.Filmstrip,
-        -> Unit
+        GalleryThumbnailStyle.Filmstrip -> Unit
         else -> return this
     }
     return graphicsLayer { clip = true }
 }
 
 /**
- * Grade de fotos: ImageDecoder aloca a miniatura na GPU.
- * Se o aparelho recusar, o fallback fica em RGB_565 na CPU.
+ * Miniatura da grade: JPEG pequeno em RGB_565, já no cache de memória.
+ * A rolagem só copia esse bitmap. Textura de hardware por célula ficou mais lenta.
  */
 internal fun galleryGridImageRequest(
     context: Context,
     data: Any,
     sizePx: Int,
     cacheKey: String,
-    useGpu: Boolean,
 ): ImageRequest {
     return ImageRequest.Builder(context)
         .data(data)
         .size(sizePx)
         .precision(Precision.INEXACT)
         .crossfade(false)
-        .allowHardware(useGpu)
-        .apply {
-            if (useGpu) {
-                allowRgb565(false)
-            } else {
-                allowRgb565(true)
-                bitmapConfig(Bitmap.Config.RGB_565)
-            }
-        }
+        .allowHardware(false)
+        .allowRgb565(true)
+        .bitmapConfig(Bitmap.Config.RGB_565)
         .memoryCacheKey(cacheKey)
         .build()
 }

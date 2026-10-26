@@ -67,7 +67,6 @@ fun GalleryThumbnailImage(
             sizePx = sizePx,
             modifier = modifier,
             contentScale = contentScale,
-            style = style,
         )
         return
     }
