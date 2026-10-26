@@ -43,6 +43,7 @@ class MsalAuthManager(
     private val authPreferences: AuthPreferences,
 ) {
     private val appContext = context.applicationContext
+    private val initMutex = Mutex()
     private val silentTokenMutex = Mutex()
     private var tokenAcceptedAtMs = 0L
     private val msalSilentThread = HandlerThread("msal-silent").apply { start() }
@@ -55,6 +56,7 @@ class MsalAuthManager(
     val interactionRequired: SharedFlow<Unit> = _interactionRequired.asSharedFlow()
 
     private var client: ISingleAccountPublicClientApplication? = null
+    private var initializedClientId: String? = null
     private var configFile: File? = null
 
     val redirectUriForAzure: String
@@ -174,12 +176,11 @@ class MsalAuthManager(
         authPreferences.azureClientId = clientId
     }
 
-    suspend fun initialize(): Result<Unit> {
-        _state.value = _state.value.copy(isCheckingStoredAccount = true)
+    suspend fun initialize(): Result<Unit> = initMutex.withLock {
         val clientId = effectiveClientId()
         if (clientId.isBlank() || clientId.startsWith("00000000")) {
             _state.value = _state.value.copy(isCheckingStoredAccount = false)
-            return Result.failure(
+            return@withLock Result.failure(
                 IllegalStateException(
                     "Este APK não tem Client ID embutido. Quem compila precisa configurar msal.properties " +
                         "(ver docs/BUILTIN_MSAL.md). Você não precisa criar Azure — só entrar com Microsoft " +
@@ -187,15 +188,22 @@ class MsalAuthManager(
                 ),
             )
         }
-        configFile = MsalConfigFactory.writeConfigFile(appContext, clientId)
-        client = null
-        return suspendCancellableCoroutine { cont ->
+        if (client != null && initializedClientId == clientId) {
+            return@withLock Result.success(Unit)
+        }
+        _state.value = _state.value.copy(isCheckingStoredAccount = true)
+        configFile = runCatching { MsalConfigFactory.writeConfigFile(appContext, clientId) }.getOrElse {
+            _state.value = _state.value.copy(isCheckingStoredAccount = false)
+            return@withLock Result.failure(it)
+        }
+        suspendCancellableCoroutine { cont ->
             PublicClientApplication.createSingleAccountPublicClientApplication(
                 appContext,
                 configFile!!,
                 object : IPublicClientApplication.ISingleAccountApplicationCreatedListener {
                     override fun onCreated(application: ISingleAccountPublicClientApplication) {
                         client = application
+                        initializedClientId = clientId
                         application.getCurrentAccountAsync(object :
                             ISingleAccountPublicClientApplication.CurrentAccountCallback {
                             override fun onAccountLoaded(activeAccount: com.microsoft.identity.client.IAccount?) {

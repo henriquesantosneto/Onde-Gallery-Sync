@@ -29,6 +29,9 @@ object MsalConfigFactory {
 
     fun writeConfigFile(context: Context, clientId: String): File {
         val redirectUri = redirectUriForInstalledApk(context)
+        require(redirectUri.startsWith("msauth://")) {
+            "URI de redirect MSAL vazia"
+        }
         val json = """
             {
               "client_id": "$clientId",
@@ -48,7 +51,18 @@ object MsalConfigFactory {
             }
         """.trimIndent()
         val file = File(context.filesDir, "msal_auth_config.json")
-        file.writeText(json)
+        val encoded = json.toByteArray(Charsets.UTF_8)
+        if (file.isFile && file.length() == encoded.size.toLong()) {
+            val existing = runCatching { file.readBytes() }.getOrNull()
+            if (existing != null && existing.contentEquals(encoded)) return file
+        }
+        // writeText no destino trunca o arquivo que o MSAL ainda está lendo (Uri.parse null).
+        val tmp = File(context.filesDir, "msal_auth_config.json.tmp")
+        tmp.writeBytes(encoded)
+        if (!tmp.renameTo(file)) {
+            file.writeBytes(encoded)
+            tmp.delete()
+        }
         return file
     }
 
