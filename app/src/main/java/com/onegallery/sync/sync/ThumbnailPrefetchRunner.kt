@@ -1,5 +1,6 @@
 package com.onegallery.sync.sync
 
+import android.os.Process
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.ui.gallery.GalleryGridScrollGate
 import com.onegallery.sync.ui.gallery.GalleryMapper
@@ -165,21 +166,33 @@ internal class ThumbnailPrefetchRunner(
                                     cloudSourcesOnly,
                                     localSourcesOnly,
                                 )
-                                withContext(host.thumbnailPrefetchBlocking) {
-                                    withTimeout(itemTimeoutMs) {
-                                        host.ensureThumbnailCached(
-                                            row.canonicalPath,
-                                            host.activeSyncProgressCallback(
-                                                row,
-                                                host.thumbnailOperationLabel(row),
-                                            ),
-                                            lightweightPrefetch = !localSourcesOnly && !cloudSourcesOnly,
-                                            localSourcesOnly = localSourcesOnly,
-                                            cloudSourcesOnly = cloudSourcesOnly,
-                                            cloudVideoAggressive = GalleryMapper.isVideoFileName(
-                                                row.displayName,
-                                            ) && (cloudSourcesOnly || (!localSourcesOnly && !cloudSourcesOnly)),
-                                        )
+                                GalleryGridScrollGate.withGalleryFriendlyThumbnailSlot {
+                                    withContext(host.thumbnailPrefetchBlocking) {
+                                        val quiet = GalleryGridScrollGate.shouldUseQuietThumbnailSlot()
+                                        if (quiet) {
+                                            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                                        }
+                                        try {
+                                            withTimeout(itemTimeoutMs) {
+                                                host.ensureThumbnailCached(
+                                                    row.canonicalPath,
+                                                    host.activeSyncProgressCallback(
+                                                        row,
+                                                        host.thumbnailOperationLabel(row),
+                                                    ),
+                                                    lightweightPrefetch = !localSourcesOnly && !cloudSourcesOnly,
+                                                    localSourcesOnly = localSourcesOnly,
+                                                    cloudSourcesOnly = cloudSourcesOnly,
+                                                    cloudVideoAggressive = GalleryMapper.isVideoFileName(
+                                                        row.displayName,
+                                                    ) && (cloudSourcesOnly || (!localSourcesOnly && !cloudSourcesOnly)),
+                                                )
+                                            }
+                                        } finally {
+                                            if (quiet) {
+                                                Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT)
+                                            }
+                                        }
                                     }
                                 }
                             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
@@ -230,11 +243,7 @@ internal class ThumbnailPrefetchRunner(
     companion object {
         fun adaptiveParallelSlots(requested: Int = PARALLEL_THUMBNAILS): Int {
             val max = requested.coerceIn(1, PARALLEL_THUMBNAILS)
-            return if (GalleryGridScrollGate.shouldDeferBulkThumbnailPrefetch()) {
-                minOf(2, max)
-            } else {
-                max
-            }
+            return if (GalleryGridScrollGate.shouldUseQuietThumbnailSlot()) 1 else max
         }
 
         private const val THUMB_PREFETCH_RUN_CHUNK = 40

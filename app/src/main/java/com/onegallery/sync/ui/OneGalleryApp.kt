@@ -18,7 +18,9 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +29,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.onegallery.sync.ui.gallery.GalleryGridScrollGate
+import com.onegallery.sync.ui.gallery.routeKeepsSyncQuiet
 import com.onegallery.sync.ui.theme.OneGalleryEdgeToEdgeEffect
 import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import androidx.compose.ui.res.stringResource
@@ -324,6 +328,12 @@ fun OneGalleryApp(
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBottomBar = showsMainBottomBar(currentRoute)
+    SideEffect {
+        GalleryGridScrollGate.galleryInUse = routeKeepsSyncQuiet(currentRoute)
+    }
+    DisposableEffect(Unit) {
+        onDispose { GalleryGridScrollGate.galleryInUse = false }
+    }
 
     OneGalleryEdgeToEdgeEffect(currentRoute = currentRoute)
 
