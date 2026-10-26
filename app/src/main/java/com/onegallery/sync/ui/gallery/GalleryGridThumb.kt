@@ -1,15 +1,16 @@
 package com.onegallery.sync.ui.gallery
 
-import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import coil.compose.AsyncImagePainter
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.debug.DebugCrashLog
 
@@ -42,20 +43,28 @@ fun GalleryGridThumb(
     val localPhotoUri = if (thumbFile == null && item.isLocalPhotoOnDevice()) item.localUri else null
     val paintModel = thumbFile?.let(::DiskThumb) ?: localPhotoUri ?: return
     val cacheStamp = thumbFile?.lastModified() ?: 0L
-
-    val request = remember(paintModel, sizePx, item.canonicalPath, cacheStamp, revision) {
-        ImageRequest.Builder(context)
-            .data(paintModel)
-            .size(sizePx)
-            .bitmapConfig(Bitmap.Config.RGB_565)
-            .allowHardware(false)
-            .memoryCacheKey("${item.canonicalPath}:grid:$sizePx:$cacheStamp:$revision")
-            .build()
+    var useGpu by remember(paintModel, sizePx, item.canonicalPath, cacheStamp, revision) {
+        mutableStateOf(true)
+    }
+    val request = remember(paintModel, sizePx, item.canonicalPath, cacheStamp, revision, useGpu) {
+        galleryGridImageRequest(
+            context = context,
+            data = paintModel,
+            sizePx = sizePx,
+            cacheKey = "${item.canonicalPath}:grid:$sizePx:$cacheStamp:$revision:" +
+                if (useGpu) "gpu" else "cpu",
+            useGpu = useGpu,
+        )
     }
     AsyncImage(
         model = request,
         contentDescription = contentDescription,
         modifier = modifier.galleryGridThumbnailLayer(style),
         contentScale = contentScale,
+        onState = { painterState ->
+            if (useGpu && painterState is AsyncImagePainter.State.Error) {
+                useGpu = false
+            }
+        },
     )
 }

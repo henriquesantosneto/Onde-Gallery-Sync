@@ -417,6 +417,12 @@ fun GalleryScreen(
                         items(
                             items = gridEntries,
                             key = { it.key },
+                            contentType = { entry ->
+                                when (entry) {
+                                    is GalleryGridEntry.Header -> "header"
+                                    is GalleryGridEntry.Photo -> "photo"
+                                }
+                            },
                             span = { entry ->
                                 when (entry) {
                                     is GalleryGridEntry.Header -> GridItemSpan(maxLineSpan)
