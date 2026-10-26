@@ -3,6 +3,9 @@ package com.onegallery.sync.ui.gallery
 import android.graphics.Bitmap
 import android.net.Uri
 import com.onegallery.sync.TestApplication
+import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.sync.CloudSyncState
+import com.onegallery.sync.sync.PendingDeleteTarget
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -57,6 +60,27 @@ class AlbumCoverBitmapCacheTest {
         val uri = Uri.parse("content://media/external/images/media/1")
         AlbumCoverBitmapCache.put("album:uri", uri, isVideo = false, cacheKey = "uri", revision = 1L)
         assertNull(AlbumCoverBitmapCache.get("album:uri"))
+    }
+
+    @Test
+    fun coverCandidates_keepTheThumbAndThePhotoOnTheDevice() {
+        val thumb = File("thumb.jpg")
+        val uri = Uri.parse("content://media/external/images/media/4")
+        val item = GalleryDisplayItem(
+            canonicalPath = "/Photos/a.jpg",
+            displayName = "a.jpg",
+            albumName = "Photos",
+            kind = MediaKind.IMAGE,
+            cloudState = CloudSyncState.LOCAL_ONLY,
+            localMediaId = 4L,
+            oneDriveItemId = null,
+            pendingDeleteTarget = PendingDeleteTarget.NONE,
+            localUri = uri,
+            cachedOriginal = null,
+            cachedPlaceholderThumb = thumb,
+            sortTimestamp = 1L,
+        )
+        assertEquals(listOf<Any>(thumb, uri), albumCoverBitmapCandidates(model = null, item = item))
     }
 
     @Test

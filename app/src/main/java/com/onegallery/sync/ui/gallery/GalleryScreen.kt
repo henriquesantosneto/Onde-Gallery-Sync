@@ -348,6 +348,7 @@ fun GalleryScreen(
                     onToggle = { path -> viewModel.toggleSelection(path) },
                     onLongPress = { path -> viewModel.enterSelectionMode(path) },
                     onDragSelect = { path -> viewModel.enterSelectionMode(path) },
+                    onPinchCancelSelection = { viewModel.clearSelection() },
                     onPinch = gridPinch.applyPinch,
                     onMultiTouch = gridPinch.setMultiTouch,
                     onNearEnd = {

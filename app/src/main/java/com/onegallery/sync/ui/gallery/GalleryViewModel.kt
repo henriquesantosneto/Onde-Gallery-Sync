@@ -1420,8 +1420,14 @@ class GalleryViewModel(
             mediaCacheRepository,
         )
         val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: album.coverModel
+        val primaryPath = item?.canonicalPath
+        val alternates = items.asSequence()
+            .filter { it.canonicalPath != primaryPath && it.hasCheapAlbumCoverSource(mediaCacheRepository) }
+            .sortedByDescending { it.sortTimestamp }
+            .take(6)
+            .toList()
         albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
-        return LiveAlbumCover(displayModel = model, sourceItem = item)
+        return LiveAlbumCover(displayModel = model, sourceItem = item, alternates = alternates)
     }
 
     private fun detectAlbumCoverSignatureChanges(catalogItems: List<GalleryDisplayItem>): Set<String> {

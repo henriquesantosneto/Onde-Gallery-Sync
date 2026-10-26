@@ -18,7 +18,7 @@ internal object AlbumCoverBitmapCache {
     )
 
     private const val MAX_ENTRIES = 200
-    private const val MAX_BITMAP_BYTES = 16 * 1024 * 1024
+    private const val MAX_BITMAP_BYTES = 28 * 1024 * 1024
 
     private val lock = Any()
     private val entries = LinkedHashMap<String, Hit>(64, 0.75f, true)

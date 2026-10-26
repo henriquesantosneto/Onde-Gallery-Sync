@@ -14,6 +14,7 @@ import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.OverScroller
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -54,13 +55,24 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Lado da miniatura decodificada. A rolagem só copia esse bitmap. */
-internal const val BLIT_THUMB_PX = 192
+/** A célula pede pelo menos isto, e no máximo isto, para não ampliar um JPEG minúsculo. */
+internal fun blitThumbTargetPx(cellPx: Int): Int = cellPx.coerceIn(360, 640)
+
+/**
+ * A pinça não pode deixar a seleção que este mesmo gesto acabou de abrir.
+ * Seleção que já existia antes do dedo descer continua.
+ */
+internal fun pinchAbortsSelectionOpenedByThisGesture(
+    pointerCount: Int,
+    openedSelectionThisGesture: Boolean,
+): Boolean = pointerCount >= 2 && openedSelectionThisGesture
 
 private class DecodeJob(
     val key: String,
+    val path: String,
     val file: File?,
     val uri: Uri?,
+    val fallbackFile: File? = null,
 )
 
 /**
@@ -126,6 +138,7 @@ internal class GalleryBlitGridView(
     var onTogglePath: (String) -> Unit = {}
     var onLongPressPath: (String) -> Unit = {}
     var onDragPath: (String) -> Unit = {}
+    var onPinchCancelSelection: () -> Unit = {}
     var onPinch: (Float) -> Unit = {}
     var onMultiTouch: (Boolean) -> Unit = {}
     var onFirstIndex: (Int) -> Unit = {}
@@ -167,6 +180,15 @@ internal class GalleryBlitGridView(
     private var iconSynced: Bitmap? = null
     private var iconLocal: Bitmap? = null
     private var pinchDistance: Float = 0f
+    private var pinchLocked: Boolean = false
+    private var pinchActive: Boolean = false
+    private var ignoreTapAfterPinch: Boolean = false
+    private var openedSelectionThisGesture: Boolean = false
+    private var downX: Float = 0f
+    private var downY: Float = 0f
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
+    private val longPressTask = Runnable { fireLongPress() }
 
     private val scroller = OverScroller(context)
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -180,9 +202,13 @@ internal class GalleryBlitGridView(
     private val dst = Rect()
     private val src = Rect()
     private val cacheLock = Any()
-    private val memory = object : android.util.LruCache<String, Bitmap>(32 * 1024 * 1024) {
+    private val shownKeyByPath = HashMap<String, String>()
+    private val pathByCacheKey = HashMap<String, String>()
+    private val memory = object : android.util.LruCache<String, Bitmap>(64 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
         override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
+            val path = pathByCacheKey.remove(key)
+            if (path != null && shownKeyByPath[path] == key) shownKeyByPath.remove(path)
             if (evicted && newValue == null && !oldValue.isRecycled) oldValue.recycle()
         }
     }
@@ -211,19 +237,14 @@ internal class GalleryBlitGridView(
             }
 
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (selecting || coast.ignoreTapAfterCoast) return true
+                if (selecting || pinchLocked || ignoreTapAfterPinch || coast.ignoreTapAfterCoast) return true
                 val path = hit(e.x, e.y) ?: return true
                 if (selectionMode) onTogglePath(path) else onOpenPath(path)
                 return true
             }
 
             override fun onLongPress(e: MotionEvent) {
-                if (coast.ignoreTapAfterCoast) return
-                val path = hit(e.x, e.y) ?: return
-                selecting = true
-                lastDragPath = path
-                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                onLongPressPath(path)
+                // O timer próprio é cancelado quando entra o segundo dedo.
             }
 
             override fun onScroll(
@@ -369,6 +390,7 @@ internal class GalleryBlitGridView(
         decodeGeneration++
         badgeGeneration++
         mainHandler.removeCallbacks(decodeRunnable)
+        mainHandler.removeCallbacks(longPressTask)
         decodeHandler.removeCallbacksAndMessages(null)
         badgeHandler.removeCallbacksAndMessages(null)
         decodeThread.quitSafely()
@@ -396,14 +418,24 @@ internal class GalleryBlitGridView(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> haltCoast(event.eventTime)
+            MotionEvent.ACTION_DOWN -> {
+                haltCoast(event.eventTime)
+                beginSingleFinger(event)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> haltCoast(event.eventTime)
             MotionEvent.ACTION_MOVE -> {
                 if (coast.flinging || !scroller.isFinished) haltCoast(event.eventTime)
+                if (!pinchLocked &&
+                    (abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop)
+                ) {
+                    mainHandler.removeCallbacks(longPressTask)
+                }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> coast.onFingerUp()
         }
         if (event.pointerCount >= 2 || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             haltCoast(event.eventTime)
+            lockPinch()
             pinch(event)
             return true
         }
@@ -414,9 +446,15 @@ internal class GalleryBlitGridView(
         gestures.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             coast.onFingerUp()
+            mainHandler.removeCallbacks(longPressTask)
             selecting = false
             lastDragPath = null
             pinchDistance = 0f
+            pinchLocked = false
+            if (pinchActive) {
+                pinchActive = false
+                scheduleDecode()
+            }
             if (scroller.isFinished) finishScroll()
         }
         return true
@@ -488,7 +526,7 @@ internal class GalleryBlitGridView(
         val entry = entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo ?: return
         val item = entry.item
         dst.set(slot.left, slot.top, slot.left + slot.width, slot.top + slot.height)
-        val bitmap = memory.get(gridThumbCacheKey(item, BLIT_THUMB_PX))
+        val bitmap = bitmapFor(item)
         if (bitmap == null || bitmap.isRecycled) {
             fillPaint.color = placeholderColor
             canvas.drawRect(dst, fillPaint)
@@ -667,6 +705,43 @@ internal class GalleryBlitGridView(
         return blitPathAt(slots, x.roundToInt(), (y + contentOffset).roundToInt())
     }
 
+    private fun beginSingleFinger(event: MotionEvent) {
+        pinchLocked = false
+        openedSelectionThisGesture = false
+        downX = event.x
+        downY = event.y
+        mainHandler.removeCallbacks(longPressTask)
+        if (!coast.ignoreTapAfterCoast) {
+            mainHandler.postDelayed(longPressTask, longPressTimeout)
+        }
+    }
+
+    private fun fireLongPress() {
+        if (pinchLocked || pinchActive) return
+        val path = hit(downX, downY) ?: return
+        selecting = true
+        openedSelectionThisGesture = !selectionMode
+        lastDragPath = path
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        onLongPressPath(path)
+    }
+
+    private fun lockPinch() {
+        val pointers = 2
+        mainHandler.removeCallbacks(longPressTask)
+        pinchLocked = true
+        pinchActive = true
+        ignoreTapAfterPinch = true
+        selecting = false
+        lastDragPath = null
+        decodeGeneration++
+        decodeHandler.removeCallbacksAndMessages(null)
+        if (pinchAbortsSelectionOpenedByThisGesture(pointers, openedSelectionThisGesture)) {
+            openedSelectionThisGesture = false
+            onPinchCancelSelection()
+        }
+    }
+
     private fun pinch(event: MotionEvent) {
         if (event.pointerCount < 2) return
         scroller.forceFinished(true)
@@ -752,9 +827,20 @@ internal class GalleryBlitGridView(
         mainHandler.postDelayed(decodeRunnable, 32)
     }
 
+    private fun bitmapFor(item: GalleryDisplayItem): Bitmap? {
+        val exact = gridThumbCacheKey(item, blitThumbTargetPx(cellSize.coerceAtLeast(1)))
+        val primary = memory.get(exact)
+        if (primary != null && !primary.isRecycled) return primary
+        val fallbackKey = shownKeyByPath[item.canonicalPath] ?: return null
+        val fallback = memory.get(fallbackKey)
+        if (fallback != null && !fallback.isRecycled) return fallback
+        return null
+    }
+
     private fun enqueueVisible() {
-        if (scrollActive || slots.isEmpty() || width == 0) return
+        if (scrollActive || pinchActive || slots.isEmpty() || width == 0) return
         val generation = ++decodeGeneration
+        val target = blitThumbTargetPx(cellSize.coerceAtLeast(cellMinPx))
         val jobs = ArrayList<DecodeJob>()
         val first = blitFirstVisibleIndex(slots, contentOffset)
         var last = first
@@ -765,13 +851,15 @@ internal class GalleryBlitGridView(
             for (index in from..to) {
                 val slot = slots.getOrNull(index) ?: continue
                 val item = (entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo)?.item ?: continue
-                val key = gridThumbCacheKey(item, BLIT_THUMB_PX)
+                val key = gridThumbCacheKey(item, target)
                 if (synchronized(cacheLock) { memory.get(key) } != null) continue
-                val model = gridPaintModel(item, mediaCache) ?: continue
-                val file = (model as? DiskThumb)?.file
-                val uri = model as? Uri
-                if (file == null && uri == null) continue
-                jobs.add(DecodeJob(key, file, uri))
+                val source = blitDecodeSource(item) ?: continue
+                val fallback = if (source.second != null) {
+                    (gridPaintModel(item, mediaCache) as? DiskThumb)?.file?.takeIf { it.isFile }
+                } else {
+                    null
+                }
+                jobs.add(DecodeJob(key, item.canonicalPath, source.first, source.second, fallback))
             }
         }
         addRange(first, last)
@@ -781,7 +869,11 @@ internal class GalleryBlitGridView(
         decodeHandler.post {
             for (job in jobs) {
                 if (generation != decodeGeneration || GalleryGridScrollGate.isUserScrollingGrid) return@post
-                val bitmap = decodeJob(job) ?: continue
+                val bitmap = decodeJob(job)
+                    ?: job.fallbackFile?.let { file ->
+                        decodeJob(DecodeJob(job.key, job.path, file, null))
+                    }
+                    ?: continue
                 if (generation != decodeGeneration) {
                     bitmap.recycle()
                     return@post
@@ -790,8 +882,12 @@ internal class GalleryBlitGridView(
                     if (generation != decodeGeneration || bitmap.isRecycled) {
                         if (!bitmap.isRecycled) bitmap.recycle()
                     } else {
-                        synchronized(cacheLock) { memory.put(job.key, bitmap) }
-                        if (!scrollActive) invalidate()
+                        synchronized(cacheLock) {
+                            pathByCacheKey[job.key] = job.path
+                            memory.put(job.key, bitmap)
+                            shownKeyByPath[job.path] = job.key
+                        }
+                        if (!scrollActive && !pinchActive) invalidate()
                     }
                 }
             }
@@ -810,9 +906,10 @@ internal class GalleryBlitGridView(
                 }
             }
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            val edge = blitThumbTargetPx(cellSize.coerceAtLeast(cellMinPx))
             val options = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, BLIT_THUMB_PX)
-                inPreferredConfig = Bitmap.Config.RGB_565
+                inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, edge)
+                inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val decoded = if (job.file != null) {
                 BitmapFactory.decodeFile(job.file.absolutePath, options)
@@ -822,8 +919,8 @@ internal class GalleryBlitGridView(
                     BitmapFactory.decodeStream(input, null, options)
                 }
             } ?: return null
-            if (!decoded.isMutable && decoded.config == Bitmap.Config.RGB_565) return decoded
-            val immutable = decoded.copy(Bitmap.Config.RGB_565, false)
+            if (!decoded.isMutable && decoded.config == Bitmap.Config.ARGB_8888) return decoded
+            val immutable = decoded.copy(Bitmap.Config.ARGB_8888, false)
             if (immutable != null && immutable !== decoded) decoded.recycle()
             immutable ?: decoded
         }.getOrNull()
@@ -832,6 +929,20 @@ internal class GalleryBlitGridView(
     init {
         setWillNotDraw(false)
         isClickable = true
+        gestures.setIsLongpressEnabled(false)
+    }
+
+    /** Foto local entra pelo arquivo do aparelho. Vídeo e nuvem ficam na miniatura já gravada. */
+    private fun blitDecodeSource(item: GalleryDisplayItem): Pair<File?, Uri?>? {
+        if (item.kind == MediaKind.IMAGE && item.isLocalPhotoOnDevice()) {
+            item.localUri?.let { return null to it }
+            item.cachedOriginal?.takeIf { it.isFile && it.length() > 0L }?.let { return it to null }
+        }
+        val model = gridPaintModel(item, mediaCache) ?: return null
+        val file = (model as? DiskThumb)?.file?.takeIf { it.isFile }
+        val uri = (model as? Uri)?.takeUnless { it.isVideoContentUri() }
+        if (file == null && uri == null) return null
+        return file to uri
     }
 }
 
@@ -856,6 +967,7 @@ internal fun GalleryBlitPhotoGrid(
     onToggle: (String) -> Unit,
     onLongPress: (String) -> Unit,
     onDragSelect: (String) -> Unit,
+    onPinchCancelSelection: () -> Unit,
     onPinch: (Float) -> Unit,
     onMultiTouch: (Boolean) -> Unit,
     onNearEnd: () -> Unit,
@@ -920,6 +1032,7 @@ internal fun GalleryBlitPhotoGrid(
                 view.onTogglePath = onToggle
                 view.onLongPressPath = onLongPress
                 view.onDragPath = onDragSelect
+                view.onPinchCancelSelection = onPinchCancelSelection
                 view.onPinch = onPinch
                 view.onMultiTouch = onMultiTouch
                 view.onScrollEnd = onScrollEnd

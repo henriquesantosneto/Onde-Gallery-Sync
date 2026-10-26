@@ -2,12 +2,14 @@ package com.onegallery.sync.ui.gallery
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.data.local.VideoThumbnailHelper
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -154,6 +156,55 @@ object GalleryThumbnailModels {
             }
         }
         return null
+    }
+
+    /**
+     * Capa de álbum: JPEG em disco (mesmo com nome de vídeo) ou foto/vídeo no aparelho.
+     * Não passa pelo Coil, que deixa a capa vazia quando o arquivo não é uma imagem óbvia.
+     */
+    suspend fun decodeAlbumCoverBitmap(context: Context, source: Any, sizePx: Int = 480): Bitmap? {
+        val edge = sizePx.coerceIn(160, 512)
+        return when (source) {
+            is Bitmap -> source.takeIf { !it.isRecycled && it.width > 0 && it.height > 0 }
+            is DiskThumb -> decodeSampledCoverFile(source.file, edge)
+            is File -> decodeSampledCoverFile(source, edge)
+            is DeviceVideoCover -> loadDeviceVideoPoster(context, source.uri, source.mediaId, edge)
+            is Uri -> if (source.isVideoContentUri()) {
+                loadDeviceVideoPoster(context, source, null, edge)
+            } else {
+                loadDeviceImagePoster(context, source, null, edge)
+            }
+            else -> null
+        }
+    }
+
+    private fun decodeSampledCoverFile(file: File, edge: Int): Bitmap? {
+        if (!file.isFile || file.length() !in 128L..48_000_000L) return null
+        val ext = file.extension.lowercase()
+        val imageExt = ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif"
+        if (!imageExt && !file.isSafeGridImageFile()) return null
+        return runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sampleCoverSize(bounds.outWidth, bounds.outHeight, edge)
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
+            if (decoded.width <= 0 || decoded.height <= 0) {
+                decoded.recycle()
+                return null
+            }
+            decoded.ownedSoftwareBitmap()
+        }.getOrNull()
+    }
+
+    private fun sampleCoverSize(width: Int, height: Int, target: Int): Int {
+        val longest = maxOf(width, height).coerceAtLeast(1)
+        var sample = 1
+        while (longest / (sample * 2) >= target && sample < 32) sample *= 2
+        return sample
     }
 
     /** JPEG da foto no aparelho, já reduzido. Não depende do poster do MediaStore. */

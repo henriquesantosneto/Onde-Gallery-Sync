@@ -9,6 +9,7 @@ import java.io.File
 data class LiveAlbumCover(
     val displayModel: Any?,
     val sourceItem: GalleryDisplayItem?,
+    val alternates: List<GalleryDisplayItem> = emptyList(),
 )
 
 /** Poster de vídeo no aparelho. A UI lê o MediaStore; o Coil não recebe o arquivo. */
@@ -129,6 +130,34 @@ fun resolveAlbumCoverModel(
     return resolveAlbumCoverItem(items, mediaCacheRepository)?.let {
         resolveGalleryCoverModel(it, mediaCacheRepository)
     }
+}
+
+/**
+ * Ordem para pintar a capa: arquivo já escolhido, miniatura em disco, original,
+ * e a foto no aparelho quando a miniatura ainda não existe.
+ */
+internal fun albumCoverBitmapCandidates(
+    model: Any?,
+    item: GalleryDisplayItem?,
+): List<Any> {
+    val ordered = ArrayList<Any>(5)
+    fun add(value: Any?) {
+        if (value == null || ordered.any { it == value }) return
+        ordered.add(value)
+    }
+    add(model)
+    if (item != null) {
+        add(item.cachedPlaceholderThumb)
+        add(item.cachedOriginal)
+        if (item.kind == MediaKind.VIDEO) {
+            if (item.hasLocalVideoCoverOnDevice()) {
+                item.localUri?.let { add(DeviceVideoCover(it, item.localMediaId)) }
+            }
+        } else {
+            add(item.localUri)
+        }
+    }
+    return ordered
 }
 
 fun galleryItemCoverReady(

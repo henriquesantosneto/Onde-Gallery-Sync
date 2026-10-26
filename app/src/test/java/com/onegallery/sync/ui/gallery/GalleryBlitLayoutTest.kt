@@ -80,4 +80,18 @@ class GalleryBlitLayoutTest {
         assertFalse(coast.ignoreTapAfterCoast)
         assertEquals(900, blitContentOffset(fingerDown = false, offset = 40, scrollerY = 900))
     }
+
+    @Test
+    fun thumbTargetMatchesTheCellInsteadOfATinyPreview() {
+        assertEquals(360, blitThumbTargetPx(120))
+        assertEquals(480, blitThumbTargetPx(480))
+        assertEquals(640, blitThumbTargetPx(1_200))
+    }
+
+    @Test
+    fun pinchAbortsOnlyTheSelectionThisGestureOpened() {
+        assertTrue(pinchAbortsSelectionOpenedByThisGesture(pointerCount = 2, openedSelectionThisGesture = true))
+        assertFalse(pinchAbortsSelectionOpenedByThisGesture(pointerCount = 2, openedSelectionThisGesture = false))
+        assertFalse(pinchAbortsSelectionOpenedByThisGesture(pointerCount = 1, openedSelectionThisGesture = true))
+    }
 }

@@ -71,10 +71,12 @@ fun AlbumGridCoverImage(
     LaunchedEffect(album.bucketId, coverRevision, safeFallback) {
         try {
         val hit = AlbumCoverBitmapCache.get(album.bucketId)
+        val cachedBitmap = hit?.model as? Bitmap
         if (hit != null &&
             !hit.empty &&
             hit.revision == coverRevision &&
-            hit.model.isPaintableAlbumCoverModel()
+            cachedBitmap != null &&
+            !cachedBitmap.isRecycled
         ) {
             if (displayModel != hit.model) {
                 displayModel = hit.model
@@ -88,29 +90,36 @@ fun AlbumGridCoverImage(
             GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true, maxWaitMs = 2_500L)
             withContext(Dispatchers.IO) {
                 val live = resolveLiveCover(album)
-                val raw = live.sourceItem?.let { item ->
-                    resolveGalleryCoverModel(item, mediaCacheRepository)
-                } ?: live.displayModel
-                val videoCover = raw.asDeviceVideoCover()
-                val paintable = when {
-                    raw is android.net.Uri -> GalleryThumbnailModels.loadDeviceImagePoster(
-                        context,
-                        raw,
-                        live.sourceItem?.localMediaId,
-                        480,
+                val attempts = ArrayList<Pair<GalleryDisplayItem?, Any?>>(1 + live.alternates.size)
+                attempts.add(live.sourceItem to live.displayModel)
+                for (alternate in live.alternates) {
+                    attempts.add(
+                        alternate to resolveGalleryCoverModel(alternate, mediaCacheRepository),
                     )
-                    videoCover != null -> GalleryThumbnailModels.loadDeviceVideoPoster(
-                        context,
-                        videoCover.uri,
-                        videoCover.mediaId ?: live.sourceItem?.localMediaId,
-                        480,
-                    )
-                    else -> raw
+                }
+                var bitmap: Bitmap? = null
+                var chosen = live.sourceItem
+                var coilFallback: Any? = null
+                for ((candidate, model) in attempts) {
+                    val sources = albumCoverBitmapCandidates(model, candidate)
+                    for (source in sources) {
+                        if (source.isBlankSyncedCover(mediaCacheRepository)) continue
+                        val decoded = GalleryThumbnailModels.decodeAlbumCoverBitmap(context, source, 480)
+                        if (decoded != null && !decoded.isRecycled) {
+                            bitmap = decoded
+                            chosen = candidate
+                            break
+                        }
+                        if (coilFallback == null && coverCoilModel(source) != null) {
+                            coilFallback = source
+                        }
+                    }
+                    if (bitmap != null) break
                 }
                 ResolvedAlbumCover(
-                    model = paintable?.takeIf { it.isPaintableAlbumCoverModel() },
-                    isVideo = live.sourceItem?.kind == MediaKind.VIDEO || videoCover != null,
-                    cacheKey = live.sourceItem?.canonicalPath ?: album.bucketId,
+                    model = bitmap ?: coilFallback,
+                    isVideo = chosen?.kind == MediaKind.VIDEO,
+                    cacheKey = chosen?.canonicalPath ?: album.bucketId,
                 )
             }
         }
