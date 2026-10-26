@@ -1,5 +1,6 @@
 package com.onegallery.sync.ui.gallery
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -53,6 +54,7 @@ import com.onegallery.sync.ui.theme.OneDriveBlue
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** A célula pede pelo menos isto, e no máximo isto, para não ampliar um JPEG minúsculo. */
@@ -67,8 +69,37 @@ internal fun pinchAbortsSelectionOpenedByThisGesture(
     openedSelectionThisGesture: Boolean,
 ): Boolean = pointerCount >= 2 && openedSelectionThisGesture
 
+/** Um terço do large heap, entre 128 e 256 MB: as miniaturas desta visita ficam residentes. */
+internal fun blitSessionCacheBytes(largeHeapMb: Int): Int {
+    val mb = (largeHeapMb / 3).coerceIn(128, 256)
+    return mb * 1024 * 1024
+}
+
+/**
+ * Quem está mais longe da tela sai primeiro.
+ * O intervalo [protectFrom, protectTo] é a janela visível e a vizinhança, e não entra na lista.
+ */
+internal fun blitThumbEvictOrder(
+    indexes: Map<String, Int>,
+    anchor: Int,
+    protectFrom: Int,
+    protectTo: Int,
+): List<String> {
+    return indexes.entries
+        .filter { it.value !in protectFrom..protectTo }
+        .sortedByDescending { abs(it.value - anchor) }
+        .map { it.key }
+}
+
+/** Já está perto do tamanho da célula: não decodifica de novo. */
+internal fun blitThumbCoversTarget(bitmapEdge: Int, targetPx: Int): Boolean =
+    bitmapEdge >= targetPx - 32
+
+private const val BLIT_SESSION_PROTECT_SLOTS = 6
+private const val BLIT_PREFETCH_AHEAD = 80
+private const val BLIT_PREFETCH_BEHIND = 60
+
 private class DecodeJob(
-    val key: String,
     val path: String,
     val file: File?,
     val uri: Uri?,
@@ -202,16 +233,12 @@ internal class GalleryBlitGridView(
     private val dst = Rect()
     private val src = Rect()
     private val cacheLock = Any()
-    private val shownKeyByPath = HashMap<String, String>()
-    private val pathByCacheKey = HashMap<String, String>()
-    private val memory = object : android.util.LruCache<String, Bitmap>(64 * 1024 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
-        override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
-            val path = pathByCacheKey.remove(key)
-            if (path != null && shownKeyByPath[path] == key) shownKeyByPath.remove(path)
-            if (evicted && newValue == null && !oldValue.isRecycled) oldValue.recycle()
-        }
-    }
+    private val session = HashMap<String, Bitmap>()
+    private var sessionByteCount: Int = 0
+    private val sessionBudgetBytes: Int = blitSessionCacheBytes(
+        (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.largeMemoryClass ?: 192,
+    )
+    @Volatile private var released: Boolean = false
     private val decodeThread = HandlerThread("gallery-blit").apply { start() }
     private val decodeHandler = Handler(decodeThread.looper)
     private val badgeThread = HandlerThread(
@@ -310,6 +337,7 @@ internal class GalleryBlitGridView(
         invalidate()
         scheduleDecode()
         scheduleBadgeResolve()
+        if (!scrollActive && !pinchActive) trimSession()
     }
 
     fun bindMetrics(
@@ -387,6 +415,7 @@ internal class GalleryBlitGridView(
     }
 
     fun release() {
+        released = true
         decodeGeneration++
         badgeGeneration++
         mainHandler.removeCallbacks(decodeRunnable)
@@ -395,7 +424,13 @@ internal class GalleryBlitGridView(
         badgeHandler.removeCallbacksAndMessages(null)
         decodeThread.quitSafely()
         badgeThread.quitSafely()
-        synchronized(cacheLock) { memory.evictAll() }
+        synchronized(cacheLock) {
+            for (bitmap in session.values) {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+            session.clear()
+            sessionByteCount = 0
+        }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -663,16 +698,14 @@ internal class GalleryBlitGridView(
     }
 
     private fun finishScroll() {
-        if (!scrollActive && !coast.flinging) {
-            scheduleDecode()
-            scheduleBadgeResolve()
-            maybeLoadMore()
-            return
+        val idleAlready = !scrollActive && !coast.flinging
+        if (!idleAlready) {
+            scrollActive = false
+            coast.onFlingSettled()
+            GalleryGridScrollGate.isUserScrollingGrid = false
+            onScrollEnd()
         }
-        scrollActive = false
-        coast.onFlingSettled()
-        GalleryGridScrollGate.isUserScrollingGrid = false
-        onScrollEnd()
+        trimSession()
         scheduleDecode()
         scheduleBadgeResolve()
         maybeLoadMore()
@@ -828,13 +861,9 @@ internal class GalleryBlitGridView(
     }
 
     private fun bitmapFor(item: GalleryDisplayItem): Bitmap? {
-        val exact = gridThumbCacheKey(item, blitThumbTargetPx(cellSize.coerceAtLeast(1)))
-        val primary = memory.get(exact)
-        if (primary != null && !primary.isRecycled) return primary
-        val fallbackKey = shownKeyByPath[item.canonicalPath] ?: return null
-        val fallback = memory.get(fallbackKey)
-        if (fallback != null && !fallback.isRecycled) return fallback
-        return null
+        val bitmap = session[item.canonicalPath] ?: return null
+        if (bitmap.isRecycled) return null
+        return bitmap
     }
 
     private fun enqueueVisible() {
@@ -851,44 +880,94 @@ internal class GalleryBlitGridView(
             for (index in from..to) {
                 val slot = slots.getOrNull(index) ?: continue
                 val item = (entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo)?.item ?: continue
-                val key = gridThumbCacheKey(item, target)
-                if (synchronized(cacheLock) { memory.get(key) } != null) continue
+                val held = synchronized(cacheLock) { session[item.canonicalPath] }
+                if (held != null && !held.isRecycled &&
+                    blitThumbCoversTarget(min(held.width, held.height), target)
+                ) {
+                    continue
+                }
                 val source = blitDecodeSource(item) ?: continue
                 val fallback = if (source.second != null) {
                     (gridPaintModel(item, mediaCache) as? DiskThumb)?.file?.takeIf { it.isFile }
                 } else {
                     null
                 }
-                jobs.add(DecodeJob(key, item.canonicalPath, source.first, source.second, fallback))
+                jobs.add(DecodeJob(item.canonicalPath, source.first, source.second, fallback))
             }
         }
         addRange(first, last)
-        addRange(last + 1, (last + 24).coerceAtMost(slots.lastIndex))
-        addRange((first - 12).coerceAtLeast(0), first - 1)
+        addRange(last + 1, (last + BLIT_PREFETCH_AHEAD).coerceAtMost(slots.lastIndex))
+        addRange((first - BLIT_PREFETCH_BEHIND).coerceAtLeast(0), first - 1)
         if (jobs.isEmpty()) return
         decodeHandler.post {
             for (job in jobs) {
-                if (generation != decodeGeneration || GalleryGridScrollGate.isUserScrollingGrid) return@post
+                if (released || generation != decodeGeneration || GalleryGridScrollGate.isUserScrollingGrid) {
+                    return@post
+                }
                 val bitmap = decodeJob(job)
                     ?: job.fallbackFile?.let { file ->
-                        decodeJob(DecodeJob(job.key, job.path, file, null))
+                        decodeJob(DecodeJob(job.path, file, null))
                     }
                     ?: continue
-                if (generation != decodeGeneration) {
-                    bitmap.recycle()
+                if (released) {
+                    if (!bitmap.isRecycled) bitmap.recycle()
                     return@post
                 }
                 mainHandler.post {
-                    if (generation != decodeGeneration || bitmap.isRecycled) {
+                    if (released || bitmap.isRecycled) {
                         if (!bitmap.isRecycled) bitmap.recycle()
                     } else {
-                        synchronized(cacheLock) {
-                            pathByCacheKey[job.key] = job.path
-                            memory.put(job.key, bitmap)
-                            shownKeyByPath[job.path] = job.key
-                        }
+                        rememberThumb(job.path, bitmap)
                         if (!scrollActive && !pinchActive) invalidate()
                     }
+                }
+            }
+        }
+    }
+
+    /** Uma bitmap por foto. A anterior só sai quando a nova já está no lugar, na thread principal. */
+    private fun rememberThumb(path: String, bitmap: Bitmap) {
+        synchronized(cacheLock) {
+            val previous = session.put(path, bitmap)
+            if (previous != null && previous !== bitmap && !previous.isRecycled) {
+                sessionByteCount = (sessionByteCount - previous.byteCount).coerceAtLeast(0)
+                previous.recycle()
+            }
+            if (previous !== bitmap) sessionByteCount += bitmap.byteCount
+        }
+        trimSession()
+    }
+
+    /**
+     * Só corre com o dedo parado. A janela visível fica. O que está longe, ou fora da lista, sai.
+     * Se a própria janela passar do orçamento, ela permanece — a tela não fica cinza.
+     */
+    private fun trimSession() {
+        if (scrollActive || pinchActive || released) return
+        synchronized(cacheLock) {
+            if (sessionByteCount <= sessionBudgetBytes || slots.isEmpty()) return
+            val indexes = HashMap<String, Int>(slots.size)
+            for (index in slots.indices) {
+                val path = slots[index].path ?: continue
+                if (path !in indexes) indexes[path] = index
+            }
+            val first = if (slots.isEmpty()) 0 else blitFirstVisibleIndex(slots, contentOffset)
+            var last = first
+            if (slots.isNotEmpty()) {
+                val bottom = contentOffset + height
+                while (last < slots.lastIndex && slots[last + 1].top < bottom) last++
+            }
+            val protectFrom = (first - BLIT_SESSION_PROTECT_SLOTS).coerceAtLeast(0)
+            val protectTo = last + BLIT_SESSION_PROTECT_SLOTS
+            val anchor = (first + last) / 2
+            val orphans = session.keys.filter { it !in indexes }
+            val order = orphans + blitThumbEvictOrder(indexes, anchor, protectFrom, protectTo)
+            for (path in order) {
+                if (sessionByteCount <= sessionBudgetBytes) return
+                val bitmap = session.remove(path) ?: continue
+                if (!bitmap.isRecycled) {
+                    sessionByteCount = (sessionByteCount - bitmap.byteCount).coerceAtLeast(0)
+                    bitmap.recycle()
                 }
             }
         }

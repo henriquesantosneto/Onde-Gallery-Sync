@@ -94,4 +94,34 @@ class GalleryBlitLayoutTest {
         assertFalse(pinchAbortsSelectionOpenedByThisGesture(pointerCount = 2, openedSelectionThisGesture = false))
         assertFalse(pinchAbortsSelectionOpenedByThisGesture(pointerCount = 1, openedSelectionThisGesture = true))
     }
+
+    @Test
+    fun sessionBudgetIsAThirdOfTheLargeHeapClamped() {
+        assertEquals(170 * 1024 * 1024, blitSessionCacheBytes(512))
+        assertEquals(128 * 1024 * 1024, blitSessionCacheBytes(128))
+        assertEquals(128 * 1024 * 1024, blitSessionCacheBytes(0))
+        assertEquals(256 * 1024 * 1024, blitSessionCacheBytes(900))
+    }
+
+    @Test
+    fun evictionDropsTheFarthestThumbOutsideTheVisibleWindow() {
+        val indexes = mapOf(
+            "behind" to 0,
+            "near" to 14,
+            "visible" to 20,
+            "far" to 100,
+            "farther" to 400,
+        )
+        val order = blitThumbEvictOrder(indexes, anchor = 20, protectFrom = 14, protectTo = 26)
+        assertEquals(listOf("farther", "far", "behind"), order)
+        assertFalse(order.contains("visible"))
+        assertFalse(order.contains("near"))
+    }
+
+    @Test
+    fun aThumbAlreadyNearTheCellSizeIsNotDecodedAgain() {
+        assertTrue(blitThumbCoversTarget(bitmapEdge = 448, targetPx = 480))
+        assertTrue(blitThumbCoversTarget(bitmapEdge = 480, targetPx = 480))
+        assertFalse(blitThumbCoversTarget(bitmapEdge = 360, targetPx = 480))
+    }
 }
