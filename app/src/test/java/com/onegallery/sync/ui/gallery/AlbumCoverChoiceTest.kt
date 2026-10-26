@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.net.Uri
 import com.onegallery.sync.TestApplication
+import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
@@ -11,6 +12,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -80,6 +82,18 @@ class AlbumCoverChoiceTest {
         assertEquals("new", held?.canonicalPath)
         assertNull(restored.remembered("album:Other"))
         dir.deleteRecursively()
+    }
+
+    @Test
+    fun fallbackCover_usesStoredJpegWhenNewestPhotoHasOnlyAUri() {
+        val repo = MediaCacheRepository(RuntimeEnvironment.getApplication())
+        val jpeg = galleryTestJpeg()
+        val newest = photo("new", 9L).copy(
+            localUri = Uri.parse("content://media/external/images/media/9"),
+        )
+        val older = photo("old", 1L).copy(cachedPlaceholderThumb = jpeg)
+        assertEquals(jpeg, fallbackAlbumCoverFile(listOf(newest, older), repo))
+        jpeg.delete()
     }
 
     @Test

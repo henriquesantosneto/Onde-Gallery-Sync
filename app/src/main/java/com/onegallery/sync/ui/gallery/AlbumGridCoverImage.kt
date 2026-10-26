@@ -60,7 +60,7 @@ fun AlbumGridCoverImage(
     }
     val cachedCover = AlbumCoverBitmapCache.get(album.bucketId)
     val safeFallback = fallbackCover?.takeUnless { it.isBlankSyncedCover(mediaCacheRepository) }
-    var displayModel by remember(album.bucketId) {
+    var displayModel by remember(album.bucketId, safeFallback) {
         mutableStateOf(albumCoverDisplaySeed(cachedCover?.model, safeFallback))
     }
     var coverIsVideo by remember(album.bucketId) { mutableStateOf(cachedCover?.isVideo == true) }
@@ -68,7 +68,7 @@ fun AlbumGridCoverImage(
         mutableStateOf(cachedCover?.cacheKey ?: album.bucketId)
     }
 
-    LaunchedEffect(album.bucketId, coverRevision) {
+    LaunchedEffect(album.bucketId, coverRevision, safeFallback) {
         try {
         val hit = AlbumCoverBitmapCache.get(album.bucketId)
         if (hit != null &&

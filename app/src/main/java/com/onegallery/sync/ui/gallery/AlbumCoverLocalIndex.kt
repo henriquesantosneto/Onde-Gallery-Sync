@@ -82,8 +82,26 @@ class AlbumCoverLocalIndex(
         }
         val model = resolveGalleryCoverModel(item, mediaCacheRepository)?.takeIf {
             it.isPaintableAlbumCoverModel()
-        } ?: return null
+        } ?: fallbackAlbumCoverFile(items, mediaCacheRepository) ?: return null
         byKey[cacheKey] = CachedCover(signature, model)
         return model
     }
+}
+
+/** A foto mais nova do álbum pode ainda não ter JPEG. Usa outro arquivo já gravado. */
+internal fun fallbackAlbumCoverFile(
+    items: List<GalleryDisplayItem>,
+    mediaCacheRepository: com.onegallery.sync.data.local.MediaCacheRepository,
+    limit: Int = 32,
+): java.io.File? {
+    val recent = if (items.size <= limit) {
+        items
+    } else {
+        items.sortedByDescending { it.sortTimestamp }.take(limit)
+    }
+    for (candidate in recent) {
+        val model = resolveGalleryCoverModel(candidate, mediaCacheRepository)
+        if (model is java.io.File && model.isPaintableAlbumCoverModel()) return model
+    }
+    return null
 }

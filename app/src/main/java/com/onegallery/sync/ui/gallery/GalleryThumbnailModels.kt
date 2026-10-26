@@ -30,15 +30,11 @@ object GalleryThumbnailModels {
         sizePx: Int,
     ): Bitmap? = devicePosterSlots.withPermit {
         withContext(Dispatchers.IO) {
-            runCatching {
-                loadSystemThumbnail(
-                    context,
-                    uri,
-                    mediaId,
-                    MediaKind.IMAGE,
-                    sizePx.coerceIn(64, 512),
-                )?.ownedSoftwareBitmap()
-            }.getOrNull()
+            val edge = sizePx.coerceIn(64, 512)
+            runCatching { decodeSampledContentBitmap(context, uri, edge) }.getOrNull()
+                ?: runCatching {
+                    loadSystemThumbnail(context, uri, mediaId, MediaKind.IMAGE, edge)
+                }.getOrNull()
         }
     }
 
@@ -120,11 +116,7 @@ object GalleryThumbnailModels {
                 context.contentResolver.loadThumbnail(uri, Size(sizePx, sizePx), null)
             }.getOrNull()?.takeIf { it.width > 0 && it.height > 0 }?.let { raw ->
                 val bmp = raw.ownedSoftwareBitmap() ?: return@let
-                if (kind == MediaKind.VIDEO) return bmp
-                val acceptable = runCatching { VideoThumbnailHelper.isAcceptableFrame(bmp) }
-                    .getOrDefault(true)
-                if (acceptable) return bmp
-                bmp.recycle()
+                if (bmp.width > 0 && bmp.height > 0) return bmp
             }
         }
         if (localMediaId != null) {
@@ -162,6 +154,30 @@ object GalleryThumbnailModels {
             }
         }
         return null
+    }
+
+    /** JPEG da foto no aparelho, já reduzido. Não depende do poster do MediaStore. */
+    private fun decodeSampledContentBitmap(context: Context, uri: Uri, sizePx: Int): Bitmap? {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, bounds)
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        val maxEdge = maxOf(bounds.outWidth, bounds.outHeight)
+        while (maxEdge / sample > sizePx * 2 && sample < 32) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        val decoded = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, opts)
+        } ?: return null
+        if (decoded.width <= 0 || decoded.height <= 0) {
+            decoded.recycle()
+            return null
+        }
+        return decoded.ownedSoftwareBitmap()
     }
 }
 
