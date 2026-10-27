@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,10 +31,11 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.data.local.MediaAlbum
-import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.debug.DebugCrashLog
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -55,8 +57,12 @@ fun AlbumGridCoverImage(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val mediaCacheRepository = remember(context) {
         (context.applicationContext as OneGalleryApplication).mediaCacheRepository
+    }
+    val coverDisk = remember(context) {
+        AlbumCoverDiskStore(File(context.applicationContext.filesDir, "album-covers"))
     }
     val cachedCover = AlbumCoverBitmapCache.get(album.bucketId)
     val safeFallback = fallbackCover?.takeUnless { it.isBlankSyncedCover(mediaCacheRepository) }
@@ -83,44 +89,43 @@ fun AlbumGridCoverImage(
                 coverIsVideo = hit.isVideo
                 coverCacheKey = hit.cacheKey
             }
+            withContext(Dispatchers.IO) {
+                if (coverDisk.read(album.bucketId, coverRevision) == null) {
+                    coverDisk.write(
+                        album.bucketId,
+                        cachedBitmap,
+                        AlbumCoverDiskStamp(coverRevision, hit.isVideo, hit.cacheKey),
+                    )
+                }
+            }
             return@LaunchedEffect
         }
         GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true, maxWaitMs = 2_500L)
         val outcome = albumCoverResolveSlots.withPermit {
             GalleryGridScrollGate.awaitIdleIfZeroDecodeEnabled(true, maxWaitMs = 2_500L)
             withContext(Dispatchers.IO) {
+                val saved = coverDisk.read(album.bucketId, coverRevision)
+                if (saved != null) {
+                    val decoded = GalleryThumbnailModels.decodeAlbumCoverBitmap(context, saved.file, 480)
+                    if (decoded != null && !decoded.isRecycled) {
+                        return@withContext PreparedAlbumCover(
+                            model = decoded,
+                            isVideo = saved.stamp.isVideo,
+                            cacheKey = saved.stamp.cacheKey.ifBlank { album.bucketId },
+                        )
+                    }
+                }
                 val live = resolveLiveCover(album)
-                val attempts = ArrayList<Pair<GalleryDisplayItem?, Any?>>(1 + live.alternates.size)
-                attempts.add(live.sourceItem to live.displayModel)
-                for (alternate in live.alternates) {
-                    attempts.add(
-                        alternate to resolveGalleryCoverModel(alternate, mediaCacheRepository),
+                val prepared = decodePreparedAlbumCover(context, album, mediaCacheRepository, live)
+                val bitmap = prepared.model as? Bitmap
+                if (bitmap != null && !bitmap.isRecycled) {
+                    coverDisk.write(
+                        album.bucketId,
+                        bitmap,
+                        AlbumCoverDiskStamp(coverRevision, prepared.isVideo, prepared.cacheKey),
                     )
                 }
-                var bitmap: Bitmap? = null
-                var chosen = live.sourceItem
-                var coilFallback: Any? = null
-                for ((candidate, model) in attempts) {
-                    val sources = albumCoverBitmapCandidates(model, candidate)
-                    for (source in sources) {
-                        if (source.isBlankSyncedCover(mediaCacheRepository)) continue
-                        val decoded = GalleryThumbnailModels.decodeAlbumCoverBitmap(context, source, 480)
-                        if (decoded != null && !decoded.isRecycled) {
-                            bitmap = decoded
-                            chosen = candidate
-                            break
-                        }
-                        if (coilFallback == null && coverCoilModel(source) != null) {
-                            coilFallback = source
-                        }
-                    }
-                    if (bitmap != null) break
-                }
-                ResolvedAlbumCover(
-                    model = bitmap ?: coilFallback,
-                    isVideo = chosen?.kind == MediaKind.VIDEO,
-                    cacheKey = chosen?.canonicalPath ?: album.bucketId,
-                )
+                prepared
             }
         }
         val resolved = outcome.model
@@ -228,6 +233,13 @@ fun AlbumGridCoverImage(
                                         coverCacheKey,
                                         coverRevision,
                                     )
+                                    scope.launch(Dispatchers.IO) {
+                                        coverDisk.write(
+                                            album.bucketId,
+                                            stored,
+                                            AlbumCoverDiskStamp(coverRevision, coverIsVideo, coverCacheKey),
+                                        )
+                                    }
                                     displayModel = stored
                                 } catch (error: Exception) {
                                     DebugCrashLog.mark(
@@ -270,24 +282,4 @@ fun AlbumGridCoverImage(
     }
 }
 
-private data class ResolvedAlbumCover(
-    val model: Any?,
-    val isVideo: Boolean,
-    val cacheKey: String,
-)
-
-private fun coverCoilModel(model: Any?): Any? {
-    if (model.asDeviceVideoCover() != null) return null
-    return when (model) {
-        is java.io.File -> {
-            if (!model.isSafeGridImageFile()) return null
-            val ext = model.extension.lowercase()
-            if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif") {
-                model
-            } else {
-                DiskThumb(model)
-            }
-        }
-        else -> model
-    }
-}
+private fun coverCoilModel(model: Any?): Any? = preparedCoverCoilModel(model)

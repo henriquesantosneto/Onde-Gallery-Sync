@@ -19,6 +19,7 @@ import com.onegallery.sync.data.local.matchesPlace
 import com.onegallery.sync.data.local.preferredBrowseKey
 import com.onegallery.sync.data.local.db.SyncMetadataEntity
 import com.onegallery.sync.data.local.db.UserAlbumEntity
+import android.app.ActivityManager
 import android.content.Context
 import java.io.File
 import com.onegallery.sync.data.local.MediaStorageAccess
@@ -54,6 +55,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -152,6 +154,10 @@ class GalleryViewModel(
     private val folderAlbumCoverSignature = mutableMapOf<String, Long>()
     private val placeAlbumCoverSignature = mutableMapOf<String, Long>()
     private val albumCoverChoiceFile = File(appContext.filesDir, "album-cover-choices-v1.txt")
+    private val albumCoverDisk = AlbumCoverDiskStore(File(appContext.filesDir, "album-covers"))
+    private val albumCoverWarmer = AlbumCoverWarmer(appContext, albumCoverDisk, mediaCacheRepository)
+    private val albumWarmPending = AtomicReference<AlbumWarmRequest?>(null)
+    private var albumWarmJob: Job? = null
     @Volatile
     private var initialLibrarySnapshotApplied = false
     @Volatile
@@ -174,6 +180,9 @@ class GalleryViewModel(
     init {
         syncCoordinator.registerUserStopHook(userStopHook)
         albumCoverLocalIndex.loadChoices(albumCoverChoiceFile)
+        val largeHeapMb = (appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
+            ?.largeMemoryClass ?: 192
+        AlbumCoverBitmapCache.noteLargeHeap(largeHeapMb)
     }
 
     private val catalogSession = GalleryCatalogSession()
@@ -1258,6 +1267,7 @@ class GalleryViewModel(
         val placeBrowse = controls.browseFilter as? GalleryBrowseFilter.Place
         val locationFilter = placeBrowse?.displayName
         val placeBrowseMatchKey = placeBrowse?.matchKey
+        scheduleAlbumCoverWarm(displayAlbums, displayPlaceAlbums, coverRevisions)
 
         return GalleryUiState(
             isLoading = controls.isLoading,
@@ -1406,6 +1416,28 @@ class GalleryViewModel(
     /** Reaplica cache/local no índice da galeria (ex.: após baixar original no detalhe). */
     fun notifyLocalDisplayChanged() {
         syncCoordinator.notifyGalleryDisplayRefresh()
+    }
+
+    private data class AlbumWarmRequest(
+        val albums: List<MediaAlbum>,
+        val revisions: Map<String, Long>,
+    )
+
+    /** Pré-grava a capa de cada álbum enquanto a grade não está em movimento. */
+    private fun scheduleAlbumCoverWarm(
+        albums: List<MediaAlbum>,
+        placeAlbums: List<MediaAlbum>,
+        revisions: Map<String, Long>,
+    ) {
+        if (albums.isEmpty() && placeAlbums.isEmpty()) return
+        albumWarmPending.set(AlbumWarmRequest(albums + placeAlbums, revisions))
+        if (albumWarmJob?.isActive == true) return
+        albumWarmJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val request = albumWarmPending.getAndSet(null) ?: break
+                albumCoverWarmer.warm(request.albums, request.revisions, ::liveAlbumCoverFor)
+            }
+        }
     }
 
     /** Capa ao rolar a grade: foto ou vídeo com miniatura local mais recente (sem rede). */

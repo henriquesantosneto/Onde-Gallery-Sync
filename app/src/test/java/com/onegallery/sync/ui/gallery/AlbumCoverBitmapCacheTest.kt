@@ -97,7 +97,7 @@ class AlbumCoverBitmapCacheTest {
     @Test
     fun cache_dropsTheLeastRecentCoverPastTheCap() {
         AlbumCoverBitmapCache.put("album:0", File("cover-0.jpg"), false, "cover-0.jpg", 1L)
-        for (index in 1..200) {
+        for (index in 1..400) {
             AlbumCoverBitmapCache.put(
                 "album:$index",
                 File("cover-$index.jpg"),
@@ -108,8 +108,8 @@ class AlbumCoverBitmapCacheTest {
         }
         assertNull(AlbumCoverBitmapCache.get("album:0"))
         assertEquals(
-            "cover-200.jpg",
-            (AlbumCoverBitmapCache.get("album:200")?.model as File).name,
+            "cover-400.jpg",
+            (AlbumCoverBitmapCache.get("album:400")?.model as File).name,
         )
     }
 

@@ -17,11 +17,18 @@ internal object AlbumCoverBitmapCache {
         val empty: Boolean,
     )
 
-    private const val MAX_ENTRIES = 200
-    private const val MAX_BITMAP_BYTES = 28 * 1024 * 1024
+    private const val MAX_ENTRIES = 400
+    private const val DEFAULT_BITMAP_BYTES = 28 * 1024 * 1024
 
     private val lock = Any()
     private val entries = LinkedHashMap<String, Hit>(64, 0.75f, true)
+
+    @Volatile
+    private var maxBitmapBytes: Int = DEFAULT_BITMAP_BYTES
+
+    fun noteLargeHeap(largeHeapMb: Int) {
+        maxBitmapBytes = albumCoverCacheBytes(largeHeapMb)
+    }
 
     fun get(bucketId: String): Hit? = synchronized(lock) {
         val hit = entries[bucketId] ?: return null
@@ -71,6 +78,7 @@ internal object AlbumCoverBitmapCache {
 
     fun clearForTest() {
         synchronized(lock) { entries.clear() }
+        maxBitmapBytes = DEFAULT_BITMAP_BYTES
     }
 
     private fun trimLocked() {
@@ -86,12 +94,18 @@ internal object AlbumCoverBitmapCache {
             bitmapKeysEldestFirst.add(key)
         }
         for (key in bitmapKeysEldestFirst) {
-            if (bitmapBytes <= MAX_BITMAP_BYTES) break
+            if (bitmapBytes <= maxBitmapBytes) break
             val bitmap = entries[key]?.model as? Bitmap ?: continue
             bitmapBytes -= bitmap.byteCount.toLong()
             entries.remove(key)
         }
     }
+}
+
+/** Uma fatia do large heap para as capas já decodificadas. O JPEG de cada álbum fica no disco. */
+internal fun albumCoverCacheBytes(largeHeapMb: Int): Int {
+    val mb = (largeHeapMb / 6).coerceIn(48, 96)
+    return mb * 1024 * 1024
 }
 
 /** URI e poster de vídeo ainda não decodificado não podem ir para o Coil. */

@@ -124,4 +124,39 @@ class GalleryBlitLayoutTest {
         assertTrue(blitThumbCoversTarget(bitmapEdge = 480, targetPx = 480))
         assertFalse(blitThumbCoversTarget(bitmapEdge = 360, targetPx = 480))
     }
+
+    @Test
+    fun prefetchWalksOutFromTheVisibleWindow() {
+        val first = blitPrefetchScan(
+            slotCount = 10,
+            anchor = 4,
+            visibleFrom = 3,
+            visibleTo = 5,
+            startStep = 0,
+            maxIndexes = 4,
+        )
+        assertEquals(listOf(3, 4, 5, 2), first.indexes)
+        assertEquals(4, first.nextStep)
+        assertTrue(first.more)
+        val second = blitPrefetchScan(
+            slotCount = 10,
+            anchor = 4,
+            visibleFrom = 3,
+            visibleTo = 5,
+            startStep = first.nextStep,
+            maxIndexes = 4,
+        )
+        assertEquals(listOf(6, 1, 7, 0), second.indexes)
+        assertTrue(second.more)
+        val rest = blitPrefetchScan(
+            slotCount = 10,
+            anchor = 4,
+            visibleFrom = 3,
+            visibleTo = 5,
+            startStep = second.nextStep,
+            maxIndexes = 8,
+        )
+        assertEquals(listOf(8, 9), rest.indexes)
+        assertFalse(rest.more)
+    }
 }

@@ -96,8 +96,57 @@ internal fun blitThumbCoversTarget(bitmapEdge: Int, targetPx: Int): Boolean =
     bitmapEdge >= targetPx - 32
 
 private const val BLIT_SESSION_PROTECT_SLOTS = 6
-private const val BLIT_PREFETCH_AHEAD = 80
-private const val BLIT_PREFETCH_BEHIND = 60
+private const val BLIT_PREFETCH_WAVE = 48
+
+/**
+ * Ordem de pré-carga: o que está na tela, depois o mais perto, dos dois lados.
+ * [startStep] continua de onde a leva anterior parou.
+ */
+internal fun blitPrefetchScan(
+    slotCount: Int,
+    anchor: Int,
+    visibleFrom: Int,
+    visibleTo: Int,
+    startStep: Int,
+    maxIndexes: Int,
+): BlitPrefetchScan {
+    if (slotCount <= 0 || maxIndexes <= 0) {
+        return BlitPrefetchScan(emptyList(), startStep.coerceAtLeast(0), false)
+    }
+    val from = visibleFrom.coerceIn(0, slotCount - 1)
+    val to = visibleTo.coerceIn(from, slotCount - 1)
+    val safeAnchor = anchor.coerceIn(0, slotCount - 1)
+    val indexes = ArrayList<Int>(maxIndexes)
+    var seen = 0
+    val skip = startStep.coerceAtLeast(0)
+    fun offer(index: Int): Boolean {
+        if (seen >= skip) indexes.add(index)
+        seen++
+        return indexes.size >= maxIndexes
+    }
+    for (index in from..to) {
+        if (offer(index)) return BlitPrefetchScan(indexes, seen, true)
+    }
+    var distance = 0
+    while (distance < slotCount) {
+        val left = safeAnchor - distance
+        val right = safeAnchor + distance
+        if (left >= 0 && left !in from..to && offer(left)) {
+            return BlitPrefetchScan(indexes, seen, true)
+        }
+        if (right != left && right < slotCount && right !in from..to && offer(right)) {
+            return BlitPrefetchScan(indexes, seen, true)
+        }
+        distance++
+    }
+    return BlitPrefetchScan(indexes, seen, false)
+}
+
+internal data class BlitPrefetchScan(
+    val indexes: List<Int>,
+    val nextStep: Int,
+    val more: Boolean,
+)
 
 private class DecodeJob(
     val path: String,
@@ -204,6 +253,7 @@ internal class GalleryBlitGridView(
     private var selectionMode: Boolean = false
     private var selectedPaths: Set<String> = emptySet()
     private var scrollActive: Boolean = false
+    private var prefetchStep: Int = 0
     private val coast = BlitCoast()
     private var selecting: Boolean = false
     private var lastDragPath: String? = null
@@ -322,6 +372,7 @@ internal class GalleryBlitGridView(
     fun bindEntries(next: List<GalleryGridEntry>) {
         if (next === entries && slots.isNotEmpty()) return
         val offset = contentOffset
+        prefetchStep = 0
         entries = next
         val live = HashSet<String>()
         for (entry in next) {
@@ -358,6 +409,7 @@ internal class GalleryBlitGridView(
             return
         }
         val keep = firstVisible
+        prefetchStep = 0
         cellMinPx = cellMin
         gapPx = gap
         padStartPx = padStart
@@ -690,6 +742,7 @@ internal class GalleryBlitGridView(
     private fun beginScroll() {
         if (scrollActive) return
         scrollActive = true
+        prefetchStep = 0
         decodeGeneration++
         badgeGeneration++
         decodeHandler.removeCallbacksAndMessages(null)
@@ -764,6 +817,7 @@ internal class GalleryBlitGridView(
         mainHandler.removeCallbacks(longPressTask)
         pinchLocked = true
         pinchActive = true
+        prefetchStep = 0
         ignoreTapAfterPinch = true
         selecting = false
         lastDragPath = null
@@ -867,38 +921,56 @@ internal class GalleryBlitGridView(
     }
 
     private fun enqueueVisible() {
-        if (scrollActive || pinchActive || slots.isEmpty() || width == 0) return
+        if (scrollActive || pinchActive || released || slots.isEmpty() || width == 0) return
         val generation = ++decodeGeneration
         val target = blitThumbTargetPx(cellSize.coerceAtLeast(cellMinPx))
-        val jobs = ArrayList<DecodeJob>()
+        val estimate = target.toLong() * target.toLong() * 4L
+        val jobs = ArrayList<DecodeJob>(BLIT_PREFETCH_WAVE)
         val first = blitFirstVisibleIndex(slots, contentOffset)
         var last = first
         val bottom = contentOffset + height
         while (last < slots.lastIndex && slots[last + 1].top < bottom) last++
-        fun addRange(from: Int, to: Int) {
-            if (from > to) return
-            for (index in from..to) {
-                val slot = slots.getOrNull(index) ?: continue
-                val item = (entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo)?.item ?: continue
-                val held = synchronized(cacheLock) { session[item.canonicalPath] }
-                if (held != null && !held.isRecycled &&
-                    blitThumbCoversTarget(min(held.width, held.height), target)
-                ) {
-                    continue
-                }
-                val source = blitDecodeSource(item) ?: continue
-                val fallback = if (source.second != null) {
-                    (gridPaintModel(item, mediaCache) as? DiskThumb)?.file?.takeIf { it.isFile }
-                } else {
-                    null
-                }
-                jobs.add(DecodeJob(item.canonicalPath, source.first, source.second, fallback))
+        val anchor = (first + last) / 2
+        var more = false
+        var scans = 0
+        while (jobs.size < BLIT_PREFETCH_WAVE && scans < 8) {
+            scans++
+            val startedAt = prefetchStep
+            val scan = blitPrefetchScan(
+                slotCount = slots.size,
+                anchor = anchor,
+                visibleFrom = first,
+                visibleTo = last,
+                startStep = startedAt,
+                maxIndexes = BLIT_PREFETCH_WAVE,
+            )
+            if (scan.indexes.isEmpty()) {
+                prefetchStep = scan.nextStep
+                more = false
+                break
             }
+            var consumed = 0
+            var budgetStop = false
+            for (index in scan.indexes) {
+                val visible = index in first..last
+                val queuedBytes = sessionByteCount + jobs.size * estimate
+                if (!visible && queuedBytes >= sessionBudgetBytes) {
+                    budgetStop = true
+                    break
+                }
+                offerSlot(index, target, jobs)
+                consumed++
+                if (jobs.size >= BLIT_PREFETCH_WAVE) break
+            }
+            prefetchStep = startedAt + consumed
+            more = !budgetStop && (consumed < scan.indexes.size || scan.more)
+            if (budgetStop || jobs.size >= BLIT_PREFETCH_WAVE || !more) break
         }
-        addRange(first, last)
-        addRange(last + 1, (last + BLIT_PREFETCH_AHEAD).coerceAtMost(slots.lastIndex))
-        addRange((first - BLIT_PREFETCH_BEHIND).coerceAtLeast(0), first - 1)
-        if (jobs.isEmpty()) return
+        if (jobs.isEmpty()) {
+            if (more) scheduleDecode()
+            return
+        }
+        val continueAfter = more
         decodeHandler.post {
             for (job in jobs) {
                 if (released || generation != decodeGeneration || GalleryGridScrollGate.isUserScrollingGrid) {
@@ -922,7 +994,33 @@ internal class GalleryBlitGridView(
                     }
                 }
             }
+            if (continueAfter) {
+                mainHandler.post {
+                    if (!released && generation == decodeGeneration && !scrollActive && !pinchActive) {
+                        scheduleDecode()
+                    }
+                }
+            }
         }
+    }
+
+    private fun offerSlot(index: Int, target: Int, jobs: ArrayList<DecodeJob>) {
+        val slot = slots.getOrNull(index) ?: return
+        val item = (entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo)?.item ?: return
+        if (jobs.any { it.path == item.canonicalPath }) return
+        val held = synchronized(cacheLock) { session[item.canonicalPath] }
+        if (held != null && !held.isRecycled &&
+            blitThumbCoversTarget(min(held.width, held.height), target)
+        ) {
+            return
+        }
+        val source = blitDecodeSource(item) ?: return
+        val fallback = if (source.second != null) {
+            (gridPaintModel(item, mediaCache) as? DiskThumb)?.file?.takeIf { it.isFile }
+        } else {
+            null
+        }
+        jobs.add(DecodeJob(item.canonicalPath, source.first, source.second, fallback))
     }
 
     /** Uma bitmap por foto. A anterior só sai quando a nova já está no lugar, na thread principal. */
