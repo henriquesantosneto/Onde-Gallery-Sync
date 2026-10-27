@@ -34,6 +34,15 @@ object SyncProcessMarker {
         }
     }
 
+    /** A tela saiu. Morte em segundo plano não vira relatório de fechamento. */
+    fun setForeground(filesDir: File, foreground: Boolean) {
+        val parsed = parse(lastPayload) ?: parse(
+            runCatching { File(filesDir, FILE_NAME).takeIf { it.isFile }?.readText() }.getOrNull(),
+        ) ?: return
+        if (parsed.foreground == foreground) return
+        note(filesDir, foreground, parsed.step)
+    }
+
     fun clear(filesDir: File) {
         lastPayload = null
         runCatching {

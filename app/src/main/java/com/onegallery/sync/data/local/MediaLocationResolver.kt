@@ -15,6 +15,13 @@ class MediaLocationResolver(context: Context) {
     private val appContext = context.applicationContext
     private val geocodeCache = LruCache<String, String>(512)
 
+    /** Só as colunas do MediaStore. Não abre o arquivo (vídeo não passa no decodificador). */
+    fun resolveStoredCoordinates(uri: Uri): MediaLocation? {
+        if (!MediaAccessPermissions.hasMediaLocationAccess(appContext)) return null
+        val coordinates = readGpsFromMediaStore(uri) ?: return null
+        return coordinatesToLocation(coordinates.first, coordinates.second)
+    }
+
     fun resolveFromUri(uri: Uri): MediaLocation? {
         if (!MediaAccessPermissions.hasMediaLocationAccess(appContext)) return null
         readGpsFromMediaStore(uri)?.let { (lat, lon) ->

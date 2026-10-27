@@ -205,7 +205,7 @@ class SyncCoordinator(
     init {
         backgroundScope?.launch {
             _state.collect { ui ->
-                if (!ui.isRunning && ui.activityHeadline.isBlank()) {
+                if (!ui.isRunning && !ui.prefetchingThumbnails) {
                     SyncProcessMarker.clear(appContext.filesDir)
                 }
             }
@@ -964,6 +964,7 @@ class SyncCoordinator(
      * Prefetch pós-sync: em modo agressivo continua com app aberto; senão só tela Sync ou 2º plano.
      */
     fun onAppUiVisibilityChanged(inForeground: Boolean) {
+        SyncProcessMarker.setForeground(appContext.filesDir, inForeground)
         if (inForeground) {
             kickThumbnailPrefetchIfIdle()
         } else {
@@ -3319,11 +3320,14 @@ class SyncCoordinator(
         if (row.latitude != null && row.longitude != null) return row
         if (!rowNeedsGpsBackfill(row) && localFile == null) return row
         val located = try {
-            if (localFile != null && localFile.isFile) {
-                mediaLocationResolver.resolveFromFile(localFile)
-            } else {
-                null
-            } ?: resolveLocationForBackfill(row)
+            val video = GalleryMapper.isVideoFileName(row.displayName)
+            when {
+                video -> localContentUri(row)?.let { mediaLocationResolver.resolveStoredCoordinates(it) }
+                localFile != null && localFile.isFile ->
+                    mediaLocationResolver.resolveFromFile(localFile)
+                        ?: resolveLocationForBackfill(row)
+                else -> resolveLocationForBackfill(row)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
@@ -3883,6 +3887,10 @@ class SyncCoordinator(
     }
 
     private suspend fun resolveLocationForBackfill(row: SyncMetadataEntity): MediaLocation? {
+        val video = GalleryMapper.isVideoFileName(row.displayName)
+        if (video) {
+            return localContentUri(row)?.let { mediaLocationResolver.resolveStoredCoordinates(it) }
+        }
         resolveLocationFromSources(
             uri = localContentUri(row),
             cachedFilePath = row.cachedFilePath,
@@ -3897,16 +3905,6 @@ class SyncCoordinator(
                     item.longitude?.let { lon ->
                         return MediaLocation(lat, lon, formatCoordLabel(lat, lon))
                     }
-                }
-                val temp = localMediaRepository.materializeToTempFile(item)
-                if (temp != null) {
-                    runCatching {
-                        mediaLocationResolver.resolveFromFile(temp)
-                    }.getOrNull()?.let { located ->
-                        temp.delete()
-                        return located
-                    }
-                    temp.delete()
                 }
             }
         }

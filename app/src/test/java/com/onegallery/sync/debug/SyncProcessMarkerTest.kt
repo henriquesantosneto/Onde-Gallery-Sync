@@ -22,6 +22,16 @@ class SyncProcessMarkerTest {
     }
 
     @Test
+    fun leavingTheScreenDropsAVisibleDeathReport() {
+        val dir = tempDir()
+        SyncProcessMarker.note(dir, foreground = true, step = "Comparando itens locais com a nuvem…")
+        SyncProcessMarker.setForeground(dir, foreground = false)
+        assertNull(SyncProcessMarker.promoteUncleanExit(dir, "0.8.483", 510))
+        assertNull(DebugCrashLog.read(dir))
+        dir.deleteRecursively()
+    }
+
+    @Test
     fun backgroundExitDoesNotBlockTheNextOpen() {
         val dir = tempDir()
         SyncProcessMarker.note(dir, foreground = false, step = "Sincronizando com OneDrive…")
