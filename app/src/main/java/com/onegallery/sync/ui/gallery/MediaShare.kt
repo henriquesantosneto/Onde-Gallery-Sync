@@ -5,6 +5,8 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
@@ -15,10 +17,15 @@ internal enum class ShareLocalKind {
     CONTENT,
     MEDIA_ID,
     CACHE_FILE,
+    CLOUD_RECALL,
     NONE,
 }
 
-/** Ordem: arquivo da galeria, id do MediaStore, cópia em cache. Nuvem sem arquivo fica de fora. */
+/**
+ * Ordem: arquivo da galeria, id do MediaStore, cópia em cache.
+ * Sem cópia local, o OneDrive entra por um endereço que baixa o original
+ * quando o outro app abre o arquivo — isto é, quando o envio se concretiza.
+ */
 internal fun shareLocalKind(item: GalleryDisplayItem): ShareLocalKind {
     if (!item.localReleasedForSpace) {
         if (item.localUri?.scheme == "content") return ShareLocalKind.CONTENT
@@ -26,7 +33,25 @@ internal fun shareLocalKind(item: GalleryDisplayItem): ShareLocalKind {
     }
     val cached = item.cachedOriginal
     if (cached != null && cached.isFile && cached.length() > 0L) return ShareLocalKind.CACHE_FILE
+    if (!item.oneDriveItemId.isNullOrBlank()) return ShareLocalKind.CLOUD_RECALL
     return ShareLocalKind.NONE
+}
+
+internal fun shareRecallUri(context: Context, canonicalPath: String): Uri {
+    return Uri.Builder()
+        .scheme("content")
+        .authority("${context.packageName}.sharerecall")
+        .appendPath("item")
+        .appendPath(canonicalPath)
+        .build()
+}
+
+internal fun canonicalPathFromShareRecallUri(uri: Uri): String? {
+    val segments = uri.pathSegments
+    if (segments.size != 2 || segments[0] != "item") return null
+    val path = segments[1]
+    if (path.isBlank()) return null
+    return path
 }
 
 internal fun shareIntentMime(kinds: List<MediaKind>): String {
@@ -61,14 +86,29 @@ fun shareGalleryMedia(
     if (sharable.isEmpty()) {
         return "Nada no aparelho para compartilhar. O arquivo ainda está só na nuvem."
     }
+    val recalls = sharable.filter { shareLocalKind(it.first) == ShareLocalKind.CLOUD_RECALL }
+    val ready = if (recalls.isNotEmpty() && !isOnline(context)) {
+        if (recalls.size == sharable.size) {
+            return "Conecte-se para compartilhar o arquivo da nuvem."
+        }
+        sharable - recalls.toSet()
+    } else {
+        sharable
+    }
+    if (ready.isEmpty()) {
+        return "Conecte-se para compartilhar o arquivo da nuvem."
+    }
     val launched = runCatching {
         launchShareChooser(
             context,
-            sharable.map { (item, uri) -> uri to item.kind },
+            ready.map { (item, uri) -> uri to item.kind },
         )
     }.isSuccess
     if (!launched) return "Não foi possível abrir o compartilhamento."
-    val skipped = paths.size - sharable.size
+    if (recalls.isNotEmpty() && ready.size < sharable.size) {
+        return "Conecte-se para incluir o arquivo da nuvem. O restante foi adiante."
+    }
+    val skipped = paths.size - ready.size
     return if (skipped > 0) {
         "$skipped item(ns) sem cópia no aparelho não foram incluídos."
     } else {
@@ -90,8 +130,18 @@ private fun resolveShareUri(context: Context, item: GalleryDisplayItem): Uri? {
             if (uriExistsRouter.uriExists(context, uri)) return uri
         }
     }
-    val file = item.cachedOriginal?.takeIf { it.isFile && it.length() > 0L } ?: return null
-    return fileProviderUri(context, file)
+    val file = item.cachedOriginal?.takeIf { it.isFile && it.length() > 0L }
+    if (file != null) return fileProviderUri(context, file)
+    if (!item.oneDriveItemId.isNullOrBlank()) return shareRecallUri(context, item.canonicalPath)
+    return null
+}
+
+private fun isOnline(context: Context): Boolean {
+    val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return true
+    val network = manager.activeNetwork ?: return false
+    val capabilities = manager.getNetworkCapabilities(network) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
 private fun fileProviderUri(context: Context, file: File): Uri? {

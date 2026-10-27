@@ -7,6 +7,7 @@ import com.onegallery.sync.sync.CloudSyncState
 import com.onegallery.sync.sync.PendingDeleteTarget
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -61,6 +62,20 @@ class MediaShareTest {
         assertEquals("image/*", shareIntentMime(listOf(MediaKind.IMAGE, MediaKind.IMAGE)))
         assertEquals("video/*", shareIntentMime(listOf(MediaKind.VIDEO)))
         assertEquals("*/*", shareIntentMime(listOf(MediaKind.IMAGE, MediaKind.VIDEO)))
+    }
+
+    @Test
+    fun cloudFileIsSharedAndRecallStartsWhenTheOtherAppOpensIt() {
+        val context = RuntimeEnvironment.getApplication()
+        val cloud = item(path = "Fotos/nuvem.jpg").copy(
+            oneDriveItemId = "remote-1",
+            cloudState = CloudSyncState.CLOUD_ONLY,
+        )
+        assertEquals(ShareLocalKind.CLOUD_RECALL, shareLocalKind(cloud))
+        val uri = shareRecallUri(context, cloud.canonicalPath)
+        assertEquals("content", uri.scheme)
+        assertTrue(uri.authority!!.endsWith(".sharerecall"))
+        assertEquals(cloud.canonicalPath, canonicalPathFromShareRecallUri(uri))
     }
 
     @Test
