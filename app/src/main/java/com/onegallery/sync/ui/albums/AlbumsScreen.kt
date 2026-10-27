@@ -66,7 +66,6 @@ import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import com.onegallery.sync.data.local.MediaAlbum
 import com.onegallery.sync.ui.gallery.AlbumGridCoverImage
-import com.onegallery.sync.ui.gallery.GalleryCloudBadge
 import com.onegallery.sync.ui.gallery.ProvideGalleryGridScrollState
 import com.onegallery.sync.ui.gallery.LiveAlbumCover
 import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
@@ -544,16 +543,6 @@ private fun AlbumGridTile(
                         .padding(8.dp)
                         .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(50)),
                 )
-            } else {
-                album.coverSyncBadge?.let { badge ->
-                    GalleryCloudBadge(
-                        state = badge,
-                        iconSize = 22.dp,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp),
-                    )
-                }
             }
             val badgeFontScale = albumMediaCountBadgeFontScale(gridZoomScale)
             val (badgePadH, badgePadV) = albumMediaCountBadgeInnerPadding(gridZoomScale)

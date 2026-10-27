@@ -1167,6 +1167,11 @@ class GalleryViewModel(
                 publishPhotoGridFrame(ui.toGridPublication())
             }
         }
+        viewModelScope.launch {
+            syncCoordinator.recalledOriginalsEpoch.collect {
+                publishPhotoGridFrame(state.value.toGridPublication())
+            }
+        }
     }
 
     private fun initialGalleryUiState(): GalleryUiState {
@@ -1298,14 +1303,17 @@ class GalleryViewModel(
     }
 
     private suspend fun publishPhotoGridFrame(candidate: GalleryGridPublication) {
+        val recalled = syncCoordinator.recalledOriginalFiles()
+        val patched = candidate.applyingRecalledOriginals(recalled)
         val current = publishedPhotoGridBacking.value
-        if (samePhotoGridFrame(current, candidate)) return
-        if (!candidate.replacesPhotoGridImmediately(current)) {
+        if (samePhotoGridFrame(current, patched)) return
+        if (!patched.replacesPhotoGridImmediately(current)) {
             while (GalleryGridScrollGate.isUserScrollingGrid) {
                 delay(48)
             }
         }
         val latest = state.value.toGridPublication()
+            .applyingRecalledOriginals(syncCoordinator.recalledOriginalFiles())
         if (!samePhotoGridFrame(publishedPhotoGridBacking.value, latest)) {
             publishedPhotoGridBacking.value = latest
         }
@@ -1929,11 +1937,6 @@ internal fun buildAlbums(
         val latest = items.maxOfOrNull { it.sortTimestamp } ?: 0L
         val photoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
         val videoCount = items.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
-        val coverItem = if (items.isEmpty()) {
-            null
-        } else {
-            albumCoverLocalIndex.stickyCoverItem("album:$title", items, mediaCacheRepository)
-        }
         MediaAlbum(
             bucketId = "album:$title",
             title = if (userMeta != null) title else SyncPaths.albumListDisplayName(title),
@@ -1954,7 +1957,6 @@ internal fun buildAlbums(
             isUserManaged = userMeta != null,
             userAlbumId = userMeta?.id,
             createdAtEpoch = userMeta?.createdAtEpoch,
-            coverSyncBadge = coverItem?.let { galleryGridCloudBadge(it) },
         )
     }
     return sortMediaAlbums(albums, sort)
@@ -1984,11 +1986,6 @@ internal fun buildPlaceAlbums(
             null
         }
         val title = placeAlbumTitleForGroup(group, coverItem)
-        val badgeItem = coverItem ?: albumCoverLocalIndex.stickyCoverItem(
-            "place:$encodedKey",
-            group,
-            mediaCacheRepository,
-        )
         val latest = group.maxOfOrNull { it.sortTimestamp } ?: 0L
         val photoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.IMAGE }
         val videoCount = group.count { it.kind == com.onegallery.sync.data.local.MediaKind.VIDEO }
@@ -2008,7 +2005,6 @@ internal fun buildPlaceAlbums(
                 null
             },
             sortTimestamp = latest,
-            coverSyncBadge = badgeItem?.let { galleryGridCloudBadge(it) },
         )
     }
 }

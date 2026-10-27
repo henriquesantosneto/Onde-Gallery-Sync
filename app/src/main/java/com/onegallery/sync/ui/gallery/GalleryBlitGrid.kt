@@ -860,9 +860,9 @@ internal class GalleryBlitGridView(
     }
 
     private fun badgeForDraw(item: GalleryDisplayItem): CloudSyncState? {
-        val path = item.canonicalPath
-        if (path in badgeReady) return badgeState[path]
-        return galleryGridCloudBadge(item)
+        val instant = galleryGridCloudBadge(item)
+        if (item.canonicalPath !in badgeReady) return instant
+        return mergeGalleryGridBadge(instant, badgeState[item.canonicalPath])
     }
 
     private fun scheduleBadgeResolve() {

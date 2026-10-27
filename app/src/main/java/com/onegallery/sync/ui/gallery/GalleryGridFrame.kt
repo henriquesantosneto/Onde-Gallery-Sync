@@ -1,5 +1,8 @@
 package com.onegallery.sync.ui.gallery
 
+import com.onegallery.sync.sync.CloudSyncState
+import java.io.File
+
 /**
  * Lista que a grade de fotos está mostrando.
  * O catálogo novo é montado ao lado e entra numa troca só, com a rolagem parada.
@@ -60,4 +63,50 @@ internal fun samePhotoRows(
         if (left.localReleasedForSpace != right.localReleasedForSpace) return false
     }
     return true
+}
+
+/**
+ * O catálogo da grade demora a reler o Room depois do download.
+ * Enquanto isso, o arquivo já recuperado entra como Sync na publicação atual.
+ * Um item liberado para economizar espaço não volta a Sync por causa desse mapa.
+ */
+internal fun GalleryGridPublication.applyingRecalledOriginals(
+    recalledFiles: Map<String, String>,
+): GalleryGridPublication {
+    if (recalledFiles.isEmpty()) return this
+    fun patch(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
+        var changed = false
+        val next = ArrayList<GalleryDisplayItem>(items.size)
+        for (item in items) {
+            val path = recalledFiles[item.canonicalPath]
+            if (path == null || !item.acceptsRecalledOriginal(path)) {
+                next.add(item)
+            } else {
+                changed = true
+                next.add(
+                    item.copy(
+                        cloudState = CloudSyncState.SYNCED,
+                        cachedOriginal = File(path),
+                        localReleasedForSpace = false,
+                    ),
+                )
+            }
+        }
+        return if (changed) next else items
+    }
+    val library = patch(libraryItems)
+    val visible = patch(items)
+    if (library === libraryItems && visible === items) return this
+    return copy(libraryItems = library, items = visible)
+}
+
+private fun GalleryDisplayItem.acceptsRecalledOriginal(absolutePath: String): Boolean {
+    if (localReleasedForSpace) return false
+    if (cloudState == CloudSyncState.LOCAL_ONLY || cloudState == CloudSyncState.PENDING_UPLOAD) {
+        return false
+    }
+    if (cloudState == CloudSyncState.SYNCED && cachedOriginal?.path == absolutePath) return false
+    return cloudState == CloudSyncState.CLOUD_ONLY ||
+        cloudState == CloudSyncState.PENDING_DOWNLOAD ||
+        cloudState == CloudSyncState.SYNCED
 }

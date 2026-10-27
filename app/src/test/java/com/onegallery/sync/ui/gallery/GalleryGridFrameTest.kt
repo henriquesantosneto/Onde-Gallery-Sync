@@ -61,6 +61,30 @@ class GalleryGridFrameTest {
     }
 
     @Test
+    fun recalledOriginalTurnsTheAlbumGridBadgeToSynced() {
+        val cloud = photo("a.jpg", null).copy(
+            oneDriveItemId = "remote",
+            cloudState = CloudSyncState.CLOUD_ONLY,
+            localMediaId = null,
+            localUri = null,
+        )
+        val frame = frame(listOf(cloud))
+        val patched = frame.applyingRecalledOriginals(mapOf("a.jpg" to "/cache/a.jpg"))
+        val item = patched.items.single()
+        assertEquals(CloudSyncState.SYNCED, item.cloudState)
+        assertEquals("/cache/a.jpg", item.cachedOriginal?.path)
+        assertFalse(item.localReleasedForSpace)
+        assertEquals(CloudSyncState.SYNCED, galleryGridCloudBadge(item))
+        assertFalse(samePhotoGridFrame(frame, patched))
+        val again = patched.applyingRecalledOriginals(mapOf("a.jpg" to "/cache/a.jpg"))
+        assertTrue(samePhotoGridFrame(patched, again))
+        val released = frame(listOf(cloud.copy(localReleasedForSpace = true)))
+            .applyingRecalledOriginals(mapOf("a.jpg" to "/cache/a.jpg"))
+        assertTrue(released.items.single().localReleasedForSpace)
+        assertEquals(CloudSyncState.CLOUD_ONLY, released.items.single().cloudState)
+    }
+
+    @Test
     fun syncStatusChangePublishesANewGridFrame() {
         val current = frame(listOf(photo("a.jpg", null)))
         val synced = frame(

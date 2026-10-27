@@ -837,6 +837,20 @@ class SyncCoordinator(
     private val _galleryDisplayRefreshEpoch = MutableStateFlow(0L)
     val galleryDisplayRefreshEpoch: StateFlow<Long> = _galleryDisplayRefreshEpoch.asStateFlow()
 
+    /** Original baixado nesta sessão, antes do catálogo da grade reler o Room. */
+    private val recalledOriginalByPath = ConcurrentHashMap<String, String>()
+    private val _recalledOriginalsEpoch = MutableStateFlow(0L)
+    val recalledOriginalsEpoch: StateFlow<Long> = _recalledOriginalsEpoch.asStateFlow()
+
+    fun recalledOriginalFiles(): Map<String, String> = recalledOriginalByPath
+
+    private fun rememberRecalledOriginal(canonicalPath: String, file: File) {
+        if (!file.isFile || file.length() <= 0L) return
+        val previous = recalledOriginalByPath.put(canonicalPath, file.absolutePath)
+        if (previous == file.absolutePath) return
+        _recalledOriginalsEpoch.value = System.nanoTime()
+    }
+
     private val _albumCoverRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     val albumCoverRevisions: StateFlow<Map<String, Long>> = _albumCoverRevisions.asStateFlow()
 
@@ -2092,6 +2106,7 @@ class SyncCoordinator(
 
     private suspend fun persistCachedOriginalPath(row: SyncMetadataEntity, file: File) {
         if (!file.isFile || file.length() <= 0L) return
+        rememberRecalledOriginal(row.canonicalPath, file)
         val captureFromFile = row.capturedAtSeconds?.takeIf { it > 0L }
             ?: mediaCaptureTimeResolver.resolveFromFile(file)?.takeIf { it > 0L }
         val nextCloudState = cloudStateAfterVerifiedLocal(row, file)
@@ -2274,6 +2289,7 @@ class SyncCoordinator(
         if (!file.isFile || file.length() <= 0L) {
             return Result.failure(IllegalStateException("Não foi possível obter o arquivo da nuvem."))
         }
+        rememberRecalledOriginal(row.canonicalPath, file)
         val synced = row.copy(
             cachedFilePath = file.absolutePath,
             localQuickXorHash = localHash,
