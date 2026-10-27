@@ -280,6 +280,9 @@ class SyncCoordinator(
     private val lastActiveItemProgressPostMs = ConcurrentHashMap<String, Long>()
     /** Caminhos enviados à nuvem nesta execução — só estes entram em “liberar após sync”. */
     private val pathsUploadedThisSync = mutableSetOf<String>()
+
+    /** Exclusão confirmada pelo usuário. O sync em andamento não regrava essas linhas. */
+    private val userDeletedPaths = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val thumbnailStatsRefreshMutex = Mutex()
     private var lastThumbnailStatsRefreshMs = 0L
     private var thumbnailStatsRefreshScheduled = false
@@ -1457,6 +1460,10 @@ class SyncCoordinator(
                 )
             }
             val canonical = SyncPaths.canonicalFromLocal(item)
+            if (canonical in userDeletedPaths) {
+                seenPaths.add(canonical)
+                return@forEachIndexed
+            }
             seenPaths.add(canonical)
             val existingByPath = existingByCanonical[canonical]
             val existingByLocal = existingByLocalId[item.id]
@@ -1478,7 +1485,7 @@ class SyncCoordinator(
         }
         pendingUpserts.chunked(256).forEach { batch ->
             ensureNotCancelled()
-            syncMetadataDao.upsertAll(batch)
+            upsertMetadataRows(batch)
         }
         pathsToDelete.forEach { syncMetadataDao.deleteByCanonicalPath(it) }
         return seenPaths
@@ -1679,13 +1686,14 @@ class SyncCoordinator(
                     suspend fun flushReconcileUpserts() {
                         if (upsertBatch.isEmpty()) return
                         upsertBatch.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-                            syncMetadataDao.upsertAll(chunk)
+                            upsertMetadataRows(chunk)
                         }
                         upsertBatch.clear()
                     }
 
                     for (incoming in rowsProcessingOrder) {
                         ensureSyncMayContinue()
+                        if (incoming.canonicalPath in userDeletedPaths) continue
                         val row = rowWithGps(incoming)
                         localPassIndex++
                         var keepInRunQueue = false
@@ -1807,7 +1815,7 @@ class SyncCoordinator(
                     val cloudOnlyUpdates = mutableListOf<SyncMetadataEntity>()
                     remoteByPath.forEach { (path, remote) ->
                         ensureSyncMayContinue()
-                        if (path in knownPaths) return@forEach
+                        if (path in knownPaths || path in userDeletedPaths) return@forEach
                         cloudOnlyProcessed++
                         if (_state.value.isRunning) {
                             upsertActiveSyncItem(
@@ -1885,7 +1893,7 @@ class SyncCoordinator(
                         }
                     }
                     (cloudOnlyInserts + cloudOnlyUpdates).chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-                        syncMetadataDao.upsertAll(chunk)
+                        upsertMetadataRows(chunk)
                     }
 
                     val pendingCount = syncMetadataDao.countPendingOperations()
@@ -2875,28 +2883,48 @@ class SyncCoordinator(
         )
     }
 
+    private suspend fun upsertMetadataRows(rows: List<SyncMetadataEntity>) {
+        val kept = if (userDeletedPaths.isEmpty()) {
+            rows
+        } else {
+            rows.filter { it.canonicalPath !in userDeletedPaths }
+        }
+        if (kept.isEmpty()) return
+        syncMetadataDao.upsertAll(kept)
+    }
+
     suspend fun deleteItemsImmediately(
         canonicalPaths: List<String>,
         target: PendingDeleteTarget = PendingDeleteTarget.BOTH,
     ): Result<Int> {
         if (canonicalPaths.isEmpty()) return Result.success(0)
+        canonicalPaths.forEach { userDeletedPaths.add(it) }
         return runCatching {
             val rows = canonicalPaths.mapNotNull { syncMetadataDao.getByCanonicalPath(it) }
+            for (row in rows) {
+                if (row.pendingDeleteTarget != target) {
+                    syncMetadataDao.upsert(row.copy(pendingDeleteTarget = target))
+                }
+            }
             val needsLocalDelete = target == PendingDeleteTarget.LOCAL || target == PendingDeleteTarget.BOTH
 
             var localSkipped = false
             if (needsLocalDelete) {
                 when (val outcome = deleteLocalMediaForRows(rows)) {
                     MediaDeleteResult.Success, MediaDeleteResult.NothingToDelete -> Unit
-                    MediaDeleteResult.UserDenied -> error(
-                        "Exclusão cancelada. Em Ajustes, ative “Excluir sem confirmar toda vez” " +
-                            "ou confirme no diálogo do Android.",
-                    )
+                    MediaDeleteResult.UserDenied -> {
+                        undoUserDelete(canonicalPaths)
+                        throw DeleteCancelledException(
+                            "Exclusão cancelada. Em Ajustes, ative “Excluir sem confirmar toda vez” " +
+                                "ou confirme no diálogo do Android.",
+                        )
+                    }
                     is MediaDeleteResult.Failed -> {
                         if (target == PendingDeleteTarget.BOTH) {
                             localSkipped = true
                         } else {
-                            error(
+                            undoUserDelete(canonicalPaths)
+                            throw DeleteCancelledException(
                                 "Não foi possível excluir no aparelho. Em Ajustes, conceda " +
                                     "“Excluir sem confirmar toda vez” ou aceite o diálogo do Android.",
                             )
@@ -2908,6 +2936,23 @@ class SyncCoordinator(
             var deleted = 0
             for (path in canonicalPaths) {
                 val row = syncMetadataDao.getByCanonicalPath(path) ?: continue
+                if (localSkipped && target == PendingDeleteTarget.BOTH) {
+                    row.oneDriveItemId?.let { deleteRemoteFile(it).getOrThrow() }
+                    syncMetadataDao.upsert(
+                        row.copy(
+                            oneDriveItemId = null,
+                            pendingDeleteTarget = PendingDeleteTarget.LOCAL,
+                            cloudState = if (row.localMediaId != null || !row.localContentUri.isNullOrBlank()) {
+                                CloudSyncState.LOCAL_ONLY
+                            } else {
+                                row.cloudState
+                            },
+                            lastError = "Cópia local ainda no aparelho.",
+                        ),
+                    )
+                    deleted++
+                    continue
+                }
                 executeDeleteTarget(
                     row,
                     target,
@@ -2917,11 +2962,22 @@ class SyncCoordinator(
             }
             if (localSkipped) {
                 error(
-                    "Removido do OneDrive, mas a cópia local ainda está no aparelho. " +
+                    "Sumiu da galeria, mas a cópia no aparelho ainda está lá. " +
                         "Confirme a exclusão no diálogo do Android ou apague na galeria Samsung.",
                 )
             }
             deleted
+        }
+    }
+
+    private suspend fun undoUserDelete(canonicalPaths: List<String>) {
+        canonicalPaths.forEach { userDeletedPaths.remove(it) }
+        for (path in canonicalPaths) {
+            val current = syncMetadataDao.getByCanonicalPath(path) ?: continue
+            if (current.pendingDeleteTarget == PendingDeleteTarget.NONE) continue
+            syncMetadataDao.upsert(
+                current.copy(pendingDeleteTarget = PendingDeleteTarget.NONE, lastError = null),
+            )
         }
     }
 
@@ -2962,6 +3018,7 @@ class SyncCoordinator(
         galleryThumbnailService.localContentUri(row)
 
     private suspend fun uploadLocalRow(row: SyncMetadataEntity): Int {
+        if (row.canonicalPath in userDeletedPaths) return 0
         var temp: File? = null
         try {
             ensureSyncMayContinue()
@@ -3392,7 +3449,7 @@ class SyncCoordinator(
         }
         if (healed.isEmpty()) return
         healed.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-            syncMetadataDao.upsertAll(chunk)
+            upsertMetadataRows(chunk)
         }
     }
 
@@ -3442,7 +3499,7 @@ class SyncCoordinator(
         }
         if (healed.isEmpty()) return
         healed.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-            syncMetadataDao.upsertAll(chunk)
+            upsertMetadataRows(chunk)
         }
     }
 
@@ -3651,7 +3708,7 @@ class SyncCoordinator(
         val legacy = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
         if (legacy.isEmpty()) return
         legacy.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-            syncMetadataDao.upsertAll(
+            upsertMetadataRows(
                 chunk.map { row ->
                     val state = if (localOriginalPresent(row)) {
                         CloudSyncState.SYNCED
@@ -4719,7 +4776,7 @@ class SyncCoordinator(
         }
         if (updates.isEmpty()) return
         updates.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-            syncMetadataDao.upsertAll(chunk)
+            upsertMetadataRows(chunk)
         }
         notifyGalleryDisplayRefresh()
     }

@@ -23,6 +23,7 @@ import android.app.ActivityManager
 import android.content.Context
 import java.io.File
 import com.onegallery.sync.data.local.MediaStorageAccess
+import com.onegallery.sync.sync.DeleteCancelledException
 import com.onegallery.sync.sync.PendingDeleteTarget
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.sync.GalleryThumbnailCache
@@ -1307,6 +1308,7 @@ class GalleryViewModel(
         val patched = candidate.applyingRecalledOriginals(recalled)
         val current = publishedPhotoGridBacking.value
         if (samePhotoGridFrame(current, patched)) return
+        val dropped = patched.removedPhotoPaths(current)
         if (!patched.replacesPhotoGridImmediately(current)) {
             while (GalleryGridScrollGate.isUserScrollingGrid) {
                 delay(48)
@@ -1314,6 +1316,7 @@ class GalleryViewModel(
         }
         val latest = state.value.toGridPublication()
             .applyingRecalledOriginals(syncCoordinator.recalledOriginalFiles())
+            .withoutPaths(dropped)
         if (!samePhotoGridFrame(publishedPhotoGridBacking.value, latest)) {
             publishedPhotoGridBacking.value = latest
         }
@@ -1842,12 +1845,12 @@ class GalleryViewModel(
     private fun runDeleteImmediately(paths: List<String>, onSingleRemoved: (() -> Unit)? = null) {
         if (paths.isEmpty()) return
         applyImmediateGalleryRemoval(paths)
+        onSingleRemoved?.invoke()
         viewModelScope.launch {
             syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
                 .onSuccess { count ->
                     if (onSingleRemoved != null) {
                         toast("Item excluído.")
-                        onSingleRemoved()
                     } else {
                         toast("$count item(ns) excluído(s).")
                         clearSelection()
@@ -1855,7 +1858,11 @@ class GalleryViewModel(
                     syncCoordinator.notifyGalleryDisplayRefresh()
                 }
                 .onFailure {
-                    revertImmediateGalleryRemoval(paths)
+                    if (it is DeleteCancelledException) {
+                        revertImmediateGalleryRemoval(paths)
+                    } else if (onSingleRemoved == null) {
+                        clearSelection()
+                    }
                     toast(it.message)
                 }
         }
@@ -1864,6 +1871,7 @@ class GalleryViewModel(
     private fun applyImmediateGalleryRemoval(paths: List<String>) {
         val removed = paths.toSet()
         optimisticRemovedPaths.update { it + removed }
+        publishedPhotoGridBacking.update { frame -> frame.withoutPaths(removed) }
         displayBuildCache.invalidatePaths(removed)
         val bundle = catalogSession.removeCanonicalPaths(removed, sortOrder.value)
         if (bundle != null) {

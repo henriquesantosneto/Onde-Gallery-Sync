@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
+import com.onegallery.sync.sync.PendingDeleteTarget
 
 fun GalleryDisplayItem.isVisibleInGalleryBrowse(
     mediaCacheRepository: MediaCacheRepository,
@@ -20,6 +21,7 @@ fun GalleryDisplayItem.hasBrowsableThumbnail(
  * Consultar o disco de novo, item a item, trava a tela e pede para aguardar ou fechar.
  */
 fun GalleryDisplayItem.belongsOnBrowseGridWithoutDisk(): Boolean {
+    if (pendingDeleteTarget != PendingDeleteTarget.NONE) return false
     if (GalleryMapper.isAudioFileName(displayName)) return false
     if (kind != MediaKind.IMAGE && kind != MediaKind.VIDEO) return false
     if (isLocalPhotoOnDevice() || hasLocalVideoCoverOnDevice()) return true

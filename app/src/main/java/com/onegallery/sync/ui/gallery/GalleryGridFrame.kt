@@ -25,14 +25,37 @@ internal fun GalleryUiState.toGridPublication(): GalleryGridPublication = Galler
     placeBrowseMatchKey = placeBrowseMatchKey,
 )
 
-/** Ordenação e filtro trocam na hora. O restante espera a lista parar. */
+/** Ordenação, filtro e exclusão trocam na hora. O restante espera a lista parar. */
 internal fun GalleryGridPublication.replacesPhotoGridImmediately(
     previous: GalleryGridPublication,
 ): Boolean {
     return sortOrder != previous.sortOrder ||
         albumFilter != previous.albumFilter ||
         locationFilter != previous.locationFilter ||
-        placeBrowseMatchKey != previous.placeBrowseMatchKey
+        placeBrowseMatchKey != previous.placeBrowseMatchKey ||
+        removedPhotoPaths(previous).isNotEmpty()
+}
+
+/** Paths que saíram da biblioteca (exclusão). Filtro de álbum não entra aqui. */
+internal fun GalleryGridPublication.removedPhotoPaths(
+    previous: GalleryGridPublication,
+): Set<String> {
+    if (previous.libraryItems.isEmpty()) return emptySet()
+    val next = HashSet<String>(libraryItems.size)
+    for (item in libraryItems) next.add(item.canonicalPath)
+    val removed = HashSet<String>()
+    for (item in previous.libraryItems) {
+        if (item.canonicalPath !in next) removed.add(item.canonicalPath)
+    }
+    return removed
+}
+
+internal fun GalleryGridPublication.withoutPaths(paths: Set<String>): GalleryGridPublication {
+    if (paths.isEmpty()) return this
+    val library = libraryItems.filter { it.canonicalPath !in paths }
+    val visible = items.filter { it.canonicalPath !in paths }
+    if (library.size == libraryItems.size && visible.size == items.size) return this
+    return copy(libraryItems = library, items = visible)
 }
 
 internal fun samePhotoGridFrame(

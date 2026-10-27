@@ -99,6 +99,22 @@ class GalleryGridFrameTest {
     }
 
     @Test
+    fun removingAPhotoPublishesImmediately() {
+        val current = frame(listOf(photo("a.jpg", null), photo("b.jpg", null)))
+        val next = frame(listOf(photo("b.jpg", null)))
+        assertEquals(setOf("a.jpg"), next.removedPhotoPaths(current))
+        assertTrue(next.replacesPhotoGridImmediately(current))
+        val stripped = current.withoutPaths(setOf("a.jpg"))
+        assertEquals(listOf("b.jpg"), stripped.libraryItems.map { it.canonicalPath })
+        val pending = photo("a.jpg", null).copy(
+            pendingDeleteTarget = com.onegallery.sync.sync.PendingDeleteTarget.BOTH,
+            localUri = android.net.Uri.parse("content://media/1"),
+            localMediaId = 1L,
+        )
+        assertFalse(pending.belongsOnBrowseGridWithoutDisk())
+    }
+
+    @Test
     fun sortAndAlbumFilterSwapImmediately() {
         val current = frame(listOf(photo("a.jpg", null)))
         val resorted = current.copy(sortOrder = GallerySortOrder.DATE_OLDEST)

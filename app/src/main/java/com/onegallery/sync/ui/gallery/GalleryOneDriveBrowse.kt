@@ -3,6 +3,7 @@ package com.onegallery.sync.ui.gallery
 import com.onegallery.sync.data.local.MediaCacheRepository
 import com.onegallery.sync.data.local.MediaKind
 import com.onegallery.sync.sync.CloudSyncState
+import com.onegallery.sync.sync.PendingDeleteTarget
 
 /** Foto que ainda está no aparelho (MediaStore). Não espera JPEG do sync. */
 fun GalleryDisplayItem.isLocalPhotoOnDevice(): Boolean {
@@ -47,6 +48,7 @@ fun filterOneDriveGalleryBrowse(
 fun GalleryDisplayItem.preparedForBrowseGrid(
     mediaCacheRepository: MediaCacheRepository,
 ): GalleryDisplayItem? {
+    if (pendingDeleteTarget != PendingDeleteTarget.NONE) return null
     if (GalleryMapper.isAudioFileName(displayName)) return null
     if (kind != MediaKind.IMAGE && kind != MediaKind.VIDEO) return null
     if (isLocalPhotoOnDevice() || hasLocalVideoCoverOnDevice()) {

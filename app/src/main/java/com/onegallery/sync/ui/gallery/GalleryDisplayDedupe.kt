@@ -1,6 +1,7 @@
 package com.onegallery.sync.ui.gallery
 
 import com.onegallery.sync.data.local.locationSpecificityScore
+import com.onegallery.sync.sync.PendingDeleteTarget
 
 /** Uma célula por mídia (local, nuvem ou caminho), mesmo com linhas duplicadas no índice. */
 fun dedupeGalleryDisplayItems(items: List<GalleryDisplayItem>): List<GalleryDisplayItem> {
@@ -37,7 +38,8 @@ private fun dedupeGalleryDisplayItemsFast(items: List<GalleryDisplayItem>): List
 }
 
 private fun galleryDisplayItemDedupeComparator() =
-    compareByDescending<GalleryDisplayItem> { it.oneDriveItemId != null }
+    compareByDescending<GalleryDisplayItem> { it.pendingDeleteTarget != PendingDeleteTarget.NONE }
+        .thenByDescending { it.oneDriveItemId != null }
         .thenByDescending { it.localUri != null }
         .thenByDescending { it.cachedOriginal?.isFile == true }
         .thenByDescending { it.locationSpecificityScore() }
