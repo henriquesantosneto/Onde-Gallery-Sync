@@ -262,14 +262,15 @@ fun SyncStatusScreen(
             item {
                 val visibleQueueCount = activeItems.size + queueWaiting.size
                 val indexPending = coordinatorState.runQueueGlobalPending
+                val remaining = indexPending?.takeIf { it > visibleQueueCount } ?: visibleQueueCount
                 val title = when {
                     coordinatorState.prefetchingThumbnails &&
                         indexPending != null && indexPending > visibleQueueCount ->
                         "Miniaturas pendentes ($visibleQueueCount na fila · ~$indexPending no índice)"
                     coordinatorState.prefetchingThumbnails ->
                         "Miniaturas pendentes ($visibleQueueCount na fila)"
-                    visibleQueueCount > 0 ->
-                        "Fila de sincronismo ($visibleQueueCount pendente(s))"
+                    remaining > 0 ->
+                        "Fila de sincronismo ($remaining pendente(s))"
                     else ->
                         "Fila de sincronismo"
                 }

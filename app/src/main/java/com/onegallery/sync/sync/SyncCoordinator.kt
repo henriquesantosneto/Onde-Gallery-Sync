@@ -1239,6 +1239,33 @@ class SyncCoordinator(
         }
     }
 
+    private fun setRunQueueDisplayRows(
+        rows: List<SyncQueueDisplayRow>,
+        runQueueGlobalPending: Int?,
+    ) {
+        if (!shouldPublishSyncActivityUi()) return
+        bumpRunQueueGeneration()
+        _state.update { state ->
+            state.copy(
+                runQueue = rows,
+                runQueueGlobalPending = runQueueGlobalPending ?: state.runQueueGlobalPending,
+            )
+        }
+    }
+
+    /** Acrescenta nomes sem zerar o contador. Itens já concluídos não voltam para a fila. */
+    private fun appendRunQueueDisplayRows(
+        rows: List<SyncQueueDisplayRow>,
+        skipPaths: Set<String>,
+    ) {
+        if (rows.isEmpty() || !shouldPublishSyncActivityUi()) return
+        _state.update { state ->
+            val existing = state.runQueue.mapTo(HashSet(state.runQueue.size)) { it.canonicalPath }
+            val extra = rows.filter { it.canonicalPath !in existing && it.canonicalPath !in skipPaths }
+            if (extra.isEmpty()) state else state.copy(runQueue = state.runQueue + extra)
+        }
+    }
+
     private fun clearRunQueueOnly() {
         bumpRunQueueGeneration()
         val apply = {
@@ -1816,13 +1843,48 @@ class SyncCoordinator(
                     val cloudOnlyCandidates = cloudOnlyWork.size
                     val cloudOnlyProcessed = AtomicInteger(0)
                     val semaphoreCloudOnly = Semaphore(PARALLEL_CLOUD_ONLY_REGISTER)
+                    val cloudOnlyDone = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+                    val cloudOnlyQueueLabel = "Aguardando registro na nuvem…"
+                    var cloudOnlyQueueCursor = 0
                     if (cloudOnlyCandidates > 0) {
+                        val initialQueue = cloudOnlyWork
+                            .take(CLOUD_ONLY_RUN_QUEUE_UI_CAP)
+                            .map { (path, remote) ->
+                                SyncQueueDisplayRow(
+                                    canonicalPath = path,
+                                    displayName = remote.name,
+                                    statusLabel = cloudOnlyQueueLabel,
+                                )
+                            }
+                        cloudOnlyQueueCursor = initialQueue.size
+                        setRunQueueDisplayRows(initialQueue, cloudOnlyCandidates)
                         setSyncProgress(
                             SyncProgressPhase.REGISTERING_CLOUD_ONLY,
                             "Registrando fotos/vídeos só na nuvem…",
                             "0 / $cloudOnlyCandidates · até $PARALLEL_CLOUD_ONLY_REGISTER em paralelo.",
                             alsoUpdateLastMessage = false,
                         )
+                    }
+                    fun topUpCloudOnlyQueue() {
+                        if (cloudOnlyQueueCursor >= cloudOnlyWork.size) return
+                        val queued = _state.value.runQueue.size
+                        if (queued >= 80) return
+                        val room = CLOUD_ONLY_RUN_QUEUE_UI_CAP - queued
+                        if (room <= 0) return
+                        val more = ArrayList<SyncQueueDisplayRow>(room)
+                        while (more.size < room && cloudOnlyQueueCursor < cloudOnlyWork.size) {
+                            val (path, remote) = cloudOnlyWork[cloudOnlyQueueCursor]
+                            cloudOnlyQueueCursor++
+                            if (path in cloudOnlyDone) continue
+                            more.add(
+                                SyncQueueDisplayRow(
+                                    canonicalPath = path,
+                                    displayName = remote.name,
+                                    statusLabel = cloudOnlyQueueLabel,
+                                ),
+                            )
+                        }
+                        appendRunQueueDisplayRows(more, cloudOnlyDone)
                     }
                     cloudOnlyWork.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
                         ensureSyncMayContinue()
@@ -1859,6 +1921,8 @@ class SyncCoordinator(
                                             }
                                             registerOneCloudOnlyItem(path, remote, existingByPath)
                                         } finally {
+                                            cloudOnlyDone.add(path)
+                                            removeFromRunQueue(path)
                                             removeActiveSyncItem(path)
                                         }
                                     }
@@ -1871,7 +1935,9 @@ class SyncCoordinator(
                             if (outcome.counted) cloudOnly++
                         }
                         if (toSave.isNotEmpty()) upsertMetadataRows(toSave)
+                        topUpCloudOnlyQueue()
                     }
+                    if (cloudOnlyCandidates > 0) clearRunQueueOnly()
 
                     val pendingCount = syncMetadataDao.countPendingOperations()
                     var freedLocal = 0
@@ -5303,6 +5369,8 @@ class SyncCoordinator(
         /** Lista na tela Sync — evita OOM com dezenas de milhares pendentes. */
         const val THUMB_RUN_QUEUE_UI_CAP = 48
         const val GPS_RUN_QUEUE_UI_CAP = 1_500
+        /** Nomes visíveis ao registrar itens só na nuvem. O contador usa o total e vai caindo. */
+        const val CLOUD_ONLY_RUN_QUEUE_UI_CAP = 1_500
         const val PARALLEL_THUMB_PREFETCH = 8
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         /** Graph + amostras parciais para frame (cauda/início). */
