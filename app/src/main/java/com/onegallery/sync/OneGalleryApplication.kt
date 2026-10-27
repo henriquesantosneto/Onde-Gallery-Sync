@@ -226,6 +226,13 @@ class OneGalleryApplication : Application() {
 
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                     enforceWifiOnlyDuringSync()
+                    if (syncCoordinator.onDefaultNetworkChanged()) {
+                        BackgroundSyncScheduler.enqueueSyncSoon(
+                            context = this@OneGalleryApplication,
+                            prefs = syncPreferences,
+                            delaySeconds = 5,
+                        )
+                    }
                 }
 
                 override fun onLost(network: Network) {

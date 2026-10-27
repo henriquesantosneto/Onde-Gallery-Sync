@@ -881,9 +881,37 @@ class SyncCoordinator(
         }
     }
 
+    /**
+     * A tela ficou em "sem internet / leitura local" com a rede no ar.
+     * Devolve true quando o sync automático deve ser pedido de novo.
+     */
+    fun onDefaultNetworkChanged(): Boolean {
+        if (!networkMonitor.isOnline()) return false
+        val state = _state.value
+        val stuckOffline = state.isOffline ||
+            state.lastMessage.startsWith("Sem conexão.")
+        if (!stuckOffline) return false
+        _state.value = state.copy(
+            isOffline = false,
+            lastMessage = if (state.isRunning) {
+                state.lastMessage
+            } else {
+                "Conexão disponível. Retomando sincronismo…"
+            },
+        )
+        return !state.isRunning
+    }
+
     fun setSyncStatusScreenVisible(visible: Boolean) {
         if (visible) {
             syncStatusScreenVisibleCount.incrementAndGet()
+            if (onDefaultNetworkChanged()) {
+                BackgroundSyncScheduler.enqueueSyncSoon(
+                    context = appContext,
+                    prefs = syncPreferences,
+                    delaySeconds = 2,
+                )
+            }
             kickThumbnailPrefetchIfIdle()
         } else {
             syncStatusScreenVisibleCount.updateAndGet { current ->
@@ -1498,6 +1526,9 @@ class SyncCoordinator(
                 lastMessage = "Sem conexão. Miniaturas locais e cache offline continuam visíveis.",
             )
             return Result.failure(IllegalStateException("Offline"))
+        }
+        if (_state.value.isOffline) {
+            _state.value = _state.value.copy(isOffline = false)
         }
         if (violatesWifiOnlyPolicy()) {
             _state.value = _state.value.copy(lastMessage = WIFI_POLICY_MESSAGE)
