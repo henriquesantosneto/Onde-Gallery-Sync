@@ -65,6 +65,7 @@ fun MediaDetailScreen(
     onOpenPlacesMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val activeSort by viewModel.photoSortOrder.collectAsStateWithLifecycle()
     val selectionMode by viewModel.photoSelectionMode.collectAsStateWithLifecycle()
     val selectedPaths by viewModel.photoSelectedPaths.collectAsStateWithLifecycle()
     val liveItems = state.libraryItems
@@ -104,7 +105,7 @@ fun MediaDetailScreen(
         state.placeBrowseMatchKey,
         state.geoItems,
         initialCanonicalPath,
-        state.sortOrder,
+        activeSort,
         timelineGrouping,
     ) {
         detailItemsForOpenedPath(
@@ -115,7 +116,7 @@ fun MediaDetailScreen(
             locationFilter = state.locationFilter,
             placeMatchKey = state.placeBrowseMatchKey,
             geoItems = state.geoItems,
-            sortOrder = state.sortOrder,
+            sortOrder = activeSort,
             timelineGrouping = timelineGrouping,
         )
     }

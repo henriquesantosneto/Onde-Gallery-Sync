@@ -53,7 +53,8 @@ fun timelineGroupingForGridScale(gridScale: Float): TimelineGrouping =
 
 private fun timestampToDate(epochSeconds: Long): LocalDate {
     if (epochSeconds <= 0L) return LocalDate.EPOCH
-    return Instant.ofEpochSecond(epochSeconds).atZone(ZoneId.systemDefault()).toLocalDate()
+    val seconds = if (epochSeconds >= 10_000_000_000L) epochSeconds / 1000L else epochSeconds
+    return Instant.ofEpochSecond(seconds).atZone(ZoneId.systemDefault()).toLocalDate()
 }
 
 private fun capitalizeMonth(month: java.time.Month, year: Int): String {
@@ -122,9 +123,9 @@ fun sortedTimelinePhotos(
 ): List<GalleryDisplayItem> {
     if (!isDateTimelineSort(sortOrder)) return items
     return if (sortOrder == GallerySortOrder.DATE_NEWEST) {
-        items.sortedByDescending { it.sortTimestamp }
+        items.sortedByDescending { it.librarySortMillis() }
     } else {
-        items.sortedBy { it.sortTimestamp }
+        items.sortedBy { it.librarySortMillis() }
     }
 }
 
@@ -146,8 +147,8 @@ private fun isMonotonicForDateSort(
     if (items.size < 2) return true
     val newestFirst = sortOrder == GallerySortOrder.DATE_NEWEST
     for (index in 1 until items.size) {
-        val previous = items[index - 1].sortTimestamp
-        val current = items[index].sortTimestamp
+        val previous = items[index - 1].librarySortMillis()
+        val current = items[index].librarySortMillis()
         if (newestFirst) {
             if (current > previous) return false
         } else if (current < previous) {

@@ -101,6 +101,7 @@ fun AlbumsScreen(
     onOpenMap: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val activeAlbumSort by viewModel.albumSortOrder.collectAsStateWithLifecycle()
     val gridPinch = rememberGalleryGridZoom(galleryPreferences.albumGridZoom) { scale ->
         galleryPreferences.albumGridZoom = scale
     }
@@ -209,7 +210,16 @@ fun AlbumsScreen(
                             ) {
                                 AlbumListSort.entries.forEach { sort ->
                                     DropdownMenuItem(
-                                        text = { Text(sort.label) },
+                                        text = {
+                                            Text(
+                                                sort.label,
+                                                fontWeight = if (sort == activeAlbumSort) {
+                                                    FontWeight.Bold
+                                                } else {
+                                                    FontWeight.Normal
+                                                },
+                                            )
+                                        },
                                         onClick = {
                                             viewModel.setAlbumListSort(sort)
                                             showSortMenu = false
@@ -235,13 +245,13 @@ fun AlbumsScreen(
             }
         },
     ) { padding ->
-        val gridEntries = remember(state.placeAlbums, state.albums, state.albumListSort, selectedTab) {
+        val gridEntries = remember(state.placeAlbums, state.albums, activeAlbumSort, selectedTab) {
             when (selectedTab) {
                 AlbumsBrowseTab.ALBUMS -> buildAlbumGridEntries(
-                    sortMediaAlbums(state.albums, state.albumListSort),
+                    sortMediaAlbums(state.albums, activeAlbumSort),
                 )
                 AlbumsBrowseTab.PLACES -> buildPlaceGridEntries(
-                    sortPlaceAlbums(state.placeAlbums, state.albumListSort),
+                    sortPlaceAlbums(state.placeAlbums, activeAlbumSort),
                 )
             }
         }
@@ -297,11 +307,11 @@ fun AlbumsScreen(
                     }
                 }
                 val railAlbums = when (selectedTab) {
-                    AlbumsBrowseTab.ALBUMS -> sortMediaAlbums(state.albums, state.albumListSort)
-                    AlbumsBrowseTab.PLACES -> sortPlaceAlbums(state.placeAlbums, state.albumListSort)
+                    AlbumsBrowseTab.ALBUMS -> sortMediaAlbums(state.albums, activeAlbumSort)
+                    AlbumsBrowseTab.PLACES -> sortPlaceAlbums(state.placeAlbums, activeAlbumSort)
                 }
-                val albumScrollMarkers = remember(railAlbums, state.albumListSort) {
-                    buildAlbumGridFastScrollMarkers(railAlbums, state.albumListSort)
+                val albumScrollMarkers = remember(railAlbums, activeAlbumSort) {
+                    buildAlbumGridFastScrollMarkers(railAlbums, activeAlbumSort)
                 }
                 ProvideGalleryGridScrollState(
                     gridState = albumGridState,

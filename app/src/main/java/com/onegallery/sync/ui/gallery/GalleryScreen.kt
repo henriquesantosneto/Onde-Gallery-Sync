@@ -87,6 +87,7 @@ fun GalleryScreen(
     routePlaceTitle: String? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val activeSort by viewModel.photoSortOrder.collectAsStateWithLifecycle()
     val gridFrame by viewModel.publishedPhotoGrid.collectAsStateWithLifecycle()
     val selectionMode by viewModel.photoSelectionMode.collectAsStateWithLifecycle()
     val selectedPaths by viewModel.photoSelectedPaths.collectAsStateWithLifecycle()
@@ -98,21 +99,25 @@ fun GalleryScreen(
             viewModel.setPlaceFilter(routePlaceTitle, routePlaceMatchKey)
         }
     }
+    val libraryForGrid = if (state.libraryItems.size > gridFrame.libraryItems.size) {
+        state.libraryItems
+    } else {
+        gridFrame.libraryItems
+    }
     val fullBrowseGridItems = remember(
         requiresActiveBrowseFilter,
-        gridFrame.libraryItems,
+        libraryForGrid,
         gridFrame.items,
-        gridFrame.sortOrder,
-        state.sortOrder,
+        activeSort,
         routeAlbumFolderKey,
         routePlaceMatchKey,
         routePlaceTitle,
     ) {
         resolveBrowseGridItems(
             requiresActiveBrowseFilter = requiresActiveBrowseFilter,
-            libraryItems = gridFrame.libraryItems,
+            libraryItems = libraryForGrid,
             browseItemsFromState = gridFrame.items,
-            sortOrder = state.sortOrder,
+            sortOrder = activeSort,
             routeAlbumFolderKey = routeAlbumFolderKey,
             routePlaceMatchKey = routePlaceMatchKey,
             routePlaceTitle = routePlaceTitle,
@@ -268,10 +273,10 @@ fun GalleryScreen(
                                         text = {
                                             Text(
                                                 order.label,
-                                                fontWeight = if (order == state.sortOrder) {
-                                                    MaterialTheme.typography.titleSmall.fontWeight
+                                                fontWeight = if (order == activeSort) {
+                                                    FontWeight.Bold
                                                 } else {
-                                                    MaterialTheme.typography.bodyLarge.fontWeight
+                                                    FontWeight.Normal
                                                 },
                                             )
                                         },
@@ -322,14 +327,14 @@ fun GalleryScreen(
                 }
             }
             else -> {
-                val dateTimeline = isDateTimelineSort(state.sortOrder)
+                val dateTimeline = isDateTimelineSort(activeSort)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val galleryScrollToTop by viewModel.galleryScrollToTopRequests.collectAsStateWithLifecycle()
-                val timelinePresorted = isDateTimelineSort(state.sortOrder)
-                val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping, timelinePresorted) {
+                val timelinePresorted = isDateTimelineSort(activeSort)
+                val gridEntries = remember(gridItems, activeSort, timelineGrouping, timelinePresorted) {
                     buildGalleryGridEntries(
                         gridItems,
-                        state.sortOrder,
+                        activeSort,
                         timelineGrouping,
                         itemsAlreadySortedForTimeline = timelinePresorted,
                     )

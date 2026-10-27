@@ -146,7 +146,10 @@ class GalleryViewModel(
     val photoSelectionMode: StateFlow<Boolean> = selectionMode
     val photoSelectedPaths: StateFlow<Set<String>> = selectedPaths
     private val sortOrder = MutableStateFlow(galleryPreferences.sortOrder)
+    /** A grade lê isto no clique. O [state] só atualiza depois de remontar a biblioteca. */
+    val photoSortOrder: StateFlow<GallerySortOrder> = sortOrder.asStateFlow()
     private val albumListSort = MutableStateFlow(galleryPreferences.albumListSort)
+    val albumSortOrder: StateFlow<AlbumListSort> = albumListSort.asStateFlow()
     private val albumSelectionMode = MutableStateFlow(false)
     private val selectedAlbumTitles = MutableStateFlow<Set<String>>(emptySet())
 

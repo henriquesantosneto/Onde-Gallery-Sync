@@ -42,6 +42,38 @@ class GalleryBrowseGridItemsTest {
     )
 
     @Test
+    fun photosTab_nameSortReversesAndDateSortUsesMillis() {
+        val older = item("b", "Camera").copy(displayName = "b.jpg", sortTimestamp = 1_700_000_000L)
+        val newerByMillis = item("a", "Camera").copy(
+            displayName = "a.jpg",
+            sortTimestamp = 1_600_000_000_000L,
+        )
+        val library = listOf(older, newerByMillis)
+        val byName = resolveBrowseGridItems(
+            requiresActiveBrowseFilter = false,
+            libraryItems = library,
+            browseItemsFromState = emptyList(),
+            sortOrder = GallerySortOrder.NAME_Z_A,
+            routeAlbumFolderKey = null,
+            routePlaceMatchKey = null,
+            routePlaceTitle = null,
+            mediaCacheRepository = repo,
+        )
+        assertEquals(listOf("b", "a"), byName.map { it.canonicalPath })
+        val byDate = resolveBrowseGridItems(
+            requiresActiveBrowseFilter = false,
+            libraryItems = library,
+            browseItemsFromState = emptyList(),
+            sortOrder = GallerySortOrder.DATE_OLDEST,
+            routeAlbumFolderKey = null,
+            routePlaceMatchKey = null,
+            routePlaceTitle = null,
+            mediaCacheRepository = repo,
+        )
+        assertEquals(listOf("a", "b"), byDate.map { it.canonicalPath })
+    }
+
+    @Test
     fun photosTab_showsWholeLibraryEvenIfAlbumFilterIsStillInState() {
         val library = listOf(
             item("a", "Camera"),
