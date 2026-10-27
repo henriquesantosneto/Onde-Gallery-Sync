@@ -40,6 +40,9 @@ fun galleryGridCloudBadge(item: GalleryDisplayItem): CloudSyncState? {
     if (item.oneDriveItemId != null) {
         val onDevice = item.localUri != null || item.cachedOriginal != null
         if (!onDevice && item.localReleasedForSpace) return CloudSyncState.CLOUD_ONLY
+        if (item.cloudState == CloudSyncState.SYNCED && !item.localReleasedForSpace) {
+            return CloudSyncState.SYNCED
+        }
         if (onDevice || (item.localMediaId != null && !item.localReleasedForSpace)) {
             return CloudSyncState.SYNCED
         }
@@ -49,6 +52,7 @@ fun galleryGridCloudBadge(item: GalleryDisplayItem): CloudSyncState? {
         }
     }
     if (item.localReleasedForSpace) return null
+    if (item.cloudState == CloudSyncState.SYNCED) return CloudSyncState.SYNCED
     val onDevice = item.localUri != null || item.cachedOriginal != null || item.localMediaId != null
     return when (item.cloudState) {
         CloudSyncState.LOCAL_ONLY,
@@ -56,6 +60,19 @@ fun galleryGridCloudBadge(item: GalleryDisplayItem): CloudSyncState? {
         -> if (onDevice) CloudSyncState.LOCAL_ONLY else null
         else -> null
     }
+}
+
+/**
+ * A consulta ao MediaStore não pode apagar o visto de Sync.
+ * No álbum a grade fica parada e essa consulta terminava trocando a nuvem com ✓
+ * por uma nuvem simples.
+ */
+fun mergeGalleryGridBadge(
+    instant: CloudSyncState?,
+    precise: CloudSyncState?,
+): CloudSyncState? {
+    if (instant == CloudSyncState.SYNCED) return CloudSyncState.SYNCED
+    return precise ?: instant
 }
 
 /** Ícone no canto da grade / detalhe: celular (só local), nuvem ou nuvem com ✓. */

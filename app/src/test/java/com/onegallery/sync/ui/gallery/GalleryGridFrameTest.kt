@@ -47,6 +47,31 @@ class GalleryGridFrameTest {
         assertEquals(CloudSyncState.SYNCED, galleryGridCloudBadge(synced))
         assertEquals(CloudSyncState.CLOUD_ONLY, galleryGridCloudBadge(cloud))
         assertEquals(CloudSyncState.LOCAL_ONLY, galleryGridCloudBadge(local))
+        val syncedWithoutLocalFile = photo("d.jpg", null).copy(
+            oneDriveItemId = "remote",
+            cloudState = CloudSyncState.SYNCED,
+            localMediaId = null,
+            localUri = null,
+        )
+        assertEquals(CloudSyncState.SYNCED, galleryGridCloudBadge(syncedWithoutLocalFile))
+        assertEquals(
+            CloudSyncState.SYNCED,
+            mergeGalleryGridBadge(CloudSyncState.SYNCED, CloudSyncState.CLOUD_ONLY),
+        )
+    }
+
+    @Test
+    fun syncStatusChangePublishesANewGridFrame() {
+        val current = frame(listOf(photo("a.jpg", null)))
+        val synced = frame(
+            listOf(
+                photo("a.jpg", null).copy(
+                    cloudState = CloudSyncState.SYNCED,
+                    oneDriveItemId = "remote",
+                ),
+            ),
+        )
+        assertFalse(samePhotoGridFrame(current, synced))
     }
 
     @Test

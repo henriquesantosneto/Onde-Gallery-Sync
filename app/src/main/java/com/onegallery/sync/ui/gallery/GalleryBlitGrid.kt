@@ -493,6 +493,7 @@ internal class GalleryBlitGridView(
         }
         updateFirstIndex()
         scheduleDecode()
+        scheduleBadgeResolve()
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -891,9 +892,12 @@ internal class GalleryBlitGridView(
                 if (generation != badgeGeneration || GalleryGridScrollGate.isUserScrollingGrid) return@badgeResolve
                 val item = jobs[index]
                 val state = try {
-                    galleryCloudOverlayState(item, context)
+                    mergeGalleryGridBadge(
+                        galleryGridCloudBadge(item),
+                        galleryCloudOverlayState(item, context),
+                    )
                 } catch (_: Exception) {
-                    continue
+                    galleryGridCloudBadge(item)
                 }
                 resolved.add(Triple(item.canonicalPath, signatures[index], state))
             }

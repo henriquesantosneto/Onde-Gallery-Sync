@@ -54,6 +54,10 @@ internal fun samePhotoRows(
         if (left.localUri != right.localUri) return false
         if (left.showInBrowseGrid != right.showInBrowseGrid) return false
         if (left.cachedPlaceholderThumb?.path != right.cachedPlaceholderThumb?.path) return false
+        if (left.cloudState != right.cloudState) return false
+        if (left.oneDriveItemId != right.oneDriveItemId) return false
+        if (left.localMediaId != right.localMediaId) return false
+        if (left.localReleasedForSpace != right.localReleasedForSpace) return false
     }
     return true
 }

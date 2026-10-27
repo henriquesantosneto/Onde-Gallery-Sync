@@ -43,4 +43,6 @@ data class MediaAlbum(
     val isUserManaged: Boolean = false,
     val userAlbumId: String? = null,
     val createdAtEpoch: Long? = null,
+    /** Nuvem da capa: Sync, só nuvem ou só no aparelho. Null se ainda não deu para saber. */
+    val coverSyncBadge: com.onegallery.sync.sync.CloudSyncState? = null,
 )
