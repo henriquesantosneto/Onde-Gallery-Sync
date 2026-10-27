@@ -183,6 +183,10 @@ class GalleryViewModel(
         val largeHeapMb = (appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
             ?.largeMemoryClass ?: 192
         AlbumCoverBitmapCache.noteLargeHeap(largeHeapMb)
+        viewModelScope.launch(Dispatchers.IO) {
+            delay(1_200)
+            syncCoordinator.retryImpossibleThumbnailsAfterGalleryOpen()
+        }
     }
 
     private val catalogSession = GalleryCatalogSession()

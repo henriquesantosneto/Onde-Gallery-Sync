@@ -6,6 +6,7 @@ import com.onegallery.sync.data.local.db.SyncIndexStatsRow
 
 class SyncPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("onegallery_sync", Context.MODE_PRIVATE)
+    private val thumbFailLock = Any()
 
     fun migrateForAppVersion(currentVersionCode: Int) {
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
@@ -141,7 +142,34 @@ class SyncPreferences(context: Context) {
         get() = prefs.getInt(KEY_THUMB_PREFETCH_CURSOR, 0).coerceAtLeast(0)
         set(value) = prefs.edit().putInt(KEY_THUMB_PREFETCH_CURSOR, value.coerceAtLeast(0)).apply()
 
-    fun thumbnailFailureCount(canonicalPath: String): Int {
+    fun thumbnailFailureCount(canonicalPath: String): Int = synchronized(thumbFailLock) {
+        val prefix = thumbnailFailKey(canonicalPath)
+        val set = prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()
+        set.firstOrNull { it.startsWith(prefix) }
+            ?.substringAfter("::")
+            ?.toIntOrNull()
+            ?: 0
+    }
+
+    fun incrementThumbnailFailure(canonicalPath: String): Int = synchronized(thumbFailLock) {
+        val next = thumbnailFailureCountUnlocked(canonicalPath) + 1
+        val prefix = thumbnailFailKey(canonicalPath)
+        val set = (prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()).toMutableSet()
+        set.removeAll { it.startsWith(prefix) }
+        set.add("$prefix$next")
+        prefs.edit().putStringSet(KEY_THUMB_FAIL_COUNTS, set).apply()
+        next
+    }
+
+    fun clearThumbnailFailure(canonicalPath: String) = synchronized(thumbFailLock) {
+        val prefix = thumbnailFailKey(canonicalPath)
+        val set = (prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()).toMutableSet()
+        if (set.removeAll { it.startsWith(prefix) }) {
+            prefs.edit().putStringSet(KEY_THUMB_FAIL_COUNTS, set).apply()
+        }
+    }
+
+    private fun thumbnailFailureCountUnlocked(canonicalPath: String): Int {
         val prefix = thumbnailFailKey(canonicalPath)
         val set = prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()
         return set.firstOrNull { it.startsWith(prefix) }
@@ -150,31 +178,12 @@ class SyncPreferences(context: Context) {
             ?: 0
     }
 
-    fun incrementThumbnailFailure(canonicalPath: String): Int {
-        val next = thumbnailFailureCount(canonicalPath) + 1
-        val prefix = thumbnailFailKey(canonicalPath)
-        val set = (prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()).toMutableSet()
-        set.removeAll { it.startsWith(prefix) }
-        set.add("$prefix$next")
-        prefs.edit().putStringSet(KEY_THUMB_FAIL_COUNTS, set).apply()
-        return next
-    }
-
-    fun clearThumbnailFailure(canonicalPath: String) {
-        val prefix = thumbnailFailKey(canonicalPath)
-        val set = (prefs.getStringSet(KEY_THUMB_FAIL_COUNTS, emptySet()) ?: emptySet()).toMutableSet()
-        if (set.removeAll { it.startsWith(prefix) }) {
-            prefs.edit().putStringSet(KEY_THUMB_FAIL_COUNTS, set).apply()
-        }
-    }
-
-    /** Novo sync manual — permite tentar miniaturas de vídeo de novo após falhas antigas. */
-    fun clearAllThumbnailFailureCounts() {
+    fun clearAllThumbnailFailureCounts() = synchronized(thumbFailLock) {
         prefs.edit().remove(KEY_THUMB_FAIL_COUNTS).apply()
     }
 
     /** Cursores e contadores ligados ao índice antigo — após zerar e reindexar. */
-    fun resetIndexMaintenanceState() {
+    fun resetIndexMaintenanceState() = synchronized(thumbFailLock) {
         prefs.edit()
             .putInt(KEY_GPS_BACKFILL_CURSOR, 0)
             .putInt(KEY_THUMB_PREFETCH_CURSOR, 0)

@@ -51,6 +51,7 @@ internal interface ThumbnailPrefetchHost {
     ): Result<File?>
     fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean
     fun incrementThumbnailFailure(canonicalPath: String)
+    fun classifyImpossibleThumbnailIfReady(row: SyncMetadataEntity)
     fun recordThumbPrefetchAttempt(canonicalPath: String)
     fun clearThumbPrefetchAttempt(canonicalPath: String)
 }
@@ -197,6 +198,7 @@ internal class ThumbnailPrefetchRunner(
                                 }
                             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                                 host.incrementThumbnailFailure(row.canonicalPath)
+                                host.classifyImpossibleThumbnailIfReady(row)
                             }
                             var hit = host.rowHasGalleryThumbnail(row)
                             if (!hit) {

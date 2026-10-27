@@ -279,11 +279,7 @@ internal class ThumbnailSyncPipeline(
     ): Int {
         val stubborn = syncMetadataDao.getAll()
             .asSequence()
-            .filter { row -> thumbnails.needsThumbnailPrefetch(row) }
-            .filter { row ->
-                GalleryMapper.isVideoFileName(row.displayName) ||
-                    !thumbnails.hasLocalThumbnailSource(row)
-            }
+            .filter { row -> thumbnails.readyToClassifyImpossible(row) }
             .sortedWith(missingThumbnailPrefetchComparator)
             .take(maxItems)
             .toList()

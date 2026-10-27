@@ -224,6 +224,7 @@ class SyncCoordinator(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bulkThumbnailPrefetchDepth = AtomicInteger(0)
     private val thumbPrefetchAttemptsThisSession = ConcurrentHashMap<String, Int>()
+    private val impossibleThumbRetryStarted = AtomicBoolean(false)
     private val galleryThumbnailService = GalleryThumbnailService(
         appContext = appContext,
         syncMetadataDao = syncMetadataDao,
@@ -571,10 +572,6 @@ class SyncCoordinator(
     private suspend fun prepareSyncSession(userInitiated: Boolean) {
         if (userInitiated) {
             resetSyncCancel()
-            syncPreferences.clearAllThumbnailFailureCounts()
-            withContext(Dispatchers.IO) {
-                mediaCacheRepository.discardSyncFailurePlaceholders()
-            }
         } else {
             ensureNotCancelled()
         }
@@ -2002,6 +1999,38 @@ class SyncCoordinator(
         cloudSourcesOnly,
         cloudVideoAggressive,
     )
+
+    /**
+     * Uma vez por processo, ao abrir a galeria: encerra quem já falhou 5 vezes
+     * e tenta capturar de novo. A falha mantém o cinza e fora da fila.
+     */
+    suspend fun retryImpossibleThumbnailsAfterGalleryOpen() {
+        if (!impossibleThumbRetryStarted.compareAndSet(false, true)) return
+        withContext(Dispatchers.IO) {
+            var waits = 0
+            while (_state.value.isRunning && waits < 40) {
+                delay(3_000)
+                waits++
+            }
+            if (_state.value.isRunning) return@withContext
+            giveUpStubbornThumbnailsBatch(ThumbnailPostSyncEngine.THUMB_STUBBORN_PLACEHOLDER_CAP)
+            val rows = syncMetadataDao.getAll().filter { row ->
+                galleryThumbnailService.hasGiveUpThumbnail(row)
+            }
+            if (rows.isEmpty()) return@withContext
+            var recovered = 0
+            for (row in rows) {
+                while (com.onegallery.sync.ui.gallery.GalleryGridScrollGate.isUserScrollingGrid) {
+                    delay(48)
+                }
+                if (_state.value.isRunning) break
+                if (galleryThumbnailService.retryGiveUpThumbnail(row.canonicalPath)) {
+                    recovered++
+                }
+            }
+            if (recovered > 0) notifyGalleryDisplayRefresh()
+        }
+    }
 
     private fun activeSyncProgressCallback(
         row: SyncMetadataEntity,
@@ -4981,6 +5010,13 @@ class SyncCoordinator(
             syncPreferences.incrementThumbnailFailure(canonicalPath)
         }
 
+        override fun classifyImpossibleThumbnailIfReady(row: SyncMetadataEntity) {
+            if (!galleryThumbnailService.readyToClassifyImpossible(row)) return
+            galleryThumbnailService.persistMinimalPlaceholderThumbnail(row)
+            syncPreferences.clearThumbnailFailure(row.canonicalPath)
+            thumbPrefetchAttemptsThisSession.remove(row.canonicalPath)
+        }
+
         override fun recordThumbPrefetchAttempt(canonicalPath: String) {
             thumbPrefetchAttemptsThisSession.merge(canonicalPath, 1) { left, _ -> left + 1 }
         }
@@ -5070,7 +5106,7 @@ class SyncCoordinator(
         const val BACKGROUND_THUMB_PREFETCH_INITIAL_DELAY_MS = 600L
         const val BACKGROUND_THUMB_PREFETCH_RETRY_DELAY_MS = 1_200L
         const val THUMB_MAX_FAILURE_ATTEMPTS = 5
-        const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 12
+        const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 5
         const val LOCAL_THUMB_EARLY_DURING_SYNC_MAX = 4_000
         const val LOCAL_THUMB_EARLY_POST_SYNC_MAX = 6_000
         /** Por item na fila de miniaturas (fotos locais / JPEG rápido). */

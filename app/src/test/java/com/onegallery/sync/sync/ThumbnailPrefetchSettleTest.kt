@@ -36,6 +36,21 @@ class ThumbnailPrefetchSettleTest {
     }
 
     @Test
+    fun fiveFailuresClassifyJpgPngAndMp4AsImpossible() {
+        assertFalse(thumbnailFailureExhausted(4))
+        assertTrue(thumbnailFailureExhausted(5))
+        assertTrue(
+            shouldClassifyImpossibleThumbnail(needsPrefetch = true, failureCount = 5),
+        )
+        assertFalse(
+            shouldClassifyImpossibleThumbnail(needsPrefetch = true, failureCount = 4),
+        )
+        assertFalse(
+            shouldClassifyImpossibleThumbnail(needsPrefetch = false, failureCount = 9),
+        )
+    }
+
+    @Test
     fun missingThumbStaysPendingUntilARealFileOrGiveUp() {
         assertTrue(
             thumbnailStillNeedsPrefetch(

@@ -160,13 +160,14 @@ class GalleryThumbnailService(
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
         cloudVideoAggressive: Boolean = false,
+        retryDespiteGiveUp: Boolean = false,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
         if (!GalleryMapper.supportsGeneratedThumbnail(row.displayName)) {
             persistMinimalPlaceholderThumbnail(row)?.let { return Result.success(it) }
             return Result.success(null)
         }
-        if (hasGiveUpThumbnail(row)) {
+        if (hasGiveUpThumbnail(row) && !retryDespiteGiveUp) {
             return Result.success(
                 mediaCacheRepository.thumbnailIfCached(row.canonicalPath, row.oneDriveItemId),
             )
@@ -195,9 +196,7 @@ class GalleryThumbnailService(
                     ),
                 )
             }
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)?.let {
-                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-            }
+            discardCachedThumbUnlessGiveUp(canonicalPath, row.oneDriveItemId)
         } else if (syncedOnGraph || cloudFirst) {
             if (rowHasGalleryThumbnail(row)) {
                 syncPreferences.clearThumbnailFailure(canonicalPath)
@@ -209,9 +208,7 @@ class GalleryThumbnailService(
                     ),
                 )
             }
-            mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId)?.let {
-                mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, row.oneDriveItemId)
-            }
+            discardCachedThumbUnlessGiveUp(canonicalPath, row.oneDriveItemId)
         }
 
         val staging = mediaCacheRepository.thumbStagingFile(canonicalPath)
@@ -375,18 +372,56 @@ class GalleryThumbnailService(
 
         staging.delete()
         existingCachedThumb()?.let { cached ->
-            syncPreferences.clearThumbnailFailure(canonicalPath)
-            return Result.success(cached)
+            if (rowHasGalleryThumbnail(row)) {
+                syncPreferences.clearThumbnailFailure(canonicalPath)
+                return Result.success(cached)
+            }
         }
 
-        val maxThumbFailures = if (isVideo) THUMB_MAX_FAILURE_ATTEMPTS_VIDEO else THUMB_MAX_FAILURE_ATTEMPTS
-        if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= maxThumbFailures) {
+        if (retryDespiteGiveUp) {
+            return Result.success(
+                mediaCacheRepository.thumbnailIfCached(canonicalPath, row.oneDriveItemId),
+            )
+        }
+
+        if (syncPreferences.incrementThumbnailFailure(canonicalPath) >= THUMB_MAX_FAILURE_ATTEMPTS) {
             persistMinimalPlaceholderThumbnail(row)?.let { placeholder ->
                 syncPreferences.clearThumbnailFailure(canonicalPath)
                 return Result.success(placeholder)
             }
         }
         return Result.success(null)
+    }
+
+    /** Cinza 96px fica no disco até uma captura nova substituir. A fila automática não apaga. */
+    private fun discardCachedThumbUnlessGiveUp(canonicalPath: String, oneDriveItemId: String?) {
+        val cached = mediaCacheRepository.thumbnailIfCached(canonicalPath, oneDriveItemId) ?: return
+        if (mediaCacheRepository.isSyncFailurePlaceholderThumbnail(cached)) return
+        mediaCacheRepository.invalidateCommittedThumbnail(canonicalPath, oneDriveItemId)
+    }
+
+    fun readyToClassifyImpossible(row: SyncMetadataEntity): Boolean {
+        return shouldClassifyImpossibleThumbnail(
+            needsPrefetch = needsThumbnailPrefetch(row),
+            failureCount = syncPreferences.thumbnailFailureCount(row.canonicalPath),
+        )
+    }
+
+    /**
+     * Abertura da galeria: tenta a miniatura de novo sem devolver o item à fila.
+     * Se a captura falha, o cinza de desistência continua.
+     */
+    suspend fun retryGiveUpThumbnail(canonicalPath: String): Boolean {
+        val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return false
+        if (!hasGiveUpThumbnail(row)) return false
+        val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
+        val result = mutex.withLock {
+            withContext(Dispatchers.IO) {
+                ensureThumbnailCachedOnIo(canonicalPath, retryDespiteGiveUp = true)
+            }
+        }
+        val file = result.getOrNull() ?: return false
+        return !mediaCacheRepository.isSyncFailurePlaceholderThumbnail(file)
     }
 
     private suspend fun fetchCloudImageThumbnail(
@@ -492,12 +527,25 @@ class GalleryThumbnailService(
 
     companion object {
         const val THUMB_MAX_FAILURE_ATTEMPTS = 5
-        const val THUMB_MAX_FAILURE_ATTEMPTS_VIDEO = 12
         const val CLOUD_THUMB_FETCH_TIMEOUT_MS = 25_000L
         const val CLOUD_VIDEO_THUMB_FETCH_TIMEOUT_MS = 90_000L
         const val CLOUD_VIDEO_ON_DEMAND_FETCH_TIMEOUT_MS = 180_000L
     }
 }
+
+internal const val THUMB_IMPOSSIBLE_AFTER_FAILURES = 5
+
+/** JPG, PNG e MP4: cinco erros seguidos classificam a miniatura como impossível. */
+internal fun thumbnailFailureExhausted(
+    failureCount: Int,
+    maxFailures: Int = THUMB_IMPOSSIBLE_AFTER_FAILURES,
+): Boolean = failureCount >= maxFailures
+
+internal fun shouldClassifyImpossibleThumbnail(
+    needsPrefetch: Boolean,
+    failureCount: Int,
+    maxFailures: Int = THUMB_IMPOSSIBLE_AFTER_FAILURES,
+): Boolean = needsPrefetch && thumbnailFailureExhausted(failureCount, maxFailures)
 
 /** Fila automática: miniatura real ou cinza de desistência tira o item da pendência. */
 internal fun thumbnailStillNeedsPrefetch(
