@@ -1684,8 +1684,9 @@ class SyncCoordinator(
                         upsertBatch.clear()
                     }
 
-                    for (row in rowsProcessingOrder) {
+                    for (incoming in rowsProcessingOrder) {
                         ensureSyncMayContinue()
+                        val row = rowWithGps(incoming)
                         localPassIndex++
                         var keepInRunQueue = false
                         markSyncProcessingItem(row, "Comparando com a nuvem…")
@@ -1830,45 +1831,53 @@ class SyncCoordinator(
                         }
                         if (path !in existingByPath) {
                             cloudOnlyInserts.add(
-                                SyncMetadataEntity(
-                                    canonicalPath = path,
-                                    displayName = remote.name,
-                                    albumName = AlbumGroupKeys.fromPaths(canonicalPath = path),
-                                    localMediaId = null,
-                                    localContentUri = null,
-                                    oneDriveItemId = remote.itemId,
-                                    localModifiedAt = null,
-                                    remoteModifiedAt = remote.modifiedAtEpoch,
-                                    remoteQuickXorHash = remote.quickXorHash,
-                                    remoteSizeBytes = remote.sizeBytes,
-                                    cloudState = CloudSyncState.CLOUD_ONLY,
-                                    cachedFilePath = null,
-                                    pendingDeleteTarget = PendingDeleteTarget.NONE,
-                                    lastError = null,
+                                rowWithGps(
+                                    SyncMetadataEntity(
+                                        canonicalPath = path,
+                                        displayName = remote.name,
+                                        albumName = AlbumGroupKeys.fromPaths(canonicalPath = path),
+                                        localMediaId = null,
+                                        localContentUri = null,
+                                        oneDriveItemId = remote.itemId,
+                                        localModifiedAt = null,
+                                        remoteModifiedAt = remote.modifiedAtEpoch,
+                                        remoteQuickXorHash = remote.quickXorHash,
+                                        remoteSizeBytes = remote.sizeBytes,
+                                        cloudState = CloudSyncState.CLOUD_ONLY,
+                                        cachedFilePath = null,
+                                        pendingDeleteTarget = PendingDeleteTarget.NONE,
+                                        lastError = null,
+                                    ),
                                 ),
                             )
                             cloudOnly++
                         } else {
                             val existing = existingByPath[path]!!
-                            if (existing.localMediaId == null &&
+                            val refreshCloudMeta = existing.localMediaId == null &&
                                 (
                                     existing.oneDriveItemId == null ||
                                         existing.cloudState == CloudSyncState.LOCAL_ONLY ||
                                         existing.cloudState == CloudSyncState.ERROR
                                     )
-                            ) {
-                                cloudOnlyUpdates.add(
-                                    existing.copy(
-                                        displayName = remote.name,
-                                        oneDriveItemId = remote.itemId,
-                                        remoteModifiedAt = remote.modifiedAtEpoch,
-                                        remoteQuickXorHash = remote.quickXorHash,
-                                        remoteSizeBytes = remote.sizeBytes,
-                                        cloudState = CloudSyncState.CLOUD_ONLY,
-                                        lastError = null,
-                                    ),
+                            val base = if (refreshCloudMeta) {
+                                existing.copy(
+                                    displayName = remote.name,
+                                    oneDriveItemId = remote.itemId,
+                                    remoteModifiedAt = remote.modifiedAtEpoch,
+                                    remoteQuickXorHash = remote.quickXorHash,
+                                    remoteSizeBytes = remote.sizeBytes,
+                                    cloudState = CloudSyncState.CLOUD_ONLY,
+                                    lastError = null,
                                 )
-                                cloudOnly++
+                            } else {
+                                existing
+                            }
+                            if (refreshCloudMeta || rowNeedsGpsBackfill(base)) {
+                                val filled = rowWithGps(base)
+                                if (refreshCloudMeta || filled.latitude != null) {
+                                    cloudOnlyUpdates.add(filled)
+                                }
+                                if (refreshCloudMeta) cloudOnly++
                             }
                         }
                         } finally {
@@ -2994,6 +3003,7 @@ class SyncCoordinator(
                 )
                 return 0
             }
+            val prepared = rowWithGps(row, temp)
             return withTimeout(UPLOAD_SINGLE_FILE_TIMEOUT_MS) {
                 runCatching {
                     val localHash = ContentFingerprint.quickXorHashBase64(temp!!)
@@ -3034,7 +3044,7 @@ class SyncCoordinator(
                         ).getOrThrow()
                         uploadedBytes = true
                     }
-                    val synced = row.copy(
+                    val synced = prepared.copy(
                         oneDriveItemId = remoteId,
                         localQuickXorHash = localHash,
                         localSizeBytes = localSize,
@@ -3062,7 +3072,7 @@ class SyncCoordinator(
                     when (error) {
                         is TimeoutCancellationException ->
                             syncMetadataDao.upsert(
-                                row.copy(
+                                prepared.copy(
                                     cloudState = CloudSyncState.ERROR,
                                     lastError = "Envio expirou (tempo máximo por arquivo).",
                                 ),
@@ -3070,7 +3080,7 @@ class SyncCoordinator(
                         else -> {
                             propagateCancellation(error)
                             syncMetadataDao.upsert(
-                                row.copy(cloudState = CloudSyncState.ERROR, lastError = error.message),
+                                prepared.copy(cloudState = CloudSyncState.ERROR, lastError = error.message),
                             )
                         }
                     }
@@ -3246,6 +3256,28 @@ class SyncCoordinator(
 
     private suspend fun countIndexedMissingThumbnails(): Int =
         galleryThumbnailIndex.countMissing()
+
+    /** GPS no mesmo item do sync. Não abre uma etapa só de localização depois. */
+    private suspend fun rowWithGps(row: SyncMetadataEntity, localFile: File? = null): SyncMetadataEntity {
+        if (row.latitude != null && row.longitude != null) return row
+        if (!rowNeedsGpsBackfill(row) && localFile == null) return row
+        val located = try {
+            if (localFile != null && localFile.isFile) {
+                mediaLocationResolver.resolveFromFile(localFile)
+            } else {
+                null
+            } ?: resolveLocationForBackfill(row)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        } ?: return row
+        return row.copy(
+            locationLabel = located.label,
+            latitude = located.latitude,
+            longitude = located.longitude,
+        )
+    }
 
     private fun rowNeedsGpsBackfill(row: SyncMetadataEntity): Boolean {
         if (row.latitude != null && row.longitude != null) return false
@@ -3878,18 +3910,6 @@ class SyncCoordinator(
                 syncThumbnailOrchestrator.runPostSyncThumbnailWork()
                 healStalePendingDownloads(remoteByPath = null)
                 healAllStaleLocalCopyMetadata()
-                val thumbsStillMissing = countIndexedMissingThumbnails()
-                setSyncProgress(
-                    SyncProgressPhase.BACKFILL_GPS,
-                    "Indexando localização (GPS)…",
-                    if (thumbsStillMissing == 0) {
-                        "Miniaturas concluídas — mapa e Locais."
-                    } else {
-                        "~$thumbsStillMissing ainda sem JPEG no cache — mapa e Locais."
-                    },
-                    alsoUpdateLastMessage = false,
-                )
-                backfillMissingGpsLocations()
                 setSyncProgress(
                     SyncProgressPhase.BACKFILL_CAPTURE_DATE,
                     "Indexando data de captura…",
