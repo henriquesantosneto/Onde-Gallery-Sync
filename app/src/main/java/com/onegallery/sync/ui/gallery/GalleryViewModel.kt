@@ -1084,7 +1084,11 @@ class GalleryViewModel(
             albumLists.catalogFingerprint?.matchesIndex(fingerprint) == true &&
             albumLists.localRevision == sessionLocalRevision
         ) {
-            return albumLists.albums to albumLists.placeAlbums
+            if (albumLists.albumSort == albumSort) {
+                return albumLists.albums to albumLists.placeAlbums
+            }
+            return sortMediaAlbums(albumLists.albums, albumSort) to
+                sortPlaceAlbums(albumLists.placeAlbums, albumSort)
         }
         if (catalogItems.size < DEFER_ALBUM_LISTS_MIN_ITEMS || onlyThumb) {
             val folderItems = if (onlyThumb) {
@@ -1431,13 +1435,17 @@ class GalleryViewModel(
     }
 
     fun setSortOrder(order: GallerySortOrder) {
+        if (sortOrder.value == order) return
         sortOrder.value = order
         galleryPreferences.sortOrder = order
+        requestGalleryScrollToTop()
     }
 
     fun setAlbumListSort(sort: AlbumListSort) {
+        if (albumListSort.value == sort) return
         albumListSort.value = sort
         galleryPreferences.albumListSort = sort
+        requestAlbumsScrollToTop()
     }
 
     /** Reaplica filtro “só com miniatura” após mudança em Ajustes. */

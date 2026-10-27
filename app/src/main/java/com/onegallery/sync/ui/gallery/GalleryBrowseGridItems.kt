@@ -19,7 +19,7 @@ fun resolveBrowseGridItems(
         items.filter { it.belongsOnBrowseGridWithoutDisk() }
 
     if (!requiresActiveBrowseFilter) {
-        return browsable(libraryItems)
+        return browsable(libraryItems).sortedBy(sortOrder)
     }
     if (!routeAlbumFolderKey.isNullOrBlank()) {
         val fromRoute = browsable(

@@ -70,6 +70,8 @@ import com.onegallery.sync.ui.gallery.ProvideGalleryGridScrollState
 import com.onegallery.sync.ui.gallery.LiveAlbumCover
 import com.onegallery.sync.ui.gallery.AlbumGridFastScrollRail
 import com.onegallery.sync.ui.gallery.AlbumListSort
+import com.onegallery.sync.ui.gallery.sortMediaAlbums
+import com.onegallery.sync.ui.gallery.sortPlaceAlbums
 import com.onegallery.sync.ui.gallery.GalleryFastScrollRailReservedWidth
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
@@ -233,10 +235,14 @@ fun AlbumsScreen(
             }
         },
     ) { padding ->
-        val gridEntries = remember(state.placeAlbums, state.albums, selectedTab) {
+        val gridEntries = remember(state.placeAlbums, state.albums, state.albumListSort, selectedTab) {
             when (selectedTab) {
-                AlbumsBrowseTab.ALBUMS -> buildAlbumGridEntries(state.albums)
-                AlbumsBrowseTab.PLACES -> buildPlaceGridEntries(state.placeAlbums)
+                AlbumsBrowseTab.ALBUMS -> buildAlbumGridEntries(
+                    sortMediaAlbums(state.albums, state.albumListSort),
+                )
+                AlbumsBrowseTab.PLACES -> buildPlaceGridEntries(
+                    sortPlaceAlbums(state.placeAlbums, state.albumListSort),
+                )
             }
         }
         val gridKeys = remember(gridEntries) { albumGridEntryKeys(gridEntries) }
@@ -291,8 +297,8 @@ fun AlbumsScreen(
                     }
                 }
                 val railAlbums = when (selectedTab) {
-                    AlbumsBrowseTab.ALBUMS -> state.albums
-                    AlbumsBrowseTab.PLACES -> state.placeAlbums
+                    AlbumsBrowseTab.ALBUMS -> sortMediaAlbums(state.albums, state.albumListSort)
+                    AlbumsBrowseTab.PLACES -> sortPlaceAlbums(state.placeAlbums, state.albumListSort)
                 }
                 val albumScrollMarkers = remember(railAlbums, state.albumListSort) {
                     buildAlbumGridFastScrollMarkers(railAlbums, state.albumListSort)

@@ -104,7 +104,7 @@ class GalleryBrowseGridItemsTest {
             routePlaceTitle = null,
             mediaCacheRepository = repo,
         )
-        assertEquals(listOf("local", "cloud-thumb"), result.map { it.canonicalPath })
+        assertEquals(listOf("cloud-thumb", "local"), result.map { it.canonicalPath })
     }
 
     @Test

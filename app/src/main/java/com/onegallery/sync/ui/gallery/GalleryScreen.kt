@@ -103,6 +103,7 @@ fun GalleryScreen(
         gridFrame.libraryItems,
         gridFrame.items,
         gridFrame.sortOrder,
+        state.sortOrder,
         routeAlbumFolderKey,
         routePlaceMatchKey,
         routePlaceTitle,
@@ -111,7 +112,7 @@ fun GalleryScreen(
             requiresActiveBrowseFilter = requiresActiveBrowseFilter,
             libraryItems = gridFrame.libraryItems,
             browseItemsFromState = gridFrame.items,
-            sortOrder = gridFrame.sortOrder,
+            sortOrder = state.sortOrder,
             routeAlbumFolderKey = routeAlbumFolderKey,
             routePlaceMatchKey = routePlaceMatchKey,
             routePlaceTitle = routePlaceTitle,
@@ -321,14 +322,14 @@ fun GalleryScreen(
                 }
             }
             else -> {
-                val dateTimeline = isDateTimelineSort(gridFrame.sortOrder)
+                val dateTimeline = isDateTimelineSort(state.sortOrder)
                 val timelineGrouping = timelineGroupingForGridScale(gridPinch.scale)
                 val galleryScrollToTop by viewModel.galleryScrollToTopRequests.collectAsStateWithLifecycle()
-                val timelinePresorted = isDateTimelineSort(gridFrame.sortOrder)
-                val gridEntries = remember(gridItems, gridFrame.sortOrder, timelineGrouping, timelinePresorted) {
+                val timelinePresorted = isDateTimelineSort(state.sortOrder)
+                val gridEntries = remember(gridItems, state.sortOrder, timelineGrouping, timelinePresorted) {
                     buildGalleryGridEntries(
                         gridItems,
-                        gridFrame.sortOrder,
+                        state.sortOrder,
                         timelineGrouping,
                         itemsAlreadySortedForTimeline = timelinePresorted,
                     )

@@ -93,6 +93,44 @@ class GalleryTimelineKeysTest {
         )
     }
 
+    @Test
+    fun largeLibraryDoesNotReuseThePreviousDateOrder() {
+        val session = GalleryCatalogSession()
+        val first = listOf(
+            photo("a.jpg", 10L),
+            photo("b.jpg", 20L),
+        )
+        session.publish(bundleOf(first), GallerySortOrder.DATE_OLDEST)
+        assertEquals(
+            listOf("a.jpg", "b.jpg"),
+            session.sortedLibraryItems(first, GallerySortOrder.DATE_OLDEST).map { it.canonicalPath },
+        )
+        val grown = (1..400).map { index -> photo("p$index.jpg", index.toLong()) }
+        session.publish(bundleOf(grown), GallerySortOrder.DATE_NEWEST)
+        assertEquals(
+            "p400.jpg",
+            session.sortedLibraryItems(grown, GallerySortOrder.DATE_NEWEST).first().canonicalPath,
+        )
+        assertEquals(
+            "p1.jpg",
+            session.sortedLibraryItems(grown, GallerySortOrder.DATE_OLDEST).first().canonicalPath,
+        )
+        assertEquals(
+            listOf("p1.jpg", "p10.jpg"),
+            session.sortedLibraryItems(grown, GallerySortOrder.NAME_A_Z)
+                .map { it.canonicalPath }
+                .take(2),
+        )
+    }
+
+    private fun bundleOf(items: List<GalleryDisplayItem>) = GalleryCatalogSession.SnapshotBundle(
+        catalogItems = items,
+        visibleItems = items,
+        userAlbums = emptyList(),
+        fingerprint = GalleryCatalogFingerprint.fromDisplayPaths(items.map { it.canonicalPath }),
+        localRevision = 1L,
+    )
+
     private fun epoch(date: LocalDate): Long =
         date.atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
 

@@ -22,7 +22,7 @@ class GalleryCatalogSession {
     var lastBundle: SnapshotBundle? = null
         private set
 
-    private var sortedLibraryCache: Pair<Int, GallerySortOrder>? = null
+    private var sortedLibraryCache: SortedLibraryKey? = null
     private var sortedLibraryItems: List<GalleryDisplayItem> = emptyList()
 
     private var preSortedDateNewest: List<GalleryDisplayItem> = emptyList()
@@ -75,6 +75,8 @@ class GalleryCatalogSession {
         if (bundle.visibleItems !== preSortVisibleRef) {
             preSortVisibleRef = bundle.visibleItems
             val visible = bundle.visibleItems
+            preSortedDateNewest = emptyList()
+            preSortedDateOldest = emptyList()
             if (visible.size < 400) {
                 preSortedDateNewest = visible.sortedByDescending { it.sortTimestamp }
                 preSortedDateOldest = visible.sortedBy { it.sortTimestamp }
@@ -121,18 +123,29 @@ class GalleryCatalogSession {
     ): List<GalleryDisplayItem> {
         when (order) {
             GallerySortOrder.DATE_NEWEST -> {
-                if (visibleItems === preSortVisibleRef && preSortedDateNewest.isNotEmpty()) {
+                if (visibleItems === preSortVisibleRef &&
+                    preSortedDateNewest.size == visibleItems.size &&
+                    preSortedDateNewest.isNotEmpty()
+                ) {
                     return preSortedDateNewest
                 }
             }
             GallerySortOrder.DATE_OLDEST -> {
-                if (visibleItems === preSortVisibleRef && preSortedDateOldest.isNotEmpty()) {
+                if (visibleItems === preSortVisibleRef &&
+                    preSortedDateOldest.size == visibleItems.size &&
+                    preSortedDateOldest.isNotEmpty()
+                ) {
                     return preSortedDateOldest
                 }
             }
             else -> Unit
         }
-        val key = visibleItems.size to order
+        val key = SortedLibraryKey(
+            order = order,
+            size = visibleItems.size,
+            head = visibleItems.firstOrNull()?.canonicalPath,
+            tail = visibleItems.lastOrNull()?.canonicalPath,
+        )
         if (sortedLibraryCache == key && sortedLibraryItems.isNotEmpty()) {
             return sortedLibraryItems
         }
@@ -288,6 +301,13 @@ class GalleryCatalogSession {
         cachedPlaceAlbums = placeAlbums
         placeAlbumsCacheKey = key.copy(userAlbumCount = 0)
     }
+
+    private data class SortedLibraryKey(
+        val order: GallerySortOrder,
+        val size: Int,
+        val head: String?,
+        val tail: String?,
+    )
 
     private data class BrowseFilterCacheKey(
         val visibleSize: Int,
