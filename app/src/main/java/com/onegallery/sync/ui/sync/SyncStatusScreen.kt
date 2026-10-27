@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -261,18 +262,18 @@ fun SyncStatusScreen(
             item {
                 val visibleQueueCount = activeItems.size + queueWaiting.size
                 val indexPending = coordinatorState.runQueueGlobalPending
-                if (showLiveActivity && (visibleQueueCount > 0 || (indexPending ?: 0) > 0)) {
-                    val title = if (coordinatorState.prefetchingThumbnails) {
-                        if (indexPending != null && indexPending > visibleQueueCount) {
-                            "Miniaturas pendentes ($visibleQueueCount na fila · ~$indexPending no índice)"
-                        } else {
-                            "Miniaturas pendentes ($visibleQueueCount na fila)"
-                        }
-                    } else {
+                val title = when {
+                    coordinatorState.prefetchingThumbnails &&
+                        indexPending != null && indexPending > visibleQueueCount ->
+                        "Miniaturas pendentes ($visibleQueueCount na fila · ~$indexPending no índice)"
+                    coordinatorState.prefetchingThumbnails ->
+                        "Miniaturas pendentes ($visibleQueueCount na fila)"
+                    visibleQueueCount > 0 ->
                         "Fila de sincronismo ($visibleQueueCount pendente(s))"
-                    }
-                    SectionTitle(title)
+                    else ->
+                        "Fila de sincronismo"
                 }
+                SectionTitle(title)
                 SyncQueueScrollPanel(
                     queueWaiting = queueWaiting,
                     activeItems = activeItems,
@@ -285,20 +286,31 @@ fun SyncStatusScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp),
+                        .padding(top = 12.dp)
+                        .height(40.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(
                         onClick = { syncTasks.runBidirectionalSync(userInitiated = true) },
                         enabled = !syncBusy,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Sincronizar agora") }
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ) {
+                        Text(
+                            "Sincronizar agora",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     if (syncBusy) {
                         OutlinedButton(
                             onClick = { syncCoordinator.requestStop() },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                         ) {
-                            Text(stringResource(R.string.sync_action_stop))
+                            Text(
+                                stringResource(R.string.sync_action_stop),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
@@ -386,7 +398,6 @@ private val SyncQueueRowStride = 34.dp
 private val SyncQueueRowGap = 4.dp
 /** Linhas visíveis no quadro; o restante rola com a barrinha à direita. */
 private const val SyncQueueVisibleRowCount = 10
-private val SyncQueueEmptyHeight = 56.dp
 
 @Composable
 private fun syncQueueListViewportHeight(): Dp {
@@ -405,12 +416,10 @@ private fun SyncQueueScrollPanel(
     val viewportHeight = syncQueueListViewportHeight()
     val outline = MaterialTheme.colorScheme.outlineVariant
     val listCount = activeItems.size + queueWaiting.size
-    val keepLargeViewport = isRunning || prefetchingThumbnails || listCount > 0
-    val panelHeight = if (keepLargeViewport) viewportHeight else SyncQueueEmptyHeight
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(panelHeight)
+            .height(viewportHeight)
             .border(1.dp, outline, MaterialTheme.shapes.medium),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surface,
@@ -504,7 +513,12 @@ private fun SectionTitle(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 4.dp)
+            .height(28.dp),
     )
 }
 
