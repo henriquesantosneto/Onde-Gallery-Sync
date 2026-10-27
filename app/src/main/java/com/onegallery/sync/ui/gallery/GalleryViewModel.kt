@@ -1311,8 +1311,32 @@ class GalleryViewModel(
         }
     }
 
+    /**
+     * Lista que estava na grade no toque. O filtro de álbum do ViewModel é
+     * compartilhado e pode ainda ser o álbum anterior quando a foto abre.
+     */
+    private var detailSessionAnchor: String? = null
+    private var detailSessionPaths: List<String>? = null
+
+    fun beginDetailSession(anchorPath: String, browsePaths: List<String>) {
+        if (browsePaths.isEmpty() || anchorPath !in browsePaths) {
+            detailSessionAnchor = null
+            detailSessionPaths = null
+            return
+        }
+        detailSessionAnchor = anchorPath
+        detailSessionPaths = browsePaths
+    }
+
+    fun detailSessionPaths(anchorPath: String): List<String>? {
+        if (detailSessionAnchor != anchorPath) return null
+        return detailSessionPaths
+    }
+
     fun clearBrowseFilters() {
         browseFilter.value = GalleryBrowseFilter.All
+        detailSessionAnchor = null
+        detailSessionPaths = null
         clearSelection()
     }
 

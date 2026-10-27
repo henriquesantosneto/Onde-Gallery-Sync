@@ -343,6 +343,12 @@ fun GalleryScreen(
                     mediaCache = mediaCacheRepository,
                     scrollToTopToken = galleryScrollToTop,
                     onOpen = { path ->
+                        val browsePaths = if (requiresActiveBrowseFilter) {
+                            fullBrowseGridItems.map { it.canonicalPath }
+                        } else {
+                            emptyList()
+                        }
+                        viewModel.beginDetailSession(path, browsePaths)
                         onOpenItem(URLEncoder.encode(path, StandardCharsets.UTF_8.name()))
                     },
                     onToggle = { path -> viewModel.toggleSelection(path) },

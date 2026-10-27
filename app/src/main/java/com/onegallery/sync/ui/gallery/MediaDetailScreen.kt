@@ -93,8 +93,12 @@ fun MediaDetailScreen(
 
     val itemsByPath = remember(liveItems) { liveItems.associateBy { it.canonicalPath } }
     val timelineGrouping = timelineGroupingForGridScale(galleryPreferences.galleryGridZoom)
+    val browsePaths = remember(initialCanonicalPath) {
+        viewModel.detailSessionPaths(initialCanonicalPath)
+    }
     val contextItems = remember(
         liveItems,
+        browsePaths,
         state.albumFilter,
         state.locationFilter,
         state.placeBrowseMatchKey,
@@ -103,12 +107,13 @@ fun MediaDetailScreen(
         state.sortOrder,
         timelineGrouping,
     ) {
-        detailContextItems(
+        detailItemsForOpenedPath(
             allItems = liveItems,
+            openedPath = initialCanonicalPath,
+            browsePaths = browsePaths,
             albumFilter = state.albumFilter,
             locationFilter = state.locationFilter,
             placeMatchKey = state.placeBrowseMatchKey,
-            anchorPath = initialCanonicalPath,
             geoItems = state.geoItems,
             sortOrder = state.sortOrder,
             timelineGrouping = timelineGrouping,
@@ -119,6 +124,16 @@ fun MediaDetailScreen(
     val pagerState = rememberPagerState(
         initialPage = initialPage.coerceIn(0, (pagerPaths.size - 1).coerceAtLeast(0)),
     ) { pagerPaths.size.coerceAtLeast(1) }
+    var landedOnOpenedPath by remember(initialCanonicalPath) { mutableStateOf(false) }
+    LaunchedEffect(initialCanonicalPath, pagerPaths) {
+        if (landedOnOpenedPath) return@LaunchedEffect
+        val index = pagerPaths.indexOf(initialCanonicalPath)
+        if (index < 0) return@LaunchedEffect
+        if (pagerState.currentPage != index) {
+            pagerState.scrollToPage(index)
+        }
+        landedOnOpenedPath = true
+    }
 
     val currentPath = pagerPaths.getOrNull(pagerState.currentPage)
     var detailBadgeItem by remember { mutableStateOf<GalleryDisplayItem?>(null) }

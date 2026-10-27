@@ -551,6 +551,7 @@ fun OneGalleryApp(
                     onClick = {},
                 ),
         ) {
+            androidx.compose.runtime.key(viewerPath) {
             MediaDetailScreen(
                 initialCanonicalPath = viewerPath,
                 viewModel = galleryViewModel,
@@ -563,6 +564,7 @@ fun OneGalleryApp(
                     navController.navigate(PLACES_MAP_ROUTE)
                 },
             )
+            }
         }
     }
     }
