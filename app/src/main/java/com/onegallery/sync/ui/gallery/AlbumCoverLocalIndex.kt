@@ -35,6 +35,18 @@ class AlbumCoverLocalIndex(
         byKey.remove(cacheKey)
     }
 
+    /** Capas cuja foto foi excluída. O mapa devolvido serve para desfazer se a exclusão for cancelada. */
+    fun forgetCoverPaths(paths: Set<String>): Map<String, AlbumCoverChoice> {
+        val dropped = choices.forgetPaths(paths)
+        dropped.keys.forEach { byKey.remove(it) }
+        return dropped
+    }
+
+    fun restoreCoverChoices(remembered: Map<String, AlbumCoverChoice>) {
+        choices.restore(remembered)
+        remembered.keys.forEach { byKey.remove(it) }
+    }
+
     fun stickyCoverItem(
         cacheKey: String,
         items: List<GalleryDisplayItem>,

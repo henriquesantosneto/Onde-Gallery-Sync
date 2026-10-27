@@ -61,6 +61,35 @@ class AlbumCoverChoiceTest {
     }
 
     @Test
+    fun deletedCover_isReplacedImmediatelyInsideTheHoldInterval() {
+        val store = AlbumCoverChoiceStore()
+        val items = listOf(photo("cover", 5L), photo("older", 1L))
+        assertEquals("cover", store.choose("album:Camera", items, 10_000L, paintable)?.canonicalPath)
+        val dropped = store.forgetPaths(setOf("cover"))
+        assertEquals("cover", dropped["album:Camera"]?.canonicalPath)
+        assertNull(store.remembered("album:Camera"))
+        val replaced = store.choose(
+            "album:Camera",
+            listOf(photo("older", 1L)),
+            nowEpochMs = 10_500L,
+            isPaintable = paintable,
+        )
+        assertEquals("older", replaced?.canonicalPath)
+        store.restore(dropped)
+        assertEquals("cover", store.remembered("album:Camera")?.canonicalPath)
+    }
+
+    @Test
+    fun forgetPaths_leavesAlbumsWhoseCoverWasNotDeleted() {
+        val store = AlbumCoverChoiceStore()
+        store.choose("album:Camera", listOf(photo("cover", 5L)), 10_000L, paintable)
+        store.choose("album:WhatsApp", listOf(photo("chat", 2L)), 10_000L, paintable)
+        val dropped = store.forgetPaths(setOf("cover"))
+        assertEquals(setOf("album:Camera"), dropped.keys)
+        assertEquals("chat", store.remembered("album:WhatsApp")?.canonicalPath)
+    }
+
+    @Test
     fun store_remembersChoiceAcrossReload() {
         val dir = File.createTempFile("covers", ".dir")
         dir.delete()

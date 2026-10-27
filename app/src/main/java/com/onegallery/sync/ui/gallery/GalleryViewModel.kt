@@ -203,6 +203,8 @@ class GalleryViewModel(
 
     /** Oculta itens na grade assim que o usuário exclui (antes do índice Room/debounce). */
     private val optimisticRemovedPaths = MutableStateFlow<Set<String>>(emptySet())
+    /** Capas esquecidas na exclusão, para voltar se o Android cancelar o apagamento. */
+    private val coversDroppedByDelete = LinkedHashMap<String, AlbumCoverChoice>()
 
     private data class DeferredAlbumLists(
         val albums: List<MediaAlbum> = emptyList(),
@@ -1489,8 +1491,14 @@ class GalleryViewModel(
 
     /** Capa ao rolar a grade: foto ou vídeo com miniatura local mais recente (sem rede). */
     suspend fun liveAlbumCoverFor(album: MediaAlbum): LiveAlbumCover {
-        val items = itemsForAlbumCover(album)
+        val removed = optimisticRemovedPaths.value
+        val items = itemsForAlbumCover(album).let { pool ->
+            if (removed.isEmpty()) pool else pool.filter { it.canonicalPath !in removed }
+        }
         if (items.isEmpty()) {
+            if (removed.isNotEmpty()) {
+                return LiveAlbumCover(displayModel = null, sourceItem = null)
+            }
             return LiveAlbumCover(displayModel = album.coverModel, sourceItem = null)
         }
         val item = albumCoverLocalIndex.stickyCoverItem(
@@ -1498,7 +1506,8 @@ class GalleryViewModel(
             items,
             mediaCacheRepository,
         )
-        val model = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) } ?: album.coverModel
+        val resolved = item?.let { resolveGalleryCoverModel(it, mediaCacheRepository) }
+        val model = resolved ?: if (removed.isEmpty()) album.coverModel else null
         val primaryPath = item?.canonicalPath
         val alternates = items.asSequence()
             .filter { it.canonicalPath != primaryPath && it.hasCheapAlbumCoverSource(mediaCacheRepository) }
@@ -1857,6 +1866,8 @@ class GalleryViewModel(
         viewModelScope.launch {
             syncCoordinator.deleteItemsImmediately(paths, PendingDeleteTarget.BOTH)
                 .onSuccess { count ->
+                    val deleted = paths.toSet()
+                    coversDroppedByDelete.entries.removeAll { it.value.canonicalPath in deleted }
                     if (onSingleRemoved != null) {
                         toast("Item excluído.")
                     } else {
@@ -1883,6 +1894,14 @@ class GalleryViewModel(
         displayBuildCache.invalidatePaths(removed)
         val bundle = catalogSession.removeCanonicalPaths(removed, sortOrder.value)
         if (bundle != null) {
+            latestCatalogItems = bundle.catalogItems
+            latestLibraryItems = bundle.visibleItems
+        } else {
+            latestCatalogItems = latestCatalogItems.filter { it.canonicalPath !in removed }
+            latestLibraryItems = latestLibraryItems.filter { it.canonicalPath !in removed }
+        }
+        replaceAlbumCoversAfterDeletion(removed)
+        if (bundle != null) {
             val snapshot = bundle.toLibrarySnapshot()
             galleryBootstrap.value = snapshot
             persistProcessCatalog(bundle)
@@ -1901,7 +1920,28 @@ class GalleryViewModel(
     private fun revertImmediateGalleryRemoval(paths: List<String>) {
         val removed = paths.toSet()
         optimisticRemovedPaths.update { it - removed }
+        restoreAlbumCoversAfterCancelledDeletion(removed)
         syncCoordinator.notifyGalleryDisplayRefresh()
+    }
+
+    /** Se a mídia excluída era a capa, escolhe outra na hora e manda a grade pintar de novo. */
+    private fun replaceAlbumCoversAfterDeletion(removed: Set<String>) {
+        val dropped = albumCoverLocalIndex.forgetCoverPaths(removed)
+        if (dropped.isEmpty()) return
+        coversDroppedByDelete.putAll(dropped)
+        AlbumCoverBitmapCache.drop(dropped.keys)
+        albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
+        syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(dropped.keys)
+    }
+
+    private fun restoreAlbumCoversAfterCancelledDeletion(removed: Set<String>) {
+        val restore = coversDroppedByDelete.filterValues { it.canonicalPath in removed }
+        if (restore.isEmpty()) return
+        restore.keys.forEach { coversDroppedByDelete.remove(it) }
+        albumCoverLocalIndex.restoreCoverChoices(restore)
+        AlbumCoverBitmapCache.drop(restore.keys)
+        albumCoverLocalIndex.saveChoicesIfDirty(albumCoverChoiceFile)
+        syncCoordinator.bumpAlbumCoverRevisionsForBucketIds(restore.keys)
     }
 
     fun releaseLocalSpaceSelected() {

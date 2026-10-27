@@ -78,6 +78,28 @@ class AlbumCoverChoiceStore {
 
     fun remembered(bucketId: String): AlbumCoverChoice? = choices[bucketId]
 
+    /**
+     * A foto da capa saiu da biblioteca. Esquece só esses álbuns para a próxima
+     * escolha pegar outra mídia na hora, sem esperar o intervalo de troca.
+     */
+    fun forgetPaths(paths: Set<String>): Map<String, AlbumCoverChoice> {
+        if (paths.isEmpty()) return emptyMap()
+        val dropped = LinkedHashMap<String, AlbumCoverChoice>()
+        for ((bucket, choice) in choices) {
+            if (choice.canonicalPath in paths) dropped[bucket] = choice
+        }
+        if (dropped.isEmpty()) return emptyMap()
+        dropped.keys.forEach { choices.remove(it) }
+        dirty.set(true)
+        return dropped
+    }
+
+    fun restore(remembered: Map<String, AlbumCoverChoice>) {
+        if (remembered.isEmpty()) return
+        remembered.forEach { (bucket, choice) -> choices[bucket] = choice }
+        dirty.set(true)
+    }
+
     fun choose(
         bucketId: String,
         items: List<GalleryDisplayItem>,

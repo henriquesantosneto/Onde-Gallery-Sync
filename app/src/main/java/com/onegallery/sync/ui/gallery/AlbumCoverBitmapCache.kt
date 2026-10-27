@@ -76,6 +76,13 @@ internal object AlbumCoverBitmapCache {
         }
     }
 
+    fun drop(bucketIds: Collection<String>) {
+        if (bucketIds.isEmpty()) return
+        synchronized(lock) {
+            bucketIds.forEach { entries.remove(it) }
+        }
+    }
+
     fun clearForTest() {
         synchronized(lock) { entries.clear() }
         maxBitmapBytes = DEFAULT_BITMAP_BYTES
