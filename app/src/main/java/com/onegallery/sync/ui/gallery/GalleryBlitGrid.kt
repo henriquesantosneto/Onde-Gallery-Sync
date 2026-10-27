@@ -96,15 +96,14 @@ internal fun blitThumbCoversTarget(bitmapEdge: Int, targetPx: Int): Boolean =
     bitmapEdge >= targetPx - 32
 
 private const val BLIT_SESSION_PROTECT_SLOTS = 6
-private const val BLIT_PREFETCH_WAVE = 48
+private const val BLIT_PREFETCH_WAVE = 96
 
 /**
- * Ordem de pré-carga: o que está na tela, depois o mais perto, dos dois lados.
+ * Ordem de pré-carga: o que está na tela, depois as páginas abaixo, e só então o que ficou para cima.
  * [startStep] continua de onde a leva anterior parou.
  */
 internal fun blitPrefetchScan(
     slotCount: Int,
-    anchor: Int,
     visibleFrom: Int,
     visibleTo: Int,
     startStep: Int,
@@ -115,7 +114,6 @@ internal fun blitPrefetchScan(
     }
     val from = visibleFrom.coerceIn(0, slotCount - 1)
     val to = visibleTo.coerceIn(from, slotCount - 1)
-    val safeAnchor = anchor.coerceIn(0, slotCount - 1)
     val indexes = ArrayList<Int>(maxIndexes)
     var seen = 0
     val skip = startStep.coerceAtLeast(0)
@@ -127,17 +125,15 @@ internal fun blitPrefetchScan(
     for (index in from..to) {
         if (offer(index)) return BlitPrefetchScan(indexes, seen, true)
     }
-    var distance = 0
-    while (distance < slotCount) {
-        val left = safeAnchor - distance
-        val right = safeAnchor + distance
-        if (left >= 0 && left !in from..to && offer(left)) {
-            return BlitPrefetchScan(indexes, seen, true)
-        }
-        if (right != left && right < slotCount && right !in from..to && offer(right)) {
-            return BlitPrefetchScan(indexes, seen, true)
-        }
-        distance++
+    var below = to + 1
+    while (below < slotCount) {
+        if (offer(below)) return BlitPrefetchScan(indexes, seen, true)
+        below++
+    }
+    var above = from - 1
+    while (above >= 0) {
+        if (offer(above)) return BlitPrefetchScan(indexes, seen, true)
+        above--
     }
     return BlitPrefetchScan(indexes, seen, false)
 }
@@ -254,6 +250,7 @@ internal class GalleryBlitGridView(
     private var selectedPaths: Set<String> = emptySet()
     private var scrollActive: Boolean = false
     private var prefetchStep: Int = 0
+    private var loadMoreArmedForCount: Int = -1
     private val coast = BlitCoast()
     private var selecting: Boolean = false
     private var lastDragPath: String? = null
@@ -388,6 +385,7 @@ internal class GalleryBlitGridView(
         invalidate()
         scheduleDecode()
         scheduleBadgeResolve()
+        maybeLoadMore()
         if (!scrollActive && !pinchActive) trimSession()
     }
 
@@ -494,6 +492,7 @@ internal class GalleryBlitGridView(
         updateFirstIndex()
         scheduleDecode()
         scheduleBadgeResolve()
+        maybeLoadMore()
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -744,9 +743,7 @@ internal class GalleryBlitGridView(
         if (scrollActive) return
         scrollActive = true
         prefetchStep = 0
-        decodeGeneration++
         badgeGeneration++
-        decodeHandler.removeCallbacksAndMessages(null)
         badgeHandler.removeCallbacksAndMessages(null)
         GalleryGridScrollGate.isUserScrollingGrid = true
     }
@@ -781,11 +778,13 @@ internal class GalleryBlitGridView(
     }
 
     private fun maybeLoadMore() {
-        if (scrollActive || slots.isEmpty()) return
+        if (scrollActive || pinchActive || slots.isEmpty()) return
+        val count = slots.size
+        if (count == loadMoreArmedForCount) return
         val last = blitFirstVisibleIndex(slots, contentOffset + height)
-        if (last >= slots.lastIndex - GalleryGridPagination.loadMoreVisibleTailMargin) {
-            onNearEnd()
-        }
+        if (!GalleryGridPagination.needsAnotherPage(count, last)) return
+        loadMoreArmedForCount = count
+        onNearEnd()
     }
 
     private fun hit(x: Float, y: Float): String? {
@@ -934,7 +933,6 @@ internal class GalleryBlitGridView(
         var last = first
         val bottom = contentOffset + height
         while (last < slots.lastIndex && slots[last + 1].top < bottom) last++
-        val anchor = (first + last) / 2
         var more = false
         var scans = 0
         while (jobs.size < BLIT_PREFETCH_WAVE && scans < 8) {
@@ -942,7 +940,6 @@ internal class GalleryBlitGridView(
             val startedAt = prefetchStep
             val scan = blitPrefetchScan(
                 slotCount = slots.size,
-                anchor = anchor,
                 visibleFrom = first,
                 visibleTo = last,
                 startStep = startedAt,
@@ -962,7 +959,7 @@ internal class GalleryBlitGridView(
                     budgetStop = true
                     break
                 }
-                offerSlot(index, target, jobs)
+                offerSlot(index, target, jobs, visible)
                 consumed++
                 if (jobs.size >= BLIT_PREFETCH_WAVE) break
             }
@@ -977,7 +974,7 @@ internal class GalleryBlitGridView(
         val continueAfter = more
         decodeHandler.post {
             for (job in jobs) {
-                if (released || generation != decodeGeneration || GalleryGridScrollGate.isUserScrollingGrid) {
+                if (released || generation != decodeGeneration) {
                     return@post
                 }
                 val bitmap = decodeJob(job)
@@ -1008,7 +1005,7 @@ internal class GalleryBlitGridView(
         }
     }
 
-    private fun offerSlot(index: Int, target: Int, jobs: ArrayList<DecodeJob>) {
+    private fun offerSlot(index: Int, target: Int, jobs: ArrayList<DecodeJob>, visible: Boolean) {
         val slot = slots.getOrNull(index) ?: return
         val item = (entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo)?.item ?: return
         if (jobs.any { it.path == item.canonicalPath }) return
@@ -1018,7 +1015,7 @@ internal class GalleryBlitGridView(
         ) {
             return
         }
-        val source = blitDecodeSource(item) ?: return
+        val source = (if (visible) blitDecodeSource(item) else blitAheadDecodeSource(item)) ?: return
         val fallback = if (source.second != null) {
             (gridPaintModel(item, mediaCache) as? DiskThumb)?.file?.takeIf { it.isFile }
         } else {
@@ -1111,6 +1108,16 @@ internal class GalleryBlitGridView(
         setWillNotDraw(false)
         isClickable = true
         gestures.setIsLongpressEnabled(false)
+    }
+
+    /**
+     * Página ainda fora da tela: a miniatura já gravada, que decodifica rápido.
+     * A célula visível continua no arquivo local, em [blitDecodeSource].
+     */
+    private fun blitAheadDecodeSource(item: GalleryDisplayItem): Pair<File?, Uri?>? {
+        val thumb = (gridPaintModel(item, mediaCache) as? DiskThumb)?.file?.takeIf { it.isFile }
+        if (thumb != null) return thumb to null
+        return blitDecodeSource(item)
     }
 
     /** Foto local entra pelo arquivo do aparelho. Vídeo e nuvem ficam na miniatura já gravada. */

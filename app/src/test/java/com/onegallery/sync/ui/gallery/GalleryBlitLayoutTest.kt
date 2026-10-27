@@ -129,34 +129,48 @@ class GalleryBlitLayoutTest {
     fun prefetchWalksOutFromTheVisibleWindow() {
         val first = blitPrefetchScan(
             slotCount = 10,
-            anchor = 4,
             visibleFrom = 3,
             visibleTo = 5,
             startStep = 0,
             maxIndexes = 4,
         )
-        assertEquals(listOf(3, 4, 5, 2), first.indexes)
+        assertEquals(listOf(3, 4, 5, 6), first.indexes)
         assertEquals(4, first.nextStep)
         assertTrue(first.more)
         val second = blitPrefetchScan(
             slotCount = 10,
-            anchor = 4,
             visibleFrom = 3,
             visibleTo = 5,
             startStep = first.nextStep,
             maxIndexes = 4,
         )
-        assertEquals(listOf(6, 1, 7, 0), second.indexes)
+        assertEquals(listOf(7, 8, 9, 2), second.indexes)
         assertTrue(second.more)
         val rest = blitPrefetchScan(
             slotCount = 10,
-            anchor = 4,
             visibleFrom = 3,
             visibleTo = 5,
             startStep = second.nextStep,
             maxIndexes = 8,
         )
-        assertEquals(listOf(8, 9), rest.indexes)
+        assertEquals(listOf(1, 0), rest.indexes)
         assertFalse(rest.more)
+    }
+
+    @Test
+    fun anotherPageIsRequestedWhileThereIsStillABufferBelowTheScreen() {
+        assertFalse(GalleryGridPagination.needsAnotherPage(slotCount = 0, lastVisibleIndex = 0))
+        assertFalse(
+            GalleryGridPagination.needsAnotherPage(
+                slotCount = GalleryGridPagination.initialLimit,
+                lastVisibleIndex = 20,
+            ),
+        )
+        assertTrue(
+            GalleryGridPagination.needsAnotherPage(
+                slotCount = GalleryGridPagination.initialLimit,
+                lastVisibleIndex = GalleryGridPagination.initialLimit - GalleryGridPagination.preloadTailSlots,
+            ),
+        )
     }
 }

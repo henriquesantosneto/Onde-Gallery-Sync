@@ -1,10 +1,21 @@
 package com.onegallery.sync.ui.gallery
 
-/** Janela inicial da grade (timeline + células) para não montar dezenas de milhares de entradas de uma vez. */
+/**
+ * A grade não monta a biblioteca inteira de uma vez.
+ * A primeira pintura já traz algumas páginas, e a lista parada pede a próxima
+ * enquanto ainda há uma folga abaixo da tela — a rolagem não espera a página nova.
+ */
 object GalleryGridPagination {
-    const val initialLimit: Int = 72
     const val pageSize: Int = 160
+    const val initialPages: Int = 4
+    const val initialLimit: Int = pageSize * initialPages
 
-    /** Quantos itens visíveis antes do fim da janela carregada disparam [GalleryViewModel.loadMoreGridItems]. */
-    const val loadMoreVisibleTailMargin: Int = 24
+    /** Itens já montados abaixo da tela antes de pedir outra página. */
+    const val preloadTailSlots: Int = pageSize * 3
+
+    fun needsAnotherPage(slotCount: Int, lastVisibleIndex: Int): Boolean {
+        if (slotCount <= 0) return false
+        val tail = slotCount - 1 - lastVisibleIndex.coerceAtLeast(0)
+        return tail <= preloadTailSlots
+    }
 }
