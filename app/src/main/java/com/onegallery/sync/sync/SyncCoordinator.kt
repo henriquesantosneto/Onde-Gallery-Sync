@@ -1810,91 +1810,67 @@ class SyncCoordinator(
                         alsoUpdateLastMessage = false,
                     )
 
-                    val cloudOnlyCandidates = remoteByPath.keys.count { it !in knownPaths }
-                    var cloudOnlyProcessed = 0
-                    val cloudOnlyInserts = mutableListOf<SyncMetadataEntity>()
-                    val cloudOnlyUpdates = mutableListOf<SyncMetadataEntity>()
-                    remoteByPath.forEach { (path, remote) ->
-                        ensureSyncMayContinue()
-                        if (path in knownPaths || path in userDeletedPaths) return@forEach
-                        cloudOnlyProcessed++
-                        if (_state.value.isRunning) {
-                            upsertActiveSyncItem(
-                                ActiveSyncItem(
-                                    canonicalPath = path,
-                                    displayName = remote.name,
-                                    operationLabel = "Registrando só na nuvem…",
-                                ),
-                                force = true,
-                            )
-                        }
-                        try {
-                        if (cloudOnlyProcessed == 1 || cloudOnlyProcessed % 128 == 0) {
-                            setSyncProgress(
-                                SyncProgressPhase.REGISTERING_CLOUD_ONLY,
-                                "Registrando fotos/vídeos só na nuvem…",
-                                "$cloudOnlyProcessed / $cloudOnlyCandidates novos no índice · " +
-                                    "$cloudOnly já gravados nesta passagem.",
-                                alsoUpdateLastMessage = false,
-                            )
-                        }
-                        if (path !in existingByPath) {
-                            cloudOnlyInserts.add(
-                                rowWithGps(
-                                    SyncMetadataEntity(
-                                        canonicalPath = path,
-                                        displayName = remote.name,
-                                        albumName = AlbumGroupKeys.fromPaths(canonicalPath = path),
-                                        localMediaId = null,
-                                        localContentUri = null,
-                                        oneDriveItemId = remote.itemId,
-                                        localModifiedAt = null,
-                                        remoteModifiedAt = remote.modifiedAtEpoch,
-                                        remoteQuickXorHash = remote.quickXorHash,
-                                        remoteSizeBytes = remote.sizeBytes,
-                                        cloudState = CloudSyncState.CLOUD_ONLY,
-                                        cachedFilePath = null,
-                                        pendingDeleteTarget = PendingDeleteTarget.NONE,
-                                        lastError = null,
-                                    ),
-                                ),
-                            )
-                            cloudOnly++
-                        } else {
-                            val existing = existingByPath[path]!!
-                            val refreshCloudMeta = existing.localMediaId == null &&
-                                (
-                                    existing.oneDriveItemId == null ||
-                                        existing.cloudState == CloudSyncState.LOCAL_ONLY ||
-                                        existing.cloudState == CloudSyncState.ERROR
-                                    )
-                            val base = if (refreshCloudMeta) {
-                                existing.copy(
-                                    displayName = remote.name,
-                                    oneDriveItemId = remote.itemId,
-                                    remoteModifiedAt = remote.modifiedAtEpoch,
-                                    remoteQuickXorHash = remote.quickXorHash,
-                                    remoteSizeBytes = remote.sizeBytes,
-                                    cloudState = CloudSyncState.CLOUD_ONLY,
-                                    lastError = null,
-                                )
-                            } else {
-                                existing
-                            }
-                            if (refreshCloudMeta || rowNeedsGpsBackfill(base)) {
-                                val filled = rowWithGps(base)
-                                if (refreshCloudMeta || filled.latitude != null) {
-                                    cloudOnlyUpdates.add(filled)
-                                }
-                                if (refreshCloudMeta) cloudOnly++
-                            }
-                        }
-                        } finally {
-                            removeActiveSyncItem(path)
-                        }
+                    val cloudOnlyWork = remoteByPath.entries.filter { (path, _) ->
+                        path !in knownPaths && path !in userDeletedPaths
                     }
-                    (cloudOnlyInserts + cloudOnlyUpdates).chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
-                        upsertMetadataRows(chunk)
+                    val cloudOnlyCandidates = cloudOnlyWork.size
+                    val cloudOnlyProcessed = AtomicInteger(0)
+                    val semaphoreCloudOnly = Semaphore(PARALLEL_CLOUD_ONLY_REGISTER)
+                    if (cloudOnlyCandidates > 0) {
+                        setSyncProgress(
+                            SyncProgressPhase.REGISTERING_CLOUD_ONLY,
+                            "Registrando fotos/vídeos só na nuvem…",
+                            "0 / $cloudOnlyCandidates · até $PARALLEL_CLOUD_ONLY_REGISTER em paralelo.",
+                            alsoUpdateLastMessage = false,
+                        )
+                    }
+                    cloudOnlyWork.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
+                        ensureSyncMayContinue()
+                        val rows = supervisorScope {
+                            chunk.map { (path, remote) ->
+                                async {
+                                    semaphoreCloudOnly.withPermit {
+                                        ensureSyncMayContinue()
+                                        coroutineContext.ensureActive()
+                                        if (_state.value.isRunning) {
+                                            upsertActiveSyncItem(
+                                                ActiveSyncItem(
+                                                    canonicalPath = path,
+                                                    displayName = remote.name,
+                                                    operationLabel = "Registrando só na nuvem…",
+                                                ),
+                                                force = true,
+                                            )
+                                        }
+                                        try {
+                                            val index = cloudOnlyProcessed.incrementAndGet()
+                                            if (index == 1 ||
+                                                index % 32 == 0 ||
+                                                index == cloudOnlyCandidates
+                                            ) {
+                                                setSyncProgress(
+                                                    SyncProgressPhase.REGISTERING_CLOUD_ONLY,
+                                                    "Registrando fotos/vídeos só na nuvem…",
+                                                    "$index / $cloudOnlyCandidates novos no índice · " +
+                                                        "$cloudOnly já gravados nesta passagem · " +
+                                                        "até $PARALLEL_CLOUD_ONLY_REGISTER em paralelo.",
+                                                    alsoUpdateLastMessage = false,
+                                                )
+                                            }
+                                            registerOneCloudOnlyItem(path, remote, existingByPath)
+                                        } finally {
+                                            removeActiveSyncItem(path)
+                                        }
+                                    }
+                                }
+                            }.awaitAll()
+                        }
+                        val toSave = ArrayList<SyncMetadataEntity>(rows.size)
+                        for (outcome in rows) {
+                            outcome.row?.let { toSave.add(it) }
+                            if (outcome.counted) cloudOnly++
+                        }
+                        if (toSave.isNotEmpty()) upsertMetadataRows(toSave)
                     }
 
                     val pendingCount = syncMetadataDao.countPendingOperations()
@@ -3314,6 +3290,71 @@ class SyncCoordinator(
 
     private suspend fun countIndexedMissingThumbnails(): Int =
         galleryThumbnailIndex.countMissing()
+
+    private data class CloudOnlyRegistration(
+        val row: SyncMetadataEntity? = null,
+        val counted: Boolean = false,
+    )
+
+    /** Um arquivo que está no OneDrive e não no aparelho. A leitura de EXIF corre em paralelo. */
+    private suspend fun registerOneCloudOnlyItem(
+        path: String,
+        remote: RemoteDriveFile,
+        existingByPath: Map<String, SyncMetadataEntity>,
+    ): CloudOnlyRegistration {
+        if (path !in existingByPath) {
+            return CloudOnlyRegistration(
+                row = rowWithGps(
+                    SyncMetadataEntity(
+                        canonicalPath = path,
+                        displayName = remote.name,
+                        albumName = AlbumGroupKeys.fromPaths(canonicalPath = path),
+                        localMediaId = null,
+                        localContentUri = null,
+                        oneDriveItemId = remote.itemId,
+                        localModifiedAt = null,
+                        remoteModifiedAt = remote.modifiedAtEpoch,
+                        remoteQuickXorHash = remote.quickXorHash,
+                        remoteSizeBytes = remote.sizeBytes,
+                        cloudState = CloudSyncState.CLOUD_ONLY,
+                        cachedFilePath = null,
+                        pendingDeleteTarget = PendingDeleteTarget.NONE,
+                        lastError = null,
+                    ),
+                ),
+                counted = true,
+            )
+        }
+        val existing = existingByPath.getValue(path)
+        val refreshCloudMeta = existing.localMediaId == null &&
+            (
+                existing.oneDriveItemId == null ||
+                    existing.cloudState == CloudSyncState.LOCAL_ONLY ||
+                    existing.cloudState == CloudSyncState.ERROR
+                )
+        val base = if (refreshCloudMeta) {
+            existing.copy(
+                displayName = remote.name,
+                oneDriveItemId = remote.itemId,
+                remoteModifiedAt = remote.modifiedAtEpoch,
+                remoteQuickXorHash = remote.quickXorHash,
+                remoteSizeBytes = remote.sizeBytes,
+                cloudState = CloudSyncState.CLOUD_ONLY,
+                lastError = null,
+            )
+        } else {
+            existing
+        }
+        if (!refreshCloudMeta && !rowNeedsGpsBackfill(base)) {
+            return CloudOnlyRegistration()
+        }
+        val filled = rowWithGps(base)
+        val keep = refreshCloudMeta || filled.latitude != null
+        return CloudOnlyRegistration(
+            row = if (keep) filled else null,
+            counted = refreshCloudMeta,
+        )
+    }
 
     /** GPS no mesmo item do sync. Não abre uma etapa só de localização depois. */
     private suspend fun rowWithGps(row: SyncMetadataEntity, localFile: File? = null): SyncMetadataEntity {
@@ -5297,6 +5338,8 @@ class SyncCoordinator(
         const val THUMB_FOREGROUND_IDLE_MAX_PER_PASS = 2_000
         const val THUMB_FOREGROUND_IDLE_RETRY_DELAY_MS = 2_500L
         const val PARALLEL_GPS_BACKFILL = 5
+        /** Registro de itens que existem só no OneDrive, com leitura de EXIF em paralelo. */
+        const val PARALLEL_CLOUD_ONLY_REGISTER = 8
         const val ROOM_UPSERT_CHUNK = 64
         const val LOCAL_ACCESS_WRITE_THROTTLE_MS = 60_000L
     }
