@@ -46,6 +46,7 @@ class GalleryThumbnailService(
         localSourcesOnly: Boolean,
         cloudSourcesOnly: Boolean,
         cloudVideoAggressive: Boolean,
+        decodeVideoFrames: Boolean,
     ): Result<File?> {
         val mutex = thumbnailMutexes.getOrPut(canonicalPath) { Mutex() }
         return mutex.withLock {
@@ -58,6 +59,7 @@ class GalleryThumbnailService(
                     localSourcesOnly,
                     cloudSourcesOnly,
                     cloudVideoAggressive,
+                    decodeVideoFrames = decodeVideoFrames,
                 )
             }
         }
@@ -160,6 +162,7 @@ class GalleryThumbnailService(
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
         cloudVideoAggressive: Boolean = false,
+        decodeVideoFrames: Boolean = true,
         retryDespiteGiveUp: Boolean = false,
     ): Result<File?> {
         val row = syncMetadataDao.getByCanonicalPath(canonicalPath) ?: return Result.success(null)
@@ -271,6 +274,7 @@ class GalleryThumbnailService(
                             row.remoteSizeBytes,
                             cloudVideoAggressive || !lightweightPrefetch,
                             onProgress,
+                            extractFrames = decodeVideoFrames,
                         )
                     } else if (fetchCloudImageThumbnail(itemId, staging, row.remoteSizeBytes, onProgress)) {
                         CloudVideoThumbnailLoader.Outcome.GRAPH_POSTER
@@ -297,8 +301,8 @@ class GalleryThumbnailService(
                         uri,
                         staging,
                         localMediaId = row.localMediaId,
-                        mediaStoreOnly = lightweightPrefetch && !isVideo,
-                        quickFrameScan = lightweightPrefetch,
+                        mediaStoreOnly = !decodeVideoFrames,
+                        quickFrameScan = lightweightPrefetch || !decodeVideoFrames,
                     )
                 } else {
                     cacheImageThumbnailFromUri(
@@ -312,7 +316,7 @@ class GalleryThumbnailService(
                 }
             }
 
-            if (isVideo && row.localMediaId != null) {
+            if (isVideo && decodeVideoFrames && row.localMediaId != null) {
                 val item = localIndexPassItems()[row.localMediaId]
                     ?: localMediaRepository.findById(row.localMediaId)
                 if (item != null) {
@@ -329,6 +333,10 @@ class GalleryThumbnailService(
                 }
             }
 
+            if (isVideo && !decodeVideoFrames) {
+                staging.delete()
+                return null
+            }
             row.cachedFilePath?.let { path ->
                 val cached = File(path)
                 if (cached.isFile && cached.length() > 0L) {

@@ -38,6 +38,7 @@ import com.onegallery.sync.data.onedrive.RemoteDriveFile
 import com.onegallery.sync.data.onedrive.LocalMirrorRepository
 import com.onegallery.sync.data.onedrive.SaOneDriveRepository
 import com.onegallery.sync.R
+import com.onegallery.sync.debug.SyncProcessMarker
 import com.onegallery.sync.worker.BackgroundSyncScheduler
 import com.onegallery.sync.worker.ScheduledThumbnailContinuation
 import com.onegallery.sync.worker.ThumbnailContinuationPolicy
@@ -200,6 +201,16 @@ class SyncCoordinator(
     fun localMirrorPathLabel(): String = localMirrorRepository.rootPathLabel()
     private val _state = MutableStateFlow(SyncUiState())
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
+
+    init {
+        backgroundScope?.launch {
+            _state.collect { ui ->
+                if (!ui.isRunning && ui.activityHeadline.isBlank()) {
+                    SyncProcessMarker.clear(appContext.filesDir)
+                }
+            }
+        }
+    }
 
     private val syncCancelRequested = AtomicBoolean(false)
     private val syncCancelReason = AtomicReference(SyncCancelReason.NONE)
@@ -375,6 +386,12 @@ class SyncCoordinator(
             } else {
                 _state.value.lastMessage
             },
+        )
+        val step = if (detail.isBlank()) headline else "$headline — $detail"
+        SyncProcessMarker.note(
+            filesDir = appContext.filesDir,
+            foreground = appForegroundState.isInForeground(),
+            step = step,
         )
     }
 
@@ -5048,6 +5065,7 @@ class SyncCoordinator(
             localSourcesOnly = localSourcesOnly,
             cloudSourcesOnly = cloudSourcesOnly,
             cloudVideoAggressive = cloudVideoAggressive,
+            decodeVideoFrames = false,
         )
 
         override fun rowHasGalleryThumbnail(row: SyncMetadataEntity): Boolean =

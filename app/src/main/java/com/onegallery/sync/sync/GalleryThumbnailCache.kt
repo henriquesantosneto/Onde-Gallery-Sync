@@ -12,5 +12,7 @@ interface GalleryThumbnailCache {
         localSourcesOnly: Boolean = false,
         cloudSourcesOnly: Boolean = false,
         cloudVideoAggressive: Boolean = false,
+        /** Fila de sync: não abre o decodificador nativo de vídeo, que fecha o processo sem erro. */
+        decodeVideoFrames: Boolean = true,
     ): Result<File?>
 }

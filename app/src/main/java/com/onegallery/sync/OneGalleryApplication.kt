@@ -117,6 +117,11 @@ class OneGalleryApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         com.onegallery.sync.debug.DebugCrashLog.install(this)
+        com.onegallery.sync.debug.SyncProcessMarker.promoteUncleanExit(
+            filesDir = filesDir,
+            versionName = BuildConfig.VERSION_NAME,
+            versionCode = BuildConfig.VERSION_CODE,
+        )
         MapLibre.getInstance(this)
         Coil.setImageLoader(
             ImageLoader.Builder(this)

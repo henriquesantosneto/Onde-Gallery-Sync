@@ -21,6 +21,8 @@ object CloudVideoThumbnailLoader {
         remoteSizeBytes: Long?,
         aggressive: Boolean,
         onProgress: ((bytesCompleted: Long, totalBytes: Long?) -> Unit)?,
+        /** Sync em massa não extrai quadro de MP4 parcial: isso fecha o processo sem exceção. */
+        extractFrames: Boolean = true,
     ): Outcome {
         staging.delete()
         fun acceptCloudImageThumb(): Boolean {
@@ -59,6 +61,10 @@ object CloudVideoThumbnailLoader {
             if (!graphPoster) staging.delete()
         }
         if (graphPoster) return Outcome.GRAPH_POSTER
+        if (!extractFrames) {
+            staging.delete()
+            return Outcome.NONE
+        }
 
         val remoteSize = remoteSizeBytes?.takeIf { it > 0L }
             ?: repository.fetchItemSizeBytes(itemId)
