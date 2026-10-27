@@ -3,6 +3,10 @@ package com.onegallery.sync.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -28,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.onegallery.sync.ui.gallery.GalleryGridScrollGate
 import com.onegallery.sync.ui.gallery.routeKeepsSyncQuiet
@@ -85,12 +90,6 @@ private fun isAlbumBrowseRoute(route: String?): Boolean =
     route?.startsWith("albums/browse/") == true
 /** Detalhe de sync (antes era aba própria). */
 private const val SYNC_STATUS_ROUTE = "settings/sync"
-private const val MEDIA_DETAIL_ROUTE = "media/{encodedPath}"
-
-private fun NavHostController.openMediaDetail(encoded: String) {
-    navigate("media/$encoded")
-}
-
 private fun albumsTabSelected(route: String?): Boolean =
     route == MainTab.Albums.route || isAlbumBrowseRoute(route)
 
@@ -310,6 +309,12 @@ fun OneGalleryApp(
     }
 
     val navController = rememberNavController()
+    var openMediaPath by rememberSaveable { mutableStateOf<String?>(null) }
+    fun openMedia(encoded: String) {
+        openMediaPath = runCatching {
+            URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+        }.getOrDefault(encoded)
+    }
     val galleryViewModel: GalleryViewModel = viewModel(
         factory = GalleryViewModelFactory(
             localMediaRepository,
@@ -335,8 +340,10 @@ fun OneGalleryApp(
         onDispose { GalleryGridScrollGate.galleryInUse = false }
     }
 
-    OneGalleryEdgeToEdgeEffect(currentRoute = currentRoute)
+    val chromeRoute = if (openMediaPath != null) "media/viewer" else currentRoute
+    OneGalleryEdgeToEdgeEffect(currentRoute = chromeRoute)
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = ZeroScaffoldContentInsets,
@@ -406,9 +413,7 @@ fun OneGalleryApp(
                     syncCoordinator = syncCoordinator,
                     mediaCacheRepository = mediaCacheRepository,
                     galleryPreferences = galleryPreferences,
-                    onOpenItem = { encoded ->
-                        navController.openMediaDetail(encoded)
-                    },
+                    onOpenItem = { encoded -> openMedia(encoded) },
                     onExitAlbumFilter = {
                         navController.navigate(MainTab.Albums.route) {
                             popUpTo(MainTab.Gallery.route) { saveState = true }
@@ -450,9 +455,7 @@ fun OneGalleryApp(
                     syncCoordinator = syncCoordinator,
                     syncTasks = syncTasks,
                     onBack = { navController.popBackStack() },
-                    onOpenItem = { encoded ->
-                        navController.openMediaDetail(encoded)
-                    },
+                    onOpenItem = { encoded -> openMedia(encoded) },
                 )
             }
             composable(
@@ -472,9 +475,7 @@ fun OneGalleryApp(
                     galleryPreferences = galleryPreferences,
                     requiresActiveBrowseFilter = true,
                     routeAlbumFolderKey = folderKey.takeIf { it.isNotBlank() },
-                    onOpenItem = { encoded ->
-                        navController.openMediaDetail(encoded)
-                    },
+                    onOpenItem = { encoded -> openMedia(encoded) },
                     onExitAlbumFilter = {
                         galleryViewModel.clearBrowseFilters()
                         navController.popBackStack(MainTab.Albums.route, inclusive = false)
@@ -504,9 +505,7 @@ fun OneGalleryApp(
                     requiresActiveBrowseFilter = true,
                     routePlaceMatchKey = placeKey.takeIf { it.isNotBlank() },
                     routePlaceTitle = placeTitle.takeIf { it.isNotBlank() },
-                    onOpenItem = { encoded ->
-                        navController.openMediaDetail(encoded)
-                    },
+                    onOpenItem = { encoded -> openMedia(encoded) },
                     onExitAlbumFilter = {
                         galleryViewModel.clearBrowseFilters()
                         navController.popBackStack(MainTab.Albums.route, inclusive = false)
@@ -538,31 +537,40 @@ fun OneGalleryApp(
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
-            composable(
-                route = MEDIA_DETAIL_ROUTE,
-                arguments = listOf(navArgument("encodedPath") { type = NavType.StringType }),
-            ) { entry ->
-                val encoded = entry.arguments?.getString("encodedPath").orEmpty()
-                val path = URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
-                MediaDetailScreen(
-                    initialCanonicalPath = path,
-                    viewModel = galleryViewModel,
-                    syncCoordinator = syncCoordinator,
-                    mediaCacheRepository = mediaCacheRepository,
-                    onBack = { navController.popBackStack() },
-                    onOpenPlacesMap = { lat, lng ->
-                        galleryViewModel.requestPlacesMapFocus(lat, lng)
-                        navController.navigate(PLACES_MAP_ROUTE)
-                    },
-                )
-            }
         }
+    }
+    val viewerPath = openMediaPath
+    if (viewerPath != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
+        ) {
+            MediaDetailScreen(
+                initialCanonicalPath = viewerPath,
+                viewModel = galleryViewModel,
+                syncCoordinator = syncCoordinator,
+                mediaCacheRepository = mediaCacheRepository,
+                onBack = { openMediaPath = null },
+                onOpenPlacesMap = { lat, lng ->
+                    openMediaPath = null
+                    galleryViewModel.requestPlacesMapFocus(lat, lng)
+                    navController.navigate(PLACES_MAP_ROUTE)
+                },
+            )
+        }
+    }
     }
 
     // Na foto, o MediaDetailScreen trata voltar (seleção/detalhes/sair). Aqui só grade e álbuns.
     val galleryUi by galleryViewModel.state.collectAsStateWithLifecycle()
     val photoSelectionMode by galleryViewModel.photoSelectionMode.collectAsStateWithLifecycle()
-    val onMediaDetail = currentRoute?.startsWith("media/") == true
+    val onMediaDetail = openMediaPath != null
     val interceptBackForSelection = !onMediaDetail &&
         (photoSelectionMode || galleryUi.albumSelectionMode)
     BackHandler(enabled = interceptBackForSelection) {
