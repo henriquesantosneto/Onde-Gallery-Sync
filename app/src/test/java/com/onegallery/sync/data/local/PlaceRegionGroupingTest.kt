@@ -18,9 +18,9 @@ class PlaceRegionGroupingTest {
 
     @Test
     fun citiesInTheSameStateShareOneAlbum() {
-        val campinas = photo("campinas.jpg", "Cambuí, Campinas, São Paulo, Brasil", -22.90, -47.06)
-        val santos = photo("santos.jpg", "Gonzaga, Santos, São Paulo, Brasil", -23.96, -46.33)
-        val rio = photo("rio.jpg", "Copacabana, Rio de Janeiro, Rio de Janeiro, Brasil", -22.97, -43.18)
+        val campinas = photo("campinas.jpg", "Cambuí, Campinas, São Paulo, Brasil", -22.90, -47.06, 11L)
+        val santos = photo("santos.jpg", "Gonzaga, Santos, São Paulo, Brasil", -23.96, -46.33, 12L)
+        val rio = photo("rio.jpg", "Copacabana, Rio de Janeiro, Rio de Janeiro, Brasil", -22.97, -43.18, 13L)
 
         val groups = groupDisplayItemsForPlaceAlbums(listOf(campinas, santos, rio))
 
@@ -37,9 +37,9 @@ class PlaceRegionGroupingTest {
 
     @Test
     fun countryOnlyStaysOneAlbumAndGpsWithoutAddressKeepsACell() {
-        val franceA = photo("a.jpg", "França", 48.85, 2.35)
-        val franceB = photo("b.jpg", "França", 43.70, 7.26)
-        val unlabeled = photo("c.jpg", "48.1° N", 48.1, 2.3)
+        val franceA = photo("a.jpg", "França", 48.85, 2.35, 21L)
+        val franceB = photo("b.jpg", "França", 43.70, 7.26, 22L)
+        val unlabeled = photo("c.jpg", "48.1° N", 48.1, 2.3, 23L)
 
         assertEquals(placeAlbumBucketEncodedKey(franceA), placeAlbumBucketEncodedKey(franceB))
         val franceKey = PlaceComponents.fromGeocoderLabel("França")!!.preferredBrowseKey("França")
@@ -63,13 +63,14 @@ class PlaceRegionGroupingTest {
         label: String,
         lat: Double,
         lon: Double,
+        mediaId: Long,
     ) = GalleryDisplayItem(
         canonicalPath = path,
         displayName = path,
         albumName = "Camera",
         kind = MediaKind.IMAGE,
         cloudState = CloudSyncState.SYNCED,
-        localMediaId = 1L,
+        localMediaId = mediaId,
         oneDriveItemId = null,
         pendingDeleteTarget = PendingDeleteTarget.NONE,
         localUri = null,
