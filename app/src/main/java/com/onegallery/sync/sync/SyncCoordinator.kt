@@ -1865,13 +1865,18 @@ class SyncCoordinator(
                             if (uploadStillPending > 0) {
                                 append(" · $uploadStillPending ainda aguardando (próximo sync ou rede)")
                             }
-                            append(" · registrando itens só na nuvem…")
                         },
                         alsoUpdateLastMessage = false,
                     )
 
-                    val cloudOnlyWork = remoteByPath.entries.filter { (path, _) ->
-                        path !in knownPaths && path !in userDeletedPaths
+                    val cloudOnlyWork = remoteByPath.entries.filter { (path, remote) ->
+                        shouldRegisterCloudOnlyItem(
+                            path = path,
+                            remote = remote,
+                            existing = existingByPath[path],
+                            onDevicePaths = knownPaths,
+                            userDeletedPaths = userDeletedPaths,
+                        )
                     }
                     val cloudOnlyCandidates = cloudOnlyWork.size
                     val cloudOnlyProcessed = AtomicInteger(0)
