@@ -6,7 +6,6 @@ import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.onegallery.sync.OneGalleryApplication
 import com.onegallery.sync.R
-import com.onegallery.sync.sync.SyncForegroundNotifications
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 
@@ -26,27 +25,20 @@ class SyncWorker(
         }
         val userInitiated = inputData.getBoolean(KEY_USER_INITIATED, false)
         if (!userInitiated && app.syncCoordinator.syncWorkProtected()) {
-            // setForeground aqui usaria o mesmo id da notificação e, ao sair, apagaria o sync.
             return Result.success()
         }
         app.syncCoordinator.setWorkerForegroundSession(true)
         app.syncCoordinator.noteWorkerForegroundJob(coroutineContext[Job])
+        app.syncCoordinator.holdForegroundIfBackgrounded(
+            applicationContext.getString(R.string.sync_notification_message),
+        )
         return try {
-            runCatching {
-                setForeground(
-                    SyncForegroundNotifications.foregroundInfo(
-                        applicationContext,
-                        applicationContext.getString(R.string.sync_notification_message),
-                    ),
-                )
-            }.onFailure { error ->
-                android.util.Log.e("SyncWorker", "setForeground failed; sync may stop if minimized", error)
-            }
             doWorkBody(app, userInitiated)
         } catch (cancelled: CancellationException) {
             Result.success()
         } finally {
             app.syncCoordinator.setWorkerForegroundSession(false)
+            app.syncCoordinator.releaseForegroundIfIdle()
         }
     }
 
@@ -117,18 +109,11 @@ class SyncWorker(
             )
             return Result.success()
         }
+        app.syncCoordinator.setWorkerForegroundSession(true)
+        app.syncCoordinator.holdForegroundIfBackgrounded(
+            applicationContext.getString(R.string.sync_notification_thumbnails_message),
+        )
         return try {
-            runCatching {
-                setForeground(
-                    SyncForegroundNotifications.foregroundInfo(
-                        applicationContext,
-                        applicationContext.getString(R.string.sync_notification_thumbnails_message),
-                        SyncForegroundNotifications.THUMBNAIL_NOTIFICATION_ID,
-                    ),
-                )
-            }.onFailure { error ->
-                android.util.Log.e("SyncWorker", "setForeground failed; thumbnails may stop if minimized", error)
-            }
             continuePendingThumbnails(app, runningSlot = slot)
         } catch (cancelled: CancellationException) {
             if (app.syncCoordinator.shouldPersistThumbnailContinuation()) {
@@ -140,6 +125,9 @@ class SyncWorker(
                 )
             }
             Result.success()
+        } finally {
+            app.syncCoordinator.setWorkerForegroundSession(false)
+            app.syncCoordinator.releaseForegroundIfIdle()
         }
     }
 

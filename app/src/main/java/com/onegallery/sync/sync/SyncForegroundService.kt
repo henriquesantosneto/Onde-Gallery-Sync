@@ -160,6 +160,18 @@ class SyncForegroundService : Service() {
 }
 
 /**
+ * O WorkManager promove com [androidx.work.CoroutineWorker.setForeground], e o serviço dele
+ * só chama startForeground num post da thread principal. Se a galeria está rolando ou o
+ * onStop está gravando o catálogo, o Android mata o processo
+ * (ForegroundServiceDidNotStartInTimeException). Com a tela visível o processo já vive;
+ * em segundo plano o [SyncForegroundService] promove dentro do onStartCommand.
+ */
+internal fun shouldStartForegroundKeepAlive(
+    appInForeground: Boolean,
+    alreadyTracked: Boolean,
+): Boolean = !appInForeground && !alreadyTracked
+
+/**
  * A geração nova (um enter que chegou depois) mantém o serviço.
  * Stop antigo, ou start que já foi cancelado antes do primeiro plano, encerra só depois do promote.
  */

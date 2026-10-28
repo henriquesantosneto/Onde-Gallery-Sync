@@ -57,6 +57,28 @@ class SyncForegroundStartTest {
     }
 
     @Test
+    fun keepAlive_skipsWhileTheGalleryIsOpenOrAlreadyHeld() {
+        assertFalse(
+            shouldStartForegroundKeepAlive(
+                appInForeground = true,
+                alreadyTracked = false,
+            ),
+        )
+        assertFalse(
+            shouldStartForegroundKeepAlive(
+                appInForeground = false,
+                alreadyTracked = true,
+            ),
+        )
+        assertTrue(
+            shouldStartForegroundKeepAlive(
+                appInForeground = false,
+                alreadyTracked = false,
+            ),
+        )
+    }
+
+    @Test
     fun currentStop_shutsDown() {
         assertTrue(
             shouldShutdownForegroundService(

@@ -801,6 +801,8 @@ class SyncCoordinator(
         }
     }
 
+    private val uiBackgroundKeepAlive = AtomicBoolean(false)
+
     /** WorkManager já promoveu [androidx.work.CoroutineWorker.setForeground] — evita 2º serviço (falha em background). */
     fun setWorkerForegroundSession(active: Boolean) {
         workerForegroundSession.set(active)
@@ -818,19 +820,50 @@ class SyncCoordinator(
             workerForegroundSession.get() ||
             foregroundGuard.holdsForeground()
 
-    private suspend inline fun <T> withSyncForeground(crossinline block: suspend () -> T): T {
-        val onSyncWorker = workerForegroundSession.get() &&
-            coroutineContext[Job] != null &&
-            coroutineContext[Job] == foregroundWorkerJob.get()
-        if (onSyncWorker) {
-            return block()
+    /**
+     * Segura o processo ao sair da tela ou quando o worker acorda em segundo plano.
+     * Não usa o SystemForegroundService do WorkManager: ele adia startForeground e o
+     * sistema fecha o app se a thread principal estiver ocupada.
+     */
+    fun holdForegroundIfBackgrounded(message: String? = null) {
+        val busy = _state.value.isRunning ||
+            workerForegroundSession.get() ||
+            backgroundThumbPrefetchJob?.isActive == true
+        if (!busy) return
+        if (!shouldStartForegroundKeepAlive(
+                appInForeground = appForegroundState.isInForeground(),
+                alreadyTracked = uiBackgroundKeepAlive.get(),
+            )
+        ) {
+            return
         }
-        foregroundGuard.enter()
+        if (!uiBackgroundKeepAlive.compareAndSet(false, true)) return
+        foregroundGuard.enter(message)
+    }
+
+    fun releaseForegroundIfIdle() {
+        if (_state.value.isRunning) return
+        if (workerForegroundSession.get()) return
+        if (backgroundThumbPrefetchJob?.isActive == true) return
+        releaseUiBackgroundKeepAlive()
+    }
+
+    private fun releaseUiBackgroundKeepAlive() {
+        if (uiBackgroundKeepAlive.compareAndSet(true, false)) {
+            foregroundGuard.leave()
+        }
+    }
+
+    private suspend inline fun <T> withSyncForeground(crossinline block: suspend () -> T): T {
+        val holdNow = !appForegroundState.isInForeground()
+        if (holdNow) foregroundGuard.enter()
         return try {
             block()
         } finally {
-            // WorkManager segue com a mesma notificação; não apagar ao soltar este serviço.
-            foregroundGuard.leave(detachNotification = workerForegroundSession.get())
+            if (holdNow) foregroundGuard.leave()
+            if (!workerForegroundSession.get()) {
+                releaseUiBackgroundKeepAlive()
+            }
         }
     }
 
@@ -4286,7 +4319,7 @@ class SyncCoordinator(
             var keepGoingInBackground = true
             try {
             refreshExtraCancellableWork()
-            if (!prefetchHoldsForeground) {
+            if (!prefetchHoldsForeground && !appForegroundState.isInForeground()) {
                 foregroundGuard.enter(thumbMessage)
                 prefetchHoldsForeground = true
             }
@@ -4390,6 +4423,7 @@ class SyncCoordinator(
                     foregroundGuard.leave()
                 }
                 backgroundThumbPrefetchJob = null
+                releaseForegroundIfIdle()
                 refreshExtraCancellableWork()
                 if (keepGoingInBackground) {
                     enqueueDurableThumbnailContinuation()

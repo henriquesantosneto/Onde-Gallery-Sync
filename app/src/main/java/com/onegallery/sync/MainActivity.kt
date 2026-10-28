@@ -50,8 +50,11 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         val app = application as OneGalleryApplication
         app.appForegroundState.setForeground(false)
+        // Promove antes de voltar ao looper. Gravar o catálogo aqui travava a thread
+        // principal e o serviço de sync não chamava startForeground a tempo.
+        app.syncCoordinator.holdForegroundIfBackgrounded()
         app.syncCoordinator.onAppUiVisibilityChanged(inForeground = false)
-        app.persistSessionCatalogForBackground(blocking = true)
+        app.persistSessionCatalogForBackground(blocking = false)
         super.onStop()
     }
 
