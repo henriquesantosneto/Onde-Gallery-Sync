@@ -25,14 +25,14 @@ class PlaceRegionGroupingTest {
         val groups = groupDisplayItemsForPlaceAlbums(listOf(campinas, santos, rio))
 
         assertEquals(2, groups.size)
-        assertEquals(campinas.placeAlbumBucketEncodedKey(), santos.placeAlbumBucketEncodedKey())
-        assertNotEquals(campinas.placeAlbumBucketEncodedKey(), rio.placeAlbumBucketEncodedKey())
+        assertEquals(placeAlbumBucketEncodedKey(campinas), placeAlbumBucketEncodedKey(santos))
+        assertNotEquals(placeAlbumBucketEncodedKey(campinas), placeAlbumBucketEncodedKey(rio))
         assertEquals(
             "Brasil · São Paulo",
             placeAlbumTitleForGroup(listOf(campinas, santos)),
         )
         assertEquals("Brasil · Rio de Janeiro", placeAlbumTitleForGroup(listOf(rio)))
-        assertEquals(campinas.placeAlbumBucketEncodedKey(), campinas.preferredPlaceBrowseEncodedKey())
+        assertEquals(placeAlbumBucketEncodedKey(campinas), campinas.preferredPlaceBrowseEncodedKey())
     }
 
     @Test
@@ -41,10 +41,10 @@ class PlaceRegionGroupingTest {
         val franceB = photo("b.jpg", "França", 43.70, 7.26)
         val unlabeled = photo("c.jpg", "48.1° N", 48.1, 2.3)
 
-        assertEquals(franceA.placeAlbumBucketEncodedKey(), franceB.placeAlbumBucketEncodedKey())
+        assertEquals(placeAlbumBucketEncodedKey(franceA), placeAlbumBucketEncodedKey(franceB))
         val franceKey = PlaceComponents.fromGeocoderLabel("França")!!.preferredBrowseKey("França")
         assertEquals(PlaceLevel.COUNTRY, franceKey.level)
-        assertNotEquals(franceA.placeAlbumBucketEncodedKey(), unlabeled.placeAlbumBucketEncodedKey())
+        assertNotEquals(placeAlbumBucketEncodedKey(franceA), placeAlbumBucketEncodedKey(unlabeled))
     }
 
     @Test
