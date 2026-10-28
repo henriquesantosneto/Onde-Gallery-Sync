@@ -319,6 +319,7 @@ class GalleryViewModel(
                         previous.second == next.second &&
                         previous.third == next.third
                 }
+                .flowOn(Dispatchers.Default)
                 .collect { (metadata, userAlbums, sort) ->
                     scheduleAlbumListsFromMetadata(metadata, userAlbums, sort)
                 }

@@ -838,10 +838,10 @@ class SyncCoordinator(
     val galleryMetadata: Flow<List<SyncMetadataEntity>> = merge(
         galleryMetadataSource.take(1),
         galleryMetadataSource.drop(1).debounce {
-            if (bulkThumbnailPrefetchDepth.get() > 0) {
-                GALLERY_METADATA_DEBOUNCE_DURING_PREFETCH_MS
-            } else {
-                GALLERY_METADATA_DEBOUNCE_MS
+            when {
+                bulkThumbnailPrefetchDepth.get() > 0 -> GALLERY_METADATA_DEBOUNCE_DURING_PREFETCH_MS
+                _state.value.isRunning -> GALLERY_METADATA_DEBOUNCE_DURING_SYNC_MS
+                else -> GALLERY_METADATA_DEBOUNCE_MS
             }
         },
     )
@@ -1235,7 +1235,7 @@ class SyncCoordinator(
             publishQueueRemovals.run()
         } else {
             mainHandler.removeCallbacks(publishQueueRemovals)
-            mainHandler.post(publishQueueRemovals)
+            mainHandler.postDelayed(publishQueueRemovals, RUN_QUEUE_UI_COALESCE_MS)
         }
     }
 
@@ -1888,7 +1888,8 @@ class SyncCoordinator(
                     }
                     cloudOnlyWork.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
                         ensureSyncMayContinue()
-                        val rows = supervisorScope {
+                        val rows = withContext(Dispatchers.IO) {
+                            supervisorScope {
                             chunk.map { (path, remote) ->
                                 async {
                                     semaphoreCloudOnly.withPermit {
@@ -1928,6 +1929,7 @@ class SyncCoordinator(
                                     }
                                 }
                             }.awaitAll()
+                            }
                         }
                         val toSave = ArrayList<SyncMetadataEntity>(rows.size)
                         for (outcome in rows) {
@@ -5345,6 +5347,9 @@ class SyncCoordinator(
     private companion object {
         const val GALLERY_METADATA_DEBOUNCE_MS = 450L
         const val GALLERY_METADATA_DEBOUNCE_DURING_PREFETCH_MS = 20_000L
+        /** Enquanto o sync grava o índice, a grade não remonta a cada lote (evita “fechar ou aguardar”). */
+        const val GALLERY_METADATA_DEBOUNCE_DURING_SYNC_MS = 4_000L
+        const val RUN_QUEUE_UI_COALESCE_MS = 250L
         const val INDEX_STATS_SAMPLE_MS = 20_000L
         /** Espera Coil gravar JPEG antes de reindexar miniaturas na grade. */
         const val GALLERY_DISPLAY_REFRESH_AFTER_SCROLL_MS = 450L

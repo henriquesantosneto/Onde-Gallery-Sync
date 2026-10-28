@@ -67,8 +67,10 @@ import com.onegallery.sync.ui.theme.ZeroScaffoldContentInsets
 import com.onegallery.sync.sync.SyncPaths
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,7 +106,9 @@ fun GalleryScreen(
     } else {
         gridFrame.libraryItems
     }
-    val fullBrowseGridItems = remember(
+    val sortOffMainThread = libraryForGrid.size >= 800 || gridFrame.items.size >= 800
+    val inlineBrowseGridItems = remember(
+        sortOffMainThread,
         requiresActiveBrowseFilter,
         libraryForGrid,
         gridFrame.items,
@@ -113,16 +117,60 @@ fun GalleryScreen(
         routePlaceMatchKey,
         routePlaceTitle,
     ) {
-        resolveBrowseGridItems(
-            requiresActiveBrowseFilter = requiresActiveBrowseFilter,
-            libraryItems = libraryForGrid,
-            browseItemsFromState = gridFrame.items,
-            sortOrder = activeSort,
-            routeAlbumFolderKey = routeAlbumFolderKey,
-            routePlaceMatchKey = routePlaceMatchKey,
-            routePlaceTitle = routePlaceTitle,
-            mediaCacheRepository = mediaCacheRepository,
-        )
+        if (sortOffMainThread) {
+            null
+        } else {
+            resolveBrowseGridItems(
+                requiresActiveBrowseFilter = requiresActiveBrowseFilter,
+                libraryItems = libraryForGrid,
+                browseItemsFromState = gridFrame.items,
+                sortOrder = activeSort,
+                routeAlbumFolderKey = routeAlbumFolderKey,
+                routePlaceMatchKey = routePlaceMatchKey,
+                routePlaceTitle = routePlaceTitle,
+                mediaCacheRepository = mediaCacheRepository,
+            )
+        }
+    }
+    var deferredBrowseGridItems by remember { mutableStateOf<List<GalleryDisplayItem>?>(null) }
+    LaunchedEffect(
+        sortOffMainThread,
+        requiresActiveBrowseFilter,
+        libraryForGrid,
+        gridFrame.items,
+        activeSort,
+        routeAlbumFolderKey,
+        routePlaceMatchKey,
+        routePlaceTitle,
+    ) {
+        if (!sortOffMainThread) {
+            deferredBrowseGridItems = null
+            return@LaunchedEffect
+        }
+        val library = libraryForGrid
+        val browse = gridFrame.items
+        val order = activeSort
+        val needsFilter = requiresActiveBrowseFilter
+        val albumKey = routeAlbumFolderKey
+        val placeKey = routePlaceMatchKey
+        val placeTitle = routePlaceTitle
+        deferredBrowseGridItems = withContext(Dispatchers.Default) {
+            resolveBrowseGridItems(
+                requiresActiveBrowseFilter = needsFilter,
+                libraryItems = library,
+                browseItemsFromState = browse,
+                sortOrder = order,
+                routeAlbumFolderKey = albumKey,
+                routePlaceMatchKey = placeKey,
+                routePlaceTitle = placeTitle,
+                mediaCacheRepository = mediaCacheRepository,
+            )
+        }
+    }
+    val fullBrowseGridItems = when {
+        !sortOffMainThread -> inlineBrowseGridItems.orEmpty()
+        deferredBrowseGridItems != null -> deferredBrowseGridItems!!
+        else -> libraryForGrid
     }
     val gridItems = remember(fullBrowseGridItems, state.gridWindowLimit) {
         fullBrowseGridItems.take(state.gridWindowLimit)
