@@ -329,7 +329,7 @@ class GalleryCatalogSession {
     )
 
     companion object {
-        const val PLACE_ALBUM_GROUPING_VERSION = 3
+        const val PLACE_ALBUM_GROUPING_VERSION = 4
     }
 
     private fun computeGeoItems(catalog: List<GalleryDisplayItem>): List<GalleryDisplayItem> {

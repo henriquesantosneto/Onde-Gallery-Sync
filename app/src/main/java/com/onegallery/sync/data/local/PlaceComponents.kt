@@ -31,6 +31,14 @@ data class PlaceComponents(
         }
     }
 
+    /** Álbum de Locais: só país e estado, para não abrir um álbum por cidade. */
+    fun regionDisplayTitle(): String {
+        return listOfNotNull(
+            country?.trim()?.takeIf { it.isNotEmpty() },
+            adminArea?.trim()?.takeIf { it.isNotEmpty() },
+        ).joinToString(" · ")
+    }
+
     /** Nome único para o bloco, do país ao bairro (ordem fixa para agrupar e ordenar). */
     fun hierarchicalDisplayTitle(): String {
         return listOfNotNull(

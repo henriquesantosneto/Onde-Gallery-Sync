@@ -9,7 +9,7 @@ fun GalleryDisplayItem.matchesPlaceAlbumBucket(encodedKey: String): Boolean {
     return placeAlbumBucketEncodedKey(this) == encodedKey
 }
 
-/** Agrupa itens colapsados em álbuns de local (célula ~[PLACE_CLUSTER_RADIUS_KM] km ou rótulo legado). */
+/** Agrupa em álbuns de país e estado. Célula de GPS só entra quando ainda não há endereço. */
 internal fun groupDisplayItemsForPlaceAlbums(
     items: List<GalleryDisplayItem>,
 ): Map<String, List<GalleryDisplayItem>> {
@@ -35,8 +35,8 @@ internal fun groupMetadataForPlaceAlbums(
 }
 
 /**
- * Título do álbum: endereço mais completo do grupo; a capa entra na disputa se tiver rótulo
- * (fica o mais longo / específico entre capa e demais fotos da célula).
+ * Título do álbum: país e estado. A capa só entra na disputa do rótulo; cidade e bairro
+ * não mudam o nome.
  */
 internal fun placeAlbumTitleForGroup(
     group: List<GalleryDisplayItem>,
@@ -56,11 +56,12 @@ internal fun placeAlbumTitleForMetadataGroup(
     val label = source.locationLabel?.trim().orEmpty()
     val components = placeComponentsForEntity(source)
         ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
-    return components?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
+    return components?.regionDisplayTitle()?.takeIf { it.isNotBlank() }
         ?: label.ifBlank { "Local" }
 }
 
 internal fun placeAlbumBucketEncodedKey(item: GalleryDisplayItem): String? {
+    regionKeyFromLabel(item.locationLabel)?.let { return it }
     val coords = validPlaceCoordinates(item.latitude, item.longitude)
     if (coords != null) {
         val cell = geographicCellKey(coords.first, coords.second)
@@ -70,6 +71,7 @@ internal fun placeAlbumBucketEncodedKey(item: GalleryDisplayItem): String? {
 }
 
 internal fun placeAlbumBucketEncodedKey(entity: SyncMetadataEntity): String? {
+    regionKeyFromLabel(entity.locationLabel)?.let { return it }
     val coords = validPlaceCoordinates(entity.latitude, entity.longitude)
     if (coords != null) {
         val cell = geographicCellKey(coords.first, coords.second)
@@ -82,9 +84,16 @@ private fun textPlaceAlbumEncodedKey(locationLabel: String?): String? {
     val label = locationLabel?.trim().orEmpty()
     if (label.isEmpty()) return null
     if (label.contains('°')) return PlaceMatchKey.legacyLabel(label).encode()
-    val title = PlaceComponents.fromGeocoderLabel(label)?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
-        ?: label
-    return PlaceMatchKey.legacyLabel(title).encode()
+    regionKeyFromLabel(label)?.let { return it }
+    return PlaceMatchKey.legacyLabel(label).encode()
+}
+
+private fun regionKeyFromLabel(locationLabel: String?): String? {
+    val label = locationLabel?.trim().orEmpty()
+    if (label.isEmpty() || label.contains('°')) return null
+    val components = PlaceComponents.fromGeocoderLabel(label) ?: return null
+    if (components.country.isNullOrBlank()) return null
+    return components.preferredBrowseKey(label).encode()
 }
 
 internal fun GalleryDisplayItem.placeAlbumDisplayTitle(): String = placeAlbumTitleFromItem(this)
@@ -93,7 +102,7 @@ private fun placeAlbumTitleFromItem(item: GalleryDisplayItem): String {
     val label = item.locationLabel?.trim().orEmpty()
     val components = PlaceComponents.forItem(item)
         ?: label.takeIf { it.isNotEmpty() }?.let { PlaceComponents.fromGeocoderLabel(it) }
-    return components?.hierarchicalDisplayTitle()?.takeIf { it.isNotBlank() }
+    return components?.regionDisplayTitle()?.takeIf { it.isNotBlank() }
         ?: label.ifBlank { "Local" }
 }
 
@@ -103,9 +112,5 @@ private fun placeComponentsForEntity(entity: SyncMetadataEntity): PlaceComponent
     return PlaceComponents.fromGeocoderLabel(label)
 }
 
-/** Chave de navegação ao abrir “este local” a partir de uma foto com GPS. */
-fun GalleryDisplayItem.preferredPlaceBrowseEncodedKey(): String? {
-    val coords = validPlaceCoordinates(latitude, longitude) ?: return null
-    val cell = geographicCellKey(coords.first, coords.second)
-    return PlaceMatchKey.geoCell(cell).encode()
-}
+/** Chave de navegação ao abrir o álbum de país/estado desta foto. */
+fun GalleryDisplayItem.preferredPlaceBrowseEncodedKey(): String? = placeAlbumBucketEncodedKey(this)

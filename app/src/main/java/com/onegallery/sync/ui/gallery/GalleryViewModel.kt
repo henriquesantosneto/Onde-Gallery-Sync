@@ -1423,13 +1423,13 @@ class GalleryViewModel(
         val components = PlaceComponents.fromGeocoderLabel(locationLabel)
         if (components != null && components.hasAnyNamedLevel()) {
             val matchKey = components.preferredBrowseKey(locationLabel).encode()
-            setPlaceFilter(components.hierarchicalDisplayTitle(), matchKey)
+            setPlaceFilter(components.regionDisplayTitle().ifBlank { locationLabel }, matchKey)
         } else {
             setPlaceFilter(locationLabel)
         }
     }
 
-    /** Abre o álbum de local da célula ~3 km quando a foto tem GPS. */
+    /** Abre o álbum de país e estado desta foto. */
     fun setPlaceFilterFromItem(item: GalleryDisplayItem) {
         val geoKey = item.preferredPlaceBrowseEncodedKey()
         if (geoKey != null) {

@@ -125,5 +125,15 @@ fun GalleryDisplayItem.matchesPlace(
     }
 }
 
-fun PlaceComponents.preferredBrowseKey(legacyLabel: String?): PlaceMatchKey =
-    PlaceMatchKey.forComponents(this, legacyLabel)
+/** Chave do álbum de Locais: país e estado. Cidade e bairro não abrem outro álbum. */
+fun PlaceComponents.preferredBrowseKey(legacyLabel: String?): PlaceMatchKey {
+    val countryName = country?.trim().orEmpty()
+    val stateName = adminArea?.trim().orEmpty()
+    if (countryName.isNotEmpty() && stateName.isNotEmpty()) {
+        return PlaceMatchKey(PlaceLevel.ADMIN_AREA, listOf(countryName, stateName))
+    }
+    if (countryName.isNotEmpty()) {
+        return PlaceMatchKey(PlaceLevel.COUNTRY, listOf(countryName))
+    }
+    return PlaceMatchKey.forComponents(this, legacyLabel)
+}
