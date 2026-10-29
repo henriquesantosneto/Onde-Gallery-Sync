@@ -805,7 +805,7 @@ internal class GalleryBlitGridView(
         getLocationInWindow(loc)
         val source = item?.item?.let { bitmapFor(it) }
         val copy = source?.takeUnless { it.isRecycled }?.let { bitmap ->
-            runCatching { bitmap.copy(bitmap.config ?: android.graphics.Bitmap.Config.ARGB_8888, false) }
+            runCatching { bitmap.copy(bitmap.config, false) }
                 .getOrNull()
         }
         return GridExpandOrigin(
