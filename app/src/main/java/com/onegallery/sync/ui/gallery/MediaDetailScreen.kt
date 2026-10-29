@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -230,6 +231,35 @@ fun MediaDetailScreen(
         detailsDragging -> detailsDragFraction > 0.14f
         else -> detailsSettleFraction > 0.05f
     } && detailPaths.isNotEmpty()
+
+    LaunchedEffect(
+        landedOnOpenedPath,
+        pagerState.currentPage,
+        detailZoomBlocksPager,
+        detailsPanelOpen,
+    ) {
+        if (!landedOnOpenedPath) return@LaunchedEffect
+        if (detailZoomBlocksPager || detailsPanelOpen) return@LaunchedEffect
+        val page = pagerState.currentPage
+        val item = contextItems.getOrNull(page) ?: return@LaunchedEffect
+        if (!item.playsInlineLocalVideo()) return@LaunchedEffect
+        while (pagerState.isScrollInProgress) {
+            delay(50L)
+        }
+        if (pagerState.currentPage != page) return@LaunchedEffect
+        val startedAt = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startedAt < LOCAL_VIDEO_PREVIEW_MS) {
+            if (pagerState.isScrollInProgress) return@LaunchedEffect
+            delay(100L)
+        }
+        if (pagerState.currentPage != page || pagerState.isScrollInProgress) return@LaunchedEffect
+        val next = nextLocalDeviceVideoIndex(contextItems, page) ?: return@LaunchedEffect
+        if (next == page + 1) {
+            pagerState.animateScrollToPage(next)
+        } else {
+            pagerState.scrollToPage(next)
+        }
+    }
 
     BackHandler {
         when {
@@ -779,10 +809,12 @@ private fun LabMediaDetailPage(
                 item = refreshed
             }
             loading = false
-            withContext(Dispatchers.IO) {
-                thumbnailCache.ensureThumbnailCached(canonicalPath)
+            if (refreshed?.showsFromLocalFile() != true) {
+                withContext(Dispatchers.IO) {
+                    thumbnailCache.ensureThumbnailCached(canonicalPath)
+                }
+                item = loadDisplayItem() ?: item
             }
-            item = loadDisplayItem() ?: item
             notifyGridIfNewlyCached(item)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
