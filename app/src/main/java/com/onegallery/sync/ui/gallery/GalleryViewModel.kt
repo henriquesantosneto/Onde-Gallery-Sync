@@ -1339,6 +1339,23 @@ class GalleryViewModel(
     private var detailSessionAnchor: String? = null
     private var detailSessionPaths: List<String>? = null
 
+    private var stagedGridExpand: GridExpandOrigin? = null
+
+    fun stageGridExpand(origin: GridExpandOrigin) {
+        val previous = stagedGridExpand
+        stagedGridExpand = origin
+        if (previous != null && previous.bitmap !== origin.bitmap) {
+            previous.bitmap?.recycle()
+        }
+    }
+
+    fun takeGridExpand(anchorPath: String): GridExpandOrigin? {
+        val staged = stagedGridExpand ?: return null
+        if (staged.canonicalPath != anchorPath) return null
+        stagedGridExpand = null
+        return staged
+    }
+
     fun beginDetailSession(anchorPath: String, browsePaths: List<String>) {
         if (browsePaths.isEmpty() || anchorPath !in browsePaths) {
             detailSessionAnchor = null

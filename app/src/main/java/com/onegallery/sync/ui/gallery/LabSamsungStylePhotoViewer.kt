@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -22,6 +24,7 @@ fun LabSamsungStylePhotoViewer(
     onToggleImmersive: (() -> Unit)? = null,
     onZoomActiveChanged: (Boolean) -> Unit = {},
     previewContext: Context? = null,
+    openingPreview: Bitmap? = null,
 ) {
     val transform = remember(item.canonicalPath) { ZoomTransformHolder() }
     val immersiveModifier = if (onToggleImmersive != null) {
@@ -53,12 +56,18 @@ fun LabSamsungStylePhotoViewer(
                     val m = context.resources.displayMetrics
                     (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
                 }
-                val request = remember(fullModel, decodeMaxPx) {
+                val request = remember(fullModel, decodeMaxPx, openingPreview) {
                     ImageRequest.Builder(context)
                         .data(fullModel)
                         .size(decodeMaxPx)
-                        .crossfade(true)
+                        .crossfade(160)
                         .allowHardware(false)
+                        .apply {
+                            val preview = openingPreview
+                            if (preview != null && !preview.isRecycled) {
+                                placeholder(BitmapDrawable(context.resources, preview))
+                            }
+                        }
                         .build()
                 }
                 ZoomableMediaContainer(

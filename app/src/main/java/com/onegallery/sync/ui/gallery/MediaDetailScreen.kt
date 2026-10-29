@@ -63,6 +63,7 @@ fun MediaDetailScreen(
     syncCoordinator: SyncCoordinator,
     mediaCacheRepository: MediaCacheRepository,
     onBack: () -> Unit,
+    openingPreview: android.graphics.Bitmap? = null,
     onOpenPlacesMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -362,6 +363,7 @@ fun MediaDetailScreen(
                         onRecallingChanged = { recalling ->
                             if (pageActive) activePageRecalling = recalling
                         },
+                        openingPreview = if (path == initialCanonicalPath) openingPreview else null,
                     )
                 }
 
@@ -716,6 +718,7 @@ private fun LabMediaDetailPage(
     onDetailZoomActiveChanged: (Boolean) -> Unit = {},
     onDisplayItemChanged: (GalleryDisplayItem?) -> Unit = {},
     onRecallingChanged: (Boolean) -> Unit = {},
+    openingPreview: android.graphics.Bitmap? = null,
 ) {
     val viewContext = LocalContext.current
     val app = viewContext.applicationContext as OneGalleryApplication
@@ -926,6 +929,7 @@ private fun LabMediaDetailPage(
                             LabSamsungStylePhotoViewer(
                                 item = display,
                                 modifier = Modifier.fillMaxSize(),
+                                openingPreview = openingPreview,
                                 onToggleImmersive = onToggleImmersive,
                                 onZoomActiveChanged = { active ->
                                     if (isActivePage) onDetailZoomActiveChanged(active)

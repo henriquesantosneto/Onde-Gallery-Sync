@@ -68,6 +68,8 @@ import com.onegallery.sync.ui.gallery.GalleryScreen
 import com.onegallery.sync.ui.gallery.GalleryPreferences
 import com.onegallery.sync.ui.gallery.GalleryViewModel
 import com.onegallery.sync.ui.gallery.GalleryViewModelFactory
+import com.onegallery.sync.ui.gallery.GridCellExpandOverlay
+import com.onegallery.sync.ui.gallery.GridExpandOrigin
 import com.onegallery.sync.ui.gallery.MediaDetailScreen
 import com.onegallery.sync.ui.onedrive.OneDriveCloudBrowserScreen
 import com.onegallery.sync.ui.settings.SettingsScreen
@@ -310,11 +312,8 @@ fun OneGalleryApp(
 
     val navController = rememberNavController()
     var openMediaPath by rememberSaveable { mutableStateOf<String?>(null) }
-    fun openMedia(encoded: String) {
-        openMediaPath = runCatching {
-            URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
-        }.getOrDefault(encoded)
-    }
+    var gridExpand by remember { mutableStateOf<GridExpandOrigin?>(null) }
+    var gridExpandVisible by remember { mutableStateOf(false) }
     val galleryViewModel: GalleryViewModel = viewModel(
         factory = GalleryViewModelFactory(
             localMediaRepository,
@@ -338,6 +337,26 @@ fun OneGalleryApp(
     }
     DisposableEffect(Unit) {
         onDispose { GalleryGridScrollGate.galleryInUse = false }
+    }
+
+    fun openMedia(encoded: String) {
+        val path = runCatching {
+            URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+        }.getOrDefault(encoded)
+        val staged = galleryViewModel.takeGridExpand(path)
+        val photoExpand = staged?.takeIf { origin ->
+            origin.kind == com.onegallery.sync.data.local.MediaKind.IMAGE &&
+                origin.bitmap != null &&
+                origin.bitmap.isRecycled.not() &&
+                origin.width > 0 &&
+                origin.height > 0
+        }
+        if (staged != null && staged !== photoExpand) {
+            staged.bitmap?.recycle()
+        }
+        gridExpand = photoExpand
+        gridExpandVisible = photoExpand != null
+        openMediaPath = path
     }
 
     val chromeRoute = if (openMediaPath != null) "media/viewer" else currentRoute
@@ -541,29 +560,66 @@ fun OneGalleryApp(
     }
     val viewerPath = openMediaPath
     if (viewerPath != null) {
+        val expand = gridExpand?.takeIf { it.canonicalPath == viewerPath }
+        var showDetail by remember(viewerPath) { mutableStateOf(expand == null) }
+        LaunchedEffect(viewerPath, expand?.canonicalPath) {
+            if (expand == null) {
+                showDetail = true
+                return@LaunchedEffect
+            }
+            androidx.compose.runtime.withFrameNanos { }
+            showDetail = true
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {},
                 ),
         ) {
-            androidx.compose.runtime.key(viewerPath) {
-            MediaDetailScreen(
-                initialCanonicalPath = viewerPath,
-                viewModel = galleryViewModel,
-                syncCoordinator = syncCoordinator,
-                mediaCacheRepository = mediaCacheRepository,
-                onBack = { openMediaPath = null },
-                onOpenPlacesMap = { lat, lng ->
-                    openMediaPath = null
-                    galleryViewModel.requestPlacesMapFocus(lat, lng)
-                    navController.navigate(PLACES_MAP_ROUTE)
-                },
-            )
+            if (showDetail) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black),
+                ) {
+                    androidx.compose.runtime.key(viewerPath) {
+                        MediaDetailScreen(
+                            initialCanonicalPath = viewerPath,
+                            viewModel = galleryViewModel,
+                            syncCoordinator = syncCoordinator,
+                            mediaCacheRepository = mediaCacheRepository,
+                            openingPreview = expand?.bitmap,
+                            onBack = {
+                                gridExpandVisible = false
+                                gridExpand = null
+                                openMediaPath = null
+                            },
+                            onOpenPlacesMap = { lat, lng ->
+                                gridExpandVisible = false
+                                gridExpand = null
+                                openMediaPath = null
+                                galleryViewModel.requestPlacesMapFocus(lat, lng)
+                                navController.navigate(PLACES_MAP_ROUTE)
+                            },
+                        )
+                    }
+                }
+            }
+            if (expand != null && gridExpandVisible) {
+                GridCellExpandOverlay(
+                    origin = expand,
+                    revealContent = showDetail,
+                    onFinished = { gridExpandVisible = false },
+                )
+            }
+        }
+        DisposableEffect(expand?.bitmap) {
+            val bitmap = expand?.bitmap
+            onDispose {
+                bitmap?.takeUnless { it.isRecycled }?.recycle()
             }
         }
     }

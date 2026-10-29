@@ -210,7 +210,7 @@ internal class GalleryBlitGridView(
     context: Context,
     private val mediaCache: MediaCacheRepository,
 ) : View(context) {
-    var onOpenPath: (String) -> Unit = {}
+    var onOpenPath: (GridExpandOrigin) -> Unit = {}
     var onTogglePath: (String) -> Unit = {}
     var onLongPressPath: (String) -> Unit = {}
     var onDragPath: (String) -> Unit = {}
@@ -313,7 +313,7 @@ internal class GalleryBlitGridView(
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (selecting || pinchLocked || ignoreTapAfterPinch || coast.ignoreTapAfterCoast) return true
                 val path = hit(e.x, e.y) ?: return true
-                if (selectionMode) onTogglePath(path) else onOpenPath(path)
+                if (selectionMode) onTogglePath(path) else onOpenPath(expandOrigin(path))
                 return true
             }
 
@@ -791,6 +791,34 @@ internal class GalleryBlitGridView(
         return blitPathAt(slots, x.roundToInt(), (y + contentOffset).roundToInt())
     }
 
+    /** Cópia do quadrado já desenhado, para a foto abrir crescendo desse lugar. */
+    private fun expandOrigin(path: String): GridExpandOrigin {
+        val slot = slots.firstOrNull { it.path == path }
+        val item = entries.firstOrNull { entry ->
+            (entry as? GalleryGridEntry.Photo)?.item?.canonicalPath == path
+        } as? GalleryGridEntry.Photo
+        val kind = item?.item?.kind ?: MediaKind.IMAGE
+        if (slot == null) {
+            return GridExpandOrigin(path, kind, 0, 0, 0, 0, null)
+        }
+        val loc = IntArray(2)
+        getLocationInWindow(loc)
+        val source = item?.item?.let { bitmapFor(it) }
+        val copy = source?.takeUnless { it.isRecycled }?.let { bitmap ->
+            runCatching { bitmap.copy(bitmap.config ?: android.graphics.Bitmap.Config.ARGB_8888, false) }
+                .getOrNull()
+        }
+        return GridExpandOrigin(
+            canonicalPath = path,
+            kind = kind,
+            left = loc[0] + slot.left,
+            top = loc[1] + slot.top - contentOffset,
+            width = slot.width,
+            height = slot.height,
+            bitmap = copy,
+        )
+    }
+
     private fun beginSingleFinger(event: MotionEvent) {
         pinchLocked = false
         openedSelectionThisGesture = false
@@ -1151,7 +1179,7 @@ internal fun GalleryBlitPhotoGrid(
     selectedPaths: Set<String>,
     mediaCache: MediaCacheRepository,
     scrollToTopToken: Int,
-    onOpen: (String) -> Unit,
+    onOpen: (GridExpandOrigin) -> Unit,
     onToggle: (String) -> Unit,
     onLongPress: (String) -> Unit,
     onDragSelect: (String) -> Unit,
