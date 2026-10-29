@@ -58,6 +58,22 @@ class LocalDetailPlaybackTest {
         assertFalse(items[3].playsInlineLocalVideo())
     }
 
+    @Test
+    fun gridPreviewPlaysOnlyLocalVideosInOrder() {
+        val items = listOf(
+            item("a.jpg", MediaKind.IMAGE, localUri = Uri.parse("content://media/1")),
+            item("v1.mp4", MediaKind.VIDEO, localUri = Uri.parse("content://media/2")),
+            item(
+                "nuvem.mp4",
+                MediaKind.VIDEO,
+                cloudState = CloudSyncState.CLOUD_ONLY,
+                thumb = File("/cache/nuvem.jpg"),
+            ),
+            item("v2.mp4", MediaKind.VIDEO, localUri = Uri.parse("content://media/4")),
+        )
+        assertEquals(listOf("v1.mp4", "v2.mp4"), localVideosInPreviewOrder(items))
+    }
+
     private fun item(
         name: String,
         kind: MediaKind,

@@ -21,6 +21,10 @@ object GalleryGridScrollGate {
     @Volatile
     var galleryInUse: Boolean = false
 
+    /** Foto aberta por cima da grade: o preview de vídeo no quadrado para. */
+    @Volatile
+    var inlineVideoPreviewEnabled: Boolean = true
+
     private val browseThumbnailPermit = Semaphore(1)
 
     fun shouldDeferCatalogThumbnailRefresh(): Boolean = isUserScrollingGrid

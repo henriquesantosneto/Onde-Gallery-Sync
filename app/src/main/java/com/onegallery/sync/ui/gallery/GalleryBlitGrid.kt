@@ -28,10 +28,13 @@ import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
@@ -220,6 +223,7 @@ internal class GalleryBlitGridView(
     var onFirstIndex: (Int) -> Unit = {}
     var onEdges: (Boolean, Boolean) -> Unit = { _, _ -> }
     var onScrollEnd: () -> Unit = {}
+    var onUserScrollActive: (Boolean) -> Unit = {}
     var onNearEnd: () -> Unit = {}
 
     var pageColor: Int = 0xFF000000.toInt()
@@ -746,6 +750,7 @@ internal class GalleryBlitGridView(
         badgeGeneration++
         badgeHandler.removeCallbacksAndMessages(null)
         GalleryGridScrollGate.isUserScrollingGrid = true
+        onUserScrollActive(true)
     }
 
     private fun finishScroll() {
@@ -755,6 +760,7 @@ internal class GalleryBlitGridView(
             coast.onFlingSettled()
             GalleryGridScrollGate.isUserScrollingGrid = false
             onScrollEnd()
+            onUserScrollActive(false)
         }
         trimSession()
         scheduleDecode()
@@ -789,6 +795,33 @@ internal class GalleryBlitGridView(
 
     private fun hit(x: Float, y: Float): String? {
         return blitPathAt(slots, x.roundToInt(), (y + contentOffset).roundToInt())
+    }
+
+    /** Vídeos locais cujo centro está na tela, na ordem da grade. */
+    internal fun localVideosOnScreen(): List<GridVideoPreviewTarget> {
+        if (height <= 0 || slots.isEmpty()) return emptyList()
+        val viewportTop = contentOffset
+        val viewportBottom = contentOffset + height
+        val targets = ArrayList<GridVideoPreviewTarget>()
+        for (slot in slots) {
+            val center = slot.top + slot.height / 2
+            if (center < viewportTop || center >= viewportBottom) continue
+            val item = (entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo)?.item ?: continue
+            if (!item.playsInlineLocalVideo()) continue
+            val uri = item.playbackUri() ?: continue
+            if (slot.width <= 0 || slot.height <= 0) continue
+            targets.add(
+                GridVideoPreviewTarget(
+                    canonicalPath = item.canonicalPath,
+                    uri = uri,
+                    left = slot.left,
+                    top = slot.top - contentOffset,
+                    width = slot.width,
+                    height = slot.height,
+                ),
+            )
+        }
+        return targets
     }
 
     /** Cópia do quadrado já desenhado, para a foto abrir crescendo desse lugar. */
@@ -841,6 +874,7 @@ internal class GalleryBlitGridView(
     }
 
     private fun lockPinch() {
+        beginScroll()
         val pointers = 2
         mainHandler.removeCallbacks(longPressTask)
         pinchLocked = true
@@ -1192,6 +1226,21 @@ internal fun GalleryBlitPhotoGrid(
 ) {
     val viewRef = remember { arrayOfNulls<GalleryBlitGridView>(1) }
     val bridge = remember { BlitScrollBridge() }
+    var scrollGeneration by remember { mutableIntStateOf(0) }
+    var userScrolling by remember { mutableStateOf(false) }
+    var inlinePreview by remember { mutableStateOf<GridVideoPreviewTarget?>(null) }
+    LaunchedEffect(scrollGeneration, selectionMode) {
+        inlinePreview = null
+        if (userScrolling || selectionMode || scrollGeneration == 0) return@LaunchedEffect
+        if (!holdGridVideoPreview(GRID_INLINE_VIDEO_IDLE_MS)) return@LaunchedEffect
+        val targets = viewRef[0]?.localVideosOnScreen().orEmpty()
+        for (target in targets) {
+            if (!GalleryGridScrollGate.inlineVideoPreviewEnabled) break
+            inlinePreview = target
+            if (!holdGridVideoPreview(GRID_INLINE_VIDEO_PLAY_MS)) break
+        }
+        inlinePreview = null
+    }
     DisposableEffect(Unit) {
         onDispose { viewRef[0]?.release() }
     }
@@ -1252,6 +1301,11 @@ internal fun GalleryBlitPhotoGrid(
                 view.onPinch = onPinch
                 view.onMultiTouch = onMultiTouch
                 view.onScrollEnd = onScrollEnd
+                view.onUserScrollActive = { active ->
+                    userScrolling = active
+                    scrollGeneration++
+                    if (active) inlinePreview = null
+                }
                 view.onNearEnd = onNearEnd
                 view.bindMetrics(
                     cellMin = cellMinPx,
@@ -1268,6 +1322,9 @@ internal fun GalleryBlitPhotoGrid(
                 view.bindEntries(entries)
             },
         )
+        inlinePreview?.let { target ->
+            GridInlineVideoPreview(target)
+        }
         if (dateTimeline) {
             BlitGridChrome(
                 bridge = bridge,

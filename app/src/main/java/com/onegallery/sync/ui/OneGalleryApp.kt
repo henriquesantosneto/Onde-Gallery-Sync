@@ -334,6 +334,7 @@ fun OneGalleryApp(
     val showBottomBar = showsMainBottomBar(currentRoute)
     SideEffect {
         GalleryGridScrollGate.galleryInUse = routeKeepsSyncQuiet(currentRoute)
+        GalleryGridScrollGate.inlineVideoPreviewEnabled = openMediaPath == null
     }
     DisposableEffect(Unit) {
         onDispose { GalleryGridScrollGate.galleryInUse = false }
