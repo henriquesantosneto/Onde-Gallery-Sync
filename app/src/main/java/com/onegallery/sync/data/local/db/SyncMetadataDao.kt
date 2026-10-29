@@ -99,6 +99,78 @@ interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
     fun observePendingDeletes(): Flow<List<SyncMetadataEntity>>
 
+    @Query("SELECT * FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
+    suspend fun getPendingDeleteRows(): List<SyncMetadataEntity>
+
+    @Query("SELECT COUNT(*) FROM sync_metadata WHERE pendingDeleteTarget != 'NONE'")
+    suspend fun countPendingDeleteOperations(): Int
+
+    @Query("SELECT * FROM sync_metadata WHERE cloudState = 'PENDING_DOWNLOAD'")
+    suspend fun getPendingDownloadRows(): List<SyncMetadataEntity>
+
+    @Query("SELECT COUNT(*) FROM sync_metadata WHERE cloudState = 'PENDING_DOWNLOAD'")
+    suspend fun countPendingDownloadStates(): Int
+
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE oneDriveItemId IS NOT NULL AND TRIM(oneDriveItemId) != ''
+        """,
+    )
+    suspend fun getRowsWithOneDriveId(): List<SyncMetadataEntity>
+
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE lastError IS NOT NULL AND TRIM(lastError) != ''
+        """,
+    )
+    suspend fun getRowsWithLastError(): List<SyncMetadataEntity>
+
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE capturedAtSeconds IS NULL OR capturedAtSeconds <= 0
+        """,
+    )
+    suspend fun getRowsMissingCaptureTime(): List<SyncMetadataEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM sync_metadata
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        """,
+    )
+    suspend fun countRowsWithGps(): Int
+
+    @Query(
+        """
+        SELECT * FROM sync_metadata
+        WHERE (latitude IS NULL OR longitude IS NULL)
+          AND (
+            localMediaId IS NOT NULL
+            OR (localContentUri IS NOT NULL AND TRIM(localContentUri) != '')
+            OR (cachedFilePath IS NOT NULL AND TRIM(cachedFilePath) != '')
+            OR (oneDriveItemId IS NOT NULL AND TRIM(oneDriveItemId) != '')
+          )
+        """,
+    )
+    suspend fun getRowsMissingGps(): List<SyncMetadataEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM sync_metadata
+        WHERE (latitude IS NULL OR longitude IS NULL)
+          AND (
+            localMediaId IS NOT NULL
+            OR (localContentUri IS NOT NULL AND TRIM(localContentUri) != '')
+            OR (cachedFilePath IS NOT NULL AND TRIM(cachedFilePath) != '')
+            OR (oneDriveItemId IS NOT NULL AND TRIM(oneDriveItemId) != '')
+          )
+        """,
+    )
+    suspend fun countRowsMissingGps(): Int
+
     @RawQuery
     suspend fun queryIndexStats(query: SupportSQLiteQuery): SyncIndexStatsRow
 

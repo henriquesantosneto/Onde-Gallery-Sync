@@ -220,6 +220,11 @@ class SyncCoordinator(
     private val pendingIndexRebuild = AtomicBoolean(false)
     /** Cache da passagem atual de indexação (evita re-varrer MediaStore no backfill). */
     private var indexPassLocalItemsById: Map<Long, LocalMediaItem> = emptyMap()
+    /**
+     * A última indexação local gravou arquivo novo, alteração de identidade ou exclusão.
+     * GPS ausente sozinho não conta: isso não deve forçar a comparação com a nuvem.
+     */
+    private var lastLocalLibraryMutated: Boolean = true
     private val longTaskMutex = Mutex()
     private val onDemandOriginalMutexes = ConcurrentHashMap<String, Mutex>()
     private val foregroundGuard = SyncForegroundGuard(appContext)
@@ -646,7 +651,8 @@ class SyncCoordinator(
                     val items = localMediaRepository.loadAllMedia()
                     indexPassLocalItemsById = items.associateBy { it.id }
                     val seenLocalIds = items.map { it.id }.toSet()
-                    val seenPaths = applyLocalIndexPass(items, lightMetadataOnly = true)
+                    val indexPass = applyLocalIndexPass(items, lightMetadataOnly = true)
+                    val seenPaths = indexPass.seenPaths
                     reconcileMissingLocalItems(seenPaths)
                     healAllStaleLocalCopyMetadata()
                     val remoteListingAvailable: Boolean
@@ -1412,10 +1418,13 @@ class SyncCoordinator(
             indexPassLocalItemsById = items.associateBy { it.id }
             val seenLocalIds = items.map { it.id }.toSet()
             ensureNotCancelled()
-            val seenPaths = applyLocalIndexPass(items, lightMetadataOnly = false)
+            lastLocalLibraryMutated = true
+            val indexPass = applyLocalIndexPass(items, lightMetadataOnly = false)
+            val seenPaths = indexPass.seenPaths
             ensureNotCancelled()
-            reconcileMissingLocalItems(seenPaths)
-            healAllStaleLocalCopyMetadata()
+            val removedLocal = reconcileMissingLocalItems(seenPaths)
+            val healedLocal = healAllStaleLocalCopyMetadata()
+            lastLocalLibraryMutated = indexPass.libraryMutated || removedLocal || healedLocal
             if (syncPreferences.syncMode == SyncMode.LOCAL_ONLY) {
                 val sanitized = runIndexSanitizePass(
                     seenLocalCanonicalPaths = seenPaths,
@@ -1488,15 +1497,22 @@ class SyncCoordinator(
         ) {
             return false
         }
-        if (existing.latitude == null || existing.longitude == null) return false
+        val indexedGps = existing.latitude != null && existing.longitude != null
+        val mediaStoreGps = item.latitude != null && item.longitude != null
+        if (!indexedGps && mediaStoreGps) return false
         return true
     }
+
+    private data class LocalIndexPassResult(
+        val seenPaths: Set<String>,
+        val libraryMutated: Boolean,
+    )
 
     /** Atualiza SQLite a partir do MediaStore; retorna caminhos canônicos vistos no aparelho. */
     private suspend fun applyLocalIndexPass(
         items: List<LocalMediaItem>,
         lightMetadataOnly: Boolean,
-    ): Set<String> {
+    ): LocalIndexPassResult {
         val existingRows = syncMetadataDao.getAll()
         val existingByCanonical = existingRows.associateBy { it.canonicalPath }
         val existingByLocalId = existingRows.mapNotNull { row ->
@@ -1549,7 +1565,10 @@ class SyncCoordinator(
             upsertMetadataRows(batch)
         }
         pathsToDelete.forEach { syncMetadataDao.deleteByCanonicalPath(it) }
-        return seenPaths
+        return LocalIndexPassResult(
+            seenPaths = seenPaths,
+            libraryMutated = pendingUpserts.isNotEmpty() || pathsToDelete.isNotEmpty(),
+        )
     }
 
     suspend fun runBidirectionalSync(userInitiated: Boolean = false): Result<SyncSummary> {
@@ -1659,6 +1678,7 @@ class SyncCoordinator(
                         "Lendo MediaStore (fotos, vídeos, pastas).",
                     )
                     val localCount = indexLocalLibrary(manageRunningState = false).getOrThrow()
+                    val localLibraryMutated = lastLocalLibraryMutated
                     setSyncProgress(
                         SyncProgressPhase.INDEXING_LOCAL,
                         "Indexação local concluída",
@@ -1710,7 +1730,26 @@ class SyncCoordinator(
                     var uploaded = 0
                     var pendingDownloadPlaceholders = 0
                     var cloudOnly = 0
-
+                    val skipUnchangedReconcile = shouldSkipUnchangedLibraryReconcile(
+                        IdleReconcileSignals(
+                            localLibraryMutated = localLibraryMutated,
+                            incrementalRemote = remoteListing.incremental,
+                            remoteChangedCount = remoteListing.changedCount,
+                            supplementalFromRecursive = remoteListing.supplementalFromRecursive,
+                            unresolvedDeltaSkips = remoteListing.unresolvedDeltaSkips,
+                            pendingUploads = syncMetadataDao.countPendingUploadOperations(),
+                            pendingDeletes = syncMetadataDao.countPendingDeleteOperations(),
+                        ),
+                    )
+                    if (skipUnchangedReconcile) {
+                        setSyncProgress(
+                            SyncProgressPhase.RECONCILING_LOCAL,
+                            "Biblioteca e nuvem sem alterações",
+                            "Nada novo no aparelho nem no delta. A comparação item a item foi pulada.",
+                        )
+                        healStalePendingDownloads(remoteByPath)
+                        pendingDownloadPlaceholders = syncMetadataDao.countPendingDownloadStates()
+                    } else {
                     val allRows = syncMetadataDao.getAll()
                     val existingByPath = allRows.associateBy { it.canonicalPath }
                     val rows = syncMetadataDao.getRowsWithLocalCopy()
@@ -1833,9 +1872,7 @@ class SyncCoordinator(
                     flushReconcileUpserts()
                     healStalePendingDownloads(remoteByPath)
                     healAllStaleLocalCopyMetadata()
-                    pendingDownloadPlaceholders = syncMetadataDao.getAll().count {
-                        it.cloudState == CloudSyncState.PENDING_DOWNLOAD
-                    }
+                    pendingDownloadPlaceholders = syncMetadataDao.countPendingDownloadStates()
 
                     setSyncProgress(
                         SyncProgressPhase.RECONCILING_LOCAL,
@@ -1978,6 +2015,7 @@ class SyncCoordinator(
                         topUpCloudOnlyQueue()
                     }
                     if (cloudOnlyCandidates > 0) clearRunQueueOnly()
+                    }
 
                     val pendingCount = syncMetadataDao.countPendingOperations()
                     var freedLocal = 0
@@ -2101,7 +2139,7 @@ class SyncCoordinator(
                     )
                     backfillMissingCaptureTimes()
                     indexPassLocalItemsById = emptyMap()
-                    syncMetadataDao.getAll().count { it.latitude != null && it.longitude != null }
+                    syncMetadataDao.countRowsWithGps()
                 }
                 result.onSuccess { withGps ->
                     val stillMissing = countIndexedMissingGps()
@@ -3496,11 +3534,8 @@ class SyncCoordinator(
     }
 
     private suspend fun allPendingGpsEntitiesForUi(): List<SyncMetadataEntity> {
-        return syncMetadataDao.getAll()
-            .asSequence()
-            .filter { rowNeedsGpsBackfill(it) }
+        return syncMetadataDao.getRowsMissingGps()
             .sortedWith(gpsBackfillComparator)
-            .toList()
     }
 
     /** Fila total na tela Sync durante leitura de GPS (como miniaturas). */
@@ -3531,7 +3566,7 @@ class SyncCoordinator(
     }
 
     private suspend fun countIndexedMissingGps(): Int {
-        return syncMetadataDao.getAll().count { row -> rowNeedsGpsBackfill(row) }
+        return syncMetadataDao.countRowsMissingGps()
     }
 
     /**
@@ -3605,7 +3640,7 @@ class SyncCoordinator(
     }
 
     private suspend fun healStalePendingDownloads(remoteByPath: Map<String, RemoteDriveFile>?) {
-        val pending = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
+        val pending = syncMetadataDao.getPendingDownloadRows()
         if (pending.isEmpty()) return
         val map = remoteByPath ?: emptyMap()
         val healed = mutableListOf<SyncMetadataEntity>()
@@ -3809,8 +3844,9 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun reconcileMissingLocalItems(seenPaths: Set<String>) {
-        syncMetadataDao.getAll().forEachIndexed { index, row ->
+    private suspend fun reconcileMissingLocalItems(seenPaths: Set<String>): Boolean {
+        var mutated = false
+        syncMetadataDao.getRowsWithLocalCopy().forEachIndexed { index, row ->
             if (index % 32 == 0) ensureNotCancelled()
             if (row.localMediaId == null) return@forEachIndexed
             if (row.canonicalPath in seenPaths) return@forEachIndexed
@@ -3824,17 +3860,20 @@ class SyncCoordinator(
                             existing = row,
                         ),
                     )
+                    mutated = true
                     return@forEachIndexed
                 }
             }
             if (row.localReleasedForSpace) {
                 finalizeLocalSpaceReleased(row)
+                mutated = true
                 return@forEachIndexed
             }
             if (row.oneDriveItemId != null && syncPreferences.autoDeleteRemoteWhenLocalRemoved) {
                 row.oneDriveItemId?.let { deleteRemoteFile(it).getOrNull() }
                 mediaCacheRepository.deleteCached(row.canonicalPath)
                 syncMetadataDao.deleteByCanonicalPath(row.canonicalPath)
+                mutated = true
             } else if (row.oneDriveItemId != null) {
                 ensureThumbnailCached(row.canonicalPath).getOrNull()
                 syncMetadataDao.upsert(
@@ -3848,15 +3887,18 @@ class SyncCoordinator(
                         lastError = null,
                     ),
                 )
+                mutated = true
             } else {
                 syncMetadataDao.deleteByCanonicalPath(row.canonicalPath)
+                mutated = true
             }
         }
+        return mutated
     }
 
     /** Instalações antigas: PENDING_DOWNLOAD não dispara mais download automático. */
     private suspend fun clearLegacyPendingDownloadStates() {
-        val legacy = syncMetadataDao.getAll().filter { it.cloudState == CloudSyncState.PENDING_DOWNLOAD }
+        val legacy = syncMetadataDao.getPendingDownloadRows()
         if (legacy.isEmpty()) return
         legacy.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
             upsertMetadataRows(
@@ -3873,7 +3915,7 @@ class SyncCoordinator(
     }
 
     private suspend fun flushLegacyPendingDeletes() {
-        val pending = syncMetadataDao.getAll().filter { it.pendingDeleteTarget != PendingDeleteTarget.NONE }
+        val pending = syncMetadataDao.getPendingDeleteRows()
         if (pending.isEmpty()) return
         pending.forEach { row ->
             ensureSyncMayContinue()
@@ -4781,9 +4823,7 @@ class SyncCoordinator(
     }
 
     private suspend fun backfillMissingCaptureTimes() {
-        val rows = syncMetadataDao.getAll().filter { row ->
-            row.capturedAtSeconds == null || row.capturedAtSeconds <= 0L
-        }
+        val rows = syncMetadataDao.getRowsMissingCaptureTime()
         if (rows.isEmpty()) return
         var cloudProbes = 0
         val maxCloudProbesPerRun = 200
@@ -4912,19 +4952,20 @@ class SyncCoordinator(
      * Limpa [localMediaId], [localContentUri] e [cachedFilePath] que apontam para arquivos inexistentes
      * e corrige [cloudState] SYNCED fantasma (índice diz local/cache, aparelho não tem).
      */
-    private suspend fun healAllStaleLocalCopyMetadata() {
+    private suspend fun healAllStaleLocalCopyMetadata(): Boolean {
         val rows = syncMetadataDao.getAll()
-        if (rows.isEmpty()) return
+        if (rows.isEmpty()) return false
         val updates = mutableListOf<SyncMetadataEntity>()
         for (row in rows) {
             val healed = healStaleLocalCopyMetadataRow(row)
             if (healed != row) updates.add(healed)
         }
-        if (updates.isEmpty()) return
+        if (updates.isEmpty()) return false
         updates.chunked(ROOM_UPSERT_CHUNK).forEach { chunk ->
             upsertMetadataRows(chunk)
         }
         notifyGalleryDisplayRefresh()
+        return true
     }
 
     private suspend fun healAndPersistStaleLocalCopyMetadata(row: SyncMetadataEntity): SyncMetadataEntity {
@@ -4991,7 +5032,7 @@ class SyncCoordinator(
     }
 
     private suspend fun sweepTransientErrorsAfterSuccessfulSync() {
-        syncMetadataDao.getAll().forEach { row ->
+        syncMetadataDao.getRowsWithLastError().forEach { row ->
             val msg = row.lastError ?: return@forEach
             if (!isTransientNetworkMessage(msg)) return@forEach
             syncMetadataDao.upsert(
@@ -5062,7 +5103,7 @@ class SyncCoordinator(
             SyncMode.ONEDRIVE_GRAPH -> {
                 val backend = cloudSyncBackendRegistry.activeApiBackend()
                     ?: return Result.failure(IllegalStateException("Backend de nuvem indisponível"))
-                val baseline = remoteBaselineFromIndex(syncMetadataDao.getAll())
+                val baseline = remoteBaselineFromIndex(syncMetadataDao.getRowsWithOneDriveId())
                     .map { it.toRemoteCloudFile() }
                 val forceRecursive = syncPreferences.forceRemoteFullListingOnce ||
                     oneDriveRepository.shouldForceRecursiveRemoteListing(
