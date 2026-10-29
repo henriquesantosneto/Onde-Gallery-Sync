@@ -61,6 +61,7 @@ internal fun GridInlineVideoPreview(target: GridVideoPreviewTarget) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(target.uri))
             volume = 0f
+            videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
             repeatMode = Player.REPEAT_MODE_OFF
             playWhenReady = true
             prepare()
