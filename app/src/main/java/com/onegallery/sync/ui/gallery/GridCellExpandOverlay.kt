@@ -53,12 +53,7 @@ internal fun GridCellExpandOverlay(
     }
     Box(modifier.fillMaxSize()) {
         Canvas(Modifier.fillMaxSize()) {
-            val end = fittedExpandRect(
-                contentWidth = bitmap.width.toFloat(),
-                contentHeight = bitmap.height.toFloat(),
-                boundsWidth = size.width,
-                boundsHeight = size.height,
-            )
+            val end = fullscreenExpandEnd(size.width, size.height)
             val rect = lerpExpandRect(
                 start = ExpandRect(
                     left = origin.left.toFloat(),
@@ -70,13 +65,20 @@ internal fun GridCellExpandOverlay(
                 fraction = progress,
             )
             drawRect(Color.Black.copy(alpha = progress.coerceIn(0f, 1f)))
+            val dstW = rect.width.roundToInt().coerceAtLeast(1)
+            val dstH = rect.height.roundToInt().coerceAtLeast(1)
+            val (srcOffset, srcSize) = centerCropSourceOffsetSize(
+                contentWidth = bitmap.width,
+                contentHeight = bitmap.height,
+                dstWidth = dstW,
+                dstHeight = dstH,
+            )
             drawImage(
                 image = bitmap.asImageBitmap(),
+                srcOffset = srcOffset,
+                srcSize = srcSize,
                 dstOffset = IntOffset(rect.left.roundToInt(), rect.top.roundToInt()),
-                dstSize = IntSize(
-                    rect.width.roundToInt().coerceAtLeast(1),
-                    rect.height.roundToInt().coerceAtLeast(1),
-                ),
+                dstSize = IntSize(dstW, dstH),
                 filterQuality = FilterQuality.Medium,
             )
         }

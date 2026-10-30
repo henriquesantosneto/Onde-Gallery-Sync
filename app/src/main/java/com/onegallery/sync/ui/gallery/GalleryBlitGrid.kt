@@ -252,6 +252,13 @@ internal class GalleryBlitGridView(
     private var atEnd: Boolean = false
     private var selectionMode: Boolean = false
     private var selectedPaths: Set<String> = emptySet()
+    /** Enquanto o preview inline toca, não desenha o poster por baixo. */
+    var inlineVideoPreviewPath: String? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
     private var scrollActive: Boolean = false
     private var prefetchStep: Int = 0
     private var loadMoreArmedForCount: Int = -1
@@ -617,9 +624,11 @@ internal class GalleryBlitGridView(
         val entry = entries.getOrNull(slot.entryIndex) as? GalleryGridEntry.Photo ?: return
         val item = entry.item
         dst.set(slot.left, slot.top, slot.left + slot.width, slot.top + slot.height)
-        val bitmap = bitmapFor(item)
+        val hidePosterForInlineVideo =
+            item.kind == MediaKind.VIDEO && item.canonicalPath == inlineVideoPreviewPath
+        val bitmap = if (hidePosterForInlineVideo) null else bitmapFor(item)
         if (bitmap == null || bitmap.isRecycled) {
-            fillPaint.color = placeholderColor
+            fillPaint.color = if (hidePosterForInlineVideo) 0xFF000000.toInt() else placeholderColor
             canvas.drawRect(dst, fillPaint)
         } else {
             centerCrop(bitmap, dst)
@@ -1320,6 +1329,7 @@ internal fun GalleryBlitPhotoGrid(
                 )
                 view.bindSelection(selectionMode, selectedPaths)
                 view.bindEntries(entries)
+                view.inlineVideoPreviewPath = inlinePreview?.canonicalPath
             },
         )
         inlinePreview?.let { target ->

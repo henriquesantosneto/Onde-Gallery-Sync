@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
+import java.io.File
 import android.graphics.drawable.BitmapDrawable
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
@@ -44,6 +46,9 @@ fun LabSamsungStylePhotoViewer(
     val useThumbnailPipeline = remember(fullModel) {
         item.detailImageUsesThumbnailPipeline(fullModel)
     }
+    val matchGridCrop = remember(fullModel, openingPreview) {
+        openingPreview != null || fullModel is Uri || fullModel is File
+    }
     Box(
         modifier = modifier.then(immersiveModifier),
         contentAlignment = Alignment.Center,
@@ -56,11 +61,11 @@ fun LabSamsungStylePhotoViewer(
                     val m = context.resources.displayMetrics
                     (maxOf(m.widthPixels, m.heightPixels) * 2).coerceIn(720, 4096)
                 }
-                val request = remember(fullModel, decodeMaxPx, openingPreview) {
+                val request = remember(fullModel, decodeMaxPx, openingPreview, matchGridCrop) {
                     ImageRequest.Builder(context)
                         .data(fullModel)
                         .size(decodeMaxPx)
-                        .crossfade(160)
+                        .crossfade(if (openingPreview != null) 0 else 160)
                         .allowHardware(false)
                         .apply {
                             val preview = openingPreview
@@ -82,7 +87,7 @@ fun LabSamsungStylePhotoViewer(
                     AsyncImage(
                         model = request,
                         contentDescription = item.displayName,
-                        contentScale = ContentScale.Fit,
+                        contentScale = if (matchGridCrop) ContentScale.Crop else ContentScale.Fit,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

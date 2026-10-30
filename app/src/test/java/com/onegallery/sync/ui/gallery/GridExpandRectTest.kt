@@ -6,6 +6,20 @@ import org.junit.Test
 class GridExpandRectTest {
 
     @Test
+    fun centerCropMatchesWideCell() {
+        val (offset, size) = centerCropSourceOffsetSize(
+            contentWidth = 4000,
+            contentHeight = 3000,
+            dstWidth = 400,
+            dstHeight = 400,
+        )
+        assertEquals(500, offset.x)
+        assertEquals(0, offset.y)
+        assertEquals(3000, size.width)
+        assertEquals(3000, size.height)
+    }
+
+    @Test
     fun widePhotoFitsTheWidthAndStaysCentered() {
         val rect = fittedExpandRect(
             contentWidth = 400f,

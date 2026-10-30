@@ -2,6 +2,7 @@ package com.onegallery.sync.ui.gallery
 
 import android.graphics.Bitmap
 import com.onegallery.sync.data.local.MediaKind
+import kotlin.math.roundToInt
 
 /** Quadrado da grade no instante do toque, já em coordenadas da janela. */
 data class GridExpandOrigin(
@@ -24,7 +25,36 @@ internal data class ExpandRect(
     val height: Float get() = bottom - top
 }
 
-/** Retângulo em que a foto cabe inteira, centrada, como no visualizador. */
+/** Mesmo recorte da grade: a célula cresce até preencher a tela. */
+internal fun fullscreenExpandEnd(boundsWidth: Float, boundsHeight: Float): ExpandRect {
+    return ExpandRect(0f, 0f, boundsWidth.coerceAtLeast(0f), boundsHeight.coerceAtLeast(0f))
+}
+
+/** Recorte central igual ao [GalleryBlitGridView.centerCrop]. */
+internal fun centerCropSourceOffsetSize(
+    contentWidth: Int,
+    contentHeight: Int,
+    dstWidth: Int,
+    dstHeight: Int,
+): Pair<androidx.compose.ui.unit.IntOffset, androidx.compose.ui.unit.IntSize> {
+    if (contentWidth <= 0 || contentHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+        return androidx.compose.ui.unit.IntOffset.Zero to androidx.compose.ui.unit.IntSize(
+            contentWidth.coerceAtLeast(1),
+            contentHeight.coerceAtLeast(1),
+        )
+    }
+    val scale = maxOf(
+        dstWidth.toFloat() / contentWidth.toFloat(),
+        dstHeight.toFloat() / contentHeight.toFloat(),
+    )
+    val srcW = (dstWidth / scale).toDouble().roundToInt().coerceIn(1, contentWidth)
+    val srcH = (dstHeight / scale).toDouble().roundToInt().coerceIn(1, contentHeight)
+    val left = ((contentWidth - srcW) / 2).coerceAtLeast(0)
+    val top = ((contentHeight - srcH) / 2).coerceAtLeast(0)
+    return androidx.compose.ui.unit.IntOffset(left, top) to androidx.compose.ui.unit.IntSize(srcW, srcH)
+}
+
+/** Retângulo em que a foto cabe inteira, centrada (legado / testes). */
 internal fun fittedExpandRect(
     contentWidth: Float,
     contentHeight: Float,
